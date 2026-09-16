@@ -1,0 +1,8 @@
+# Development disk only. All system software comes from --bootc-ref.
+# Leave partition and bootloader construction to Image Builder/bootc.
+[customizations.disk]
+type = "gpt"
+minsize = "32 GiB"
+
+[customizations.kernel]
+append = "console=tty0 console=ttyS0,115200n8"

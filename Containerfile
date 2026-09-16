@@ -1,5 +1,5 @@
 # Official Fedora 44 bootc base, pinned to its linux/amd64 manifest.
-FROM quay.io/fedora/fedora-bootc@sha256:4eb463c47f595ff98a0d98e5fdd43a126ed32bf428cc166e6bacfd389b878f7f
+FROM quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74
 
 ARG SOURCE_REVISION=unknown
 ARG BUILD_ID=unknown
