@@ -25,9 +25,9 @@ Current prototype capabilities:
 - uses an immutable root
 - exposes `sl-platformd`
 - supports `corectl status`
-- updates from an OCI registry
-- reboots into a new deployment
-- rolls back to the previous deployment
+
+`sl-platformd` currently exposes read-only platform status. Update and rollback
+lifecycle validation is planned.
 
 ## Architecture
 
