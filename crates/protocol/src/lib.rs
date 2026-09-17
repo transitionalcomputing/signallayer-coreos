@@ -1,0 +1,67 @@
+//! The Phase 3A status contract. Backend storage details are deliberately absent.
+use serde::{Deserialize, Serialize};
+
+pub const BUS: &str = "org.signallayer.Platform1";
+pub const PATH: &str = "/org/signallayer/Platform1";
+pub const INTERFACE: &str = "org.signallayer.Platform1";
+pub const SCHEMA_VERSION: &str = "0.1";
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Status {
+    pub schema_version: String,
+    pub product: String,
+    pub version: String,
+    pub platform_api_version: String,
+    pub source_revision: Option<String>,
+    pub build_id: Option<String>,
+    pub booted: Deployment,
+    pub retained_rollback: Option<Deployment>,
+    pub health: Health,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Deployment {
+    /// Opaque identifier: clients must not infer a storage path from this value.
+    pub deployment_id: String,
+    pub image_reference: Option<String>,
+    pub image_digest: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Health {
+    pub state: HealthState,
+    pub system_state: String,
+    pub failed_units: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HealthState {
+    Healthy,
+    Degraded,
+}
+
+#[derive(Debug, zbus::DBusError)]
+#[zbus(prefix = "org.signallayer.Platform1.Error")]
+pub enum PlatformError {
+    BackendUnavailable(String),
+    BackendTimeout(String),
+    InvalidBackendData(String),
+    MetadataUnavailable(String),
+    HealthUnavailable(String),
+    Busy(String),
+    #[zbus(error)]
+    ZBus(zbus::Error),
+}
+
+#[zbus::proxy(
+    interface = "org.signallayer.Platform1",
+    default_service = "org.signallayer.Platform1",
+    default_path = "/org/signallayer/Platform1"
+)]
+pub trait Platform {
+    fn get_status(&self) -> zbus::Result<String>;
+}

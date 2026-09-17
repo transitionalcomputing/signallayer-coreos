@@ -1,0 +1,22 @@
+[Unit]
+Description=SignalLayerIT read-only platform status
+After=dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.signallayer.Platform1
+ExecStart=/usr/bin/sl-platformd
+User=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

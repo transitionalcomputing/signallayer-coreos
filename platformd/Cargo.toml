@@ -1,0 +1,10 @@
+[package]
+name = "sl-platformd"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sl-protocol.workspace = true
+serde_json.workspace = true
+zbus.workspace = true
+tokio.workspace = true
