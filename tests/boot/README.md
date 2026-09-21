@@ -149,3 +149,14 @@ with `downloadOnly=false`, an unchanged boot ID, no reboot, enforcing SELinux,
 and the original immutable-root guarantees. Artifacts are retained under an
 ignored `image/build/output/phase3c-acceptance-*` directory. See
 [the update-staging contract](../../docs/update-staging.md).
+
+For Phase 3D, keep the accepted Phase 3C qcow2 as deployment A and publish a
+distinct image B containing the same accepted platform stack to the existing
+host test registry. Run `boot-activate-qcow2.py` with the same firmware paths.
+The runner uses one KVM process and one disposable overlay. Its guest probe
+stages B through `corectl update`, records both identities, requests one normal
+`systemctl reboot`, verifies B after the machine returns, and powers off after
+collecting health and retention evidence. The resulting ignored
+`phase3d-acceptance-*` directory retains the B-active/A-retained overlay for
+Phase 3E together with machine-readable evidence. See
+[the activation contract](../../docs/update-activation.md).
