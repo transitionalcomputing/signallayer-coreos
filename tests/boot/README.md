@@ -73,3 +73,58 @@ and checks the real daemon, human/JSON CLI, DynamicUser access, service/backend
 errors and final restored health while retaining the original 18 checks.
 See [the status contract](../../docs/platform-status.md). Evidence is saved in
 an ignored `image/build/output/phase3a-*` directory.
+
+For Phase 3B, retain all Phase 3A checks and add actual enforcing-domain,
+D-Bus boundary, concurrency/deadline, negative confinement and restart tests:
+
+```bash
+# Native policy analysis tools remain outside the final image.
+sudo podman build --target policy-tools -t localhost/slit-policy-tools:phase3b .
+
+sudo python3 tests/boot/boot-qcow2.py \
+  image/build/output/COREOS_BUILD_DIRECTORY/signallayer-coreos-0.0.1-x86_64.qcow2 \
+  --phase3b \
+  --policy-tools-image localhost/slit-policy-tools:phase3b \
+  --ovmf-code /usr/share/edk2/ovmf/OVMF_CODE.fd \
+  --ovmf-vars /usr/share/edk2/ovmf/OVMF_VARS.fd \
+  --accel kvm --cpus 2 --timeout 1800
+```
+
+Run the OCI build/lint and existing disk build/offline inspection before the
+boot command. Use truthful build metadata and a distinct Phase 3B image tag;
+preserve earlier disk/source artifacts. The fixed boundary client uses the
+image's existing Python and libsystemd through the test credential. No native
+test executable, policy, or file-label repair is injected into the final guest.
+The script records exact requests and error names, verifies the broker-reported
+sender UID against its own UID, and is matched against DynamicUser journal
+credentials. The image must supply the daemon, policy and labels automatically.
+Candidate 18's final acceptance topology is two vCPUs with KVM acceleration.
+TCG remains useful for diagnostics, but its preserved runs showed timing
+sensitivity in recovery checks. Do not weaken the production 15-second backend
+or 25-second client deadline to accommodate TCG scheduling overhead.
+
+Each ignored `image/build/output/phase3b-*` run includes all prior evidence,
+exact collected guest command strings, security requests/UIDs/error names,
+held real backend PID/context/capabilities, cleanup/deadline/restart results,
+expected negative AVC and final restored state. The actually loaded kernel
+policy is compressed across the evidence port and analyzed in the native
+tools container with networking disabled. `loaded-policy.bin` and
+`policy-analysis.json` retain the queried policy and exact queries/results.
+See [the hardening boundary](../../docs/platform-hardening.md).
+
+All guest changes are temporary fixtures on the disposable overlay: name-free
+ownership tests stop/restart the daemon; real child SIGSTOP holds observations;
+a stopped daemon tests the CLI method deadline; the `shadow_t` metadata bind
+is removed and the original image-owned unit restored. Do not weaken SELinux
+or the sandbox to accommodate a test. Do not count a diagnostic policy overlay
+as fresh-image acceptance. Report the observed ACPI shutdown independently.
+
+Audit collection includes JSON with systemd `_AUDIT_ID` values. The expected
+negative tests remain required. A separate expected repository-writability
+probe must correlate the observed `/sysroot/ostree/repo/objects` inode, device
+and label with a denied x86_64 `faccessat2(W_OK)` event and fixed status
+proctitle. No actual write or unmatched denial is excluded, and loaded-policy
+analysis requires generic configuration-directory writes to remain denied.
+Held-child evidence also requires the fixed OpenSSL, static-userdb and private
+libmount-cache environment values. See the proportionality rationale in the
+hardening document.

@@ -3,7 +3,15 @@ use sl_protocol::{
     Deployment, Health, HealthState, PlatformError, Status, BUS, PATH, SCHEMA_VERSION,
 };
 use std::{collections::BTreeMap, process::Stdio, time::Duration};
-use tokio::{io::AsyncReadExt, process::Command, sync::Semaphore, time::timeout};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt},
+    process::Command,
+    sync::Semaphore,
+    time::timeout,
+};
+
+mod checked_interface;
+use checked_interface::CheckedPlatform;
 
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 const BACKEND_TIMEOUT: Duration = Duration::from_secs(15);
@@ -70,6 +78,13 @@ async fn backend_command(
     let mut child = Command::new(program)
         .args(args)
         .env("LC_ALL", "C")
+        // The image copies Fedora's public configuration, keeping crypto policy
+        // while avoiding cert_t file reads that would also expose TLS keys.
+        .env("OPENSSL_CONF", "/usr/lib/signallayer/openssl.cnf")
+        // Device metadata needs static public names, not privileged userdb IPC.
+        .env("SYSTEMD_BYPASS_USERDB", "1")
+        // Keep libmount's optional writable cache inside the service's PrivateTmp.
+        .env("LIBMOUNT_UTAB", "/tmp/sl-platformd-utab")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -81,28 +96,20 @@ async fn backend_command(
                 "The bootc status backend could not be started".into(),
             )
         })?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .expect("piped stdout")
-        .take(OUTPUT_LIMIT + 1);
-    let mut stderr = child
-        .stderr
-        .take()
-        .expect("piped stderr")
-        .take(OUTPUT_LIMIT + 1);
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
     let result = timeout(limit, async {
-        let mut output = Vec::new();
-        let mut errors = Vec::new();
-        let (out, err, exit) = tokio::join!(
-            stdout.read_to_end(&mut output),
-            stderr.read_to_end(&mut errors),
-            child.wait(),
-        );
-        Ok::<_, std::io::Error>((out?, err?, exit?, output, errors))
+        // Stop at the first overflow instead of waiting for a blocked writer
+        // after a truncated pipe read. Both streams are bounded independently.
+        tokio::try_join!(bounded_output(stdout), bounded_output(stderr), async {
+            child.wait().await.map_err(|error| {
+                eprintln!("bootc wait: {error}");
+                PlatformError::BackendUnavailable("bootc status could not be read".into())
+            })
+        })
     })
     .await;
-    let (_, _, exit, output, errors) = match result {
+    let (output, errors, exit) = match result {
         Err(_) => {
             // Explicitly kill and reap, in addition to kill_on_drop on cancellation.
             let _ = timeout(Duration::from_secs(2), child.kill()).await;
@@ -111,16 +118,11 @@ async fn backend_command(
             ));
         }
         Ok(Err(error)) => {
-            eprintln!("bootc I/O: {error}");
-            return Err(PlatformError::BackendUnavailable(
-                "bootc status could not be read".into(),
-            ));
+            let _ = timeout(Duration::from_secs(2), child.kill()).await;
+            return Err(error);
         }
         Ok(Ok(result)) => result,
     };
-    if output.len() as u64 > OUTPUT_LIMIT || errors.len() as u64 > OUTPUT_LIMIT {
-        return Err(invalid("bootc status exceeded the output limit"));
-    }
     if !exit.success() {
         eprintln!(
             "bootc exited {exit}: {}",
@@ -129,6 +131,22 @@ async fn backend_command(
         return Err(PlatformError::BackendUnavailable(
             "bootc status returned an unsuccessful exit status".into(),
         ));
+    }
+    Ok(output)
+}
+
+async fn bounded_output(stream: impl AsyncRead + Unpin) -> Result<Vec<u8>, PlatformError> {
+    let mut output = Vec::new();
+    stream
+        .take(OUTPUT_LIMIT + 1)
+        .read_to_end(&mut output)
+        .await
+        .map_err(|error| {
+            eprintln!("bootc I/O: {error}");
+            PlatformError::BackendUnavailable("bootc status could not be read".into())
+        })?;
+    if output.len() as u64 > OUTPUT_LIMIT {
+        return Err(invalid("bootc status exceeded the output limit"));
     }
     Ok(output)
 }
@@ -260,10 +278,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .object_server()
         .at(
             PATH,
-            Platform {
+            CheckedPlatform(Platform {
                 connection: connection.clone(),
                 requests: Semaphore::new(1),
-            },
+            }),
         )
         .await?;
     connection.request_name(BUS).await?;
@@ -355,5 +373,73 @@ mod tests {
             backend_command("/usr/bin/false", &[], BACKEND_TIMEOUT).await,
             Err(PlatformError::BackendUnavailable(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn output_bounds_accept_boundary_and_reject_blocked_writers() {
+        let output = backend_command(
+            "/usr/bin/head",
+            &["-c", "65536", "/dev/zero"],
+            BACKEND_TIMEOUT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.len(), OUTPUT_LIMIT as usize);
+        for (stream, script) in [
+            (
+                "stdout",
+                "printf '%s' \"$$\" >\"$1\"; exec head -c 1048576 /dev/zero",
+            ),
+            (
+                "stderr",
+                "printf '%s' \"$$\" >\"$1\"; exec head -c 1048576 /dev/zero >&2",
+            ),
+        ] {
+            let path = std::env::temp_dir().join(format!(
+                "sl-platformd-overflow-{stream}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_file(&path);
+            assert!(matches!(
+                backend_command(
+                    "/usr/bin/bash",
+                    &["-c", script, "sl-test", path.to_str().unwrap()],
+                    Duration::from_secs(2)
+                )
+                .await,
+                Err(PlatformError::InvalidBackendData(_))
+            ));
+            let pid = std::fs::read_to_string(&path).unwrap();
+            std::fs::remove_file(path).unwrap();
+            assert!(
+                !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+                "{stream} overflow child remains running or unreaped"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_and_reaps_the_actual_child() {
+        let path =
+            std::env::temp_dir().join(format!("sl-platformd-timeout-{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let result = backend_command(
+            "/usr/bin/bash",
+            &[
+                "-c",
+                "printf '%s' \"$$\" >\"$1\"; exec sleep 30",
+                "sl-test",
+                path.to_str().unwrap(),
+            ],
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(matches!(result, Err(PlatformError::BackendTimeout(_))));
+        let pid = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "child remains running or unreaped"
+        );
     }
 }

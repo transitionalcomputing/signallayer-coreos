@@ -1,0 +1,124 @@
+policy_module(sl_platformd, 0.1.0)
+
+# PID 1 transitions on the image-owned entry point. No permissive/unconfined
+# attribute is assigned to this domain or its inherited bootc children.
+type sl_platformd_t;
+type sl_platformd_exec_t;
+init_daemon_domain(sl_platformd_t, sl_platformd_exec_t)
+gen_require(`
+    type init_t;
+')
+domtrans_pattern(init_t, sl_platformd_exec_t, sl_platformd_t)
+allow init_t sl_platformd_t:process2 nnp_transition;
+
+type sl_platformd_release_t;
+files_type(sl_platformd_release_t)
+allow sl_platformd_t sl_platformd_release_t:dir list_dir_perms;
+allow sl_platformd_t sl_platformd_release_t:file read_file_perms;
+
+# Rust runtime, dynamic loader, localization and ordinary read-only image data.
+libs_use_ld_so(sl_platformd_t)
+libs_use_shared_libs(sl_platformd_t)
+files_read_usr_files(sl_platformd_t)
+files_read_etc_files(sl_platformd_t)
+miscfiles_read_localization(sl_platformd_t)
+# The status backend traverses the system PKI directory during initialization.
+# Fedora also labels generic TLS keys cert_t; grant directory search only.
+miscfiles_search_generic_cert_dirs(sl_platformd_t)
+dev_read_urand(sl_platformd_t)
+# Rust available_parallelism reads cgroup CPU quota information at startup.
+fs_read_cgroup_files(sl_platformd_t)
+
+# The only command is the fixed bootc status backend; it remains in this domain.
+gen_require(`
+    type install_exec_t;
+')
+can_exec(sl_platformd_t, install_exec_t)
+# The fixed backend must be killed on its deadline or output overflow.
+allow sl_platformd_t self:process { fork sigchld signal sigkill };
+allow sl_platformd_t self:fifo_file rw_fifo_file_perms;
+allow sl_platformd_t self:capability { sys_admin sys_ptrace };
+
+# Public, read-only system-bus service plus observed systemd health properties.
+dbus_system_bus_client(sl_platformd_t)
+# The XML associates only org.signallayer.Platform1 with this service SID.
+gen_require(`
+    class dbus acquire_svc;
+')
+allow sl_platformd_t self:dbus acquire_svc;
+init_dbus_chat(sl_platformd_t)
+# PID 1 separately checks status permission for read-only Manager properties.
+# bootc also stats packaged units: metadata only, without unit contents/control.
+init_status(sl_platformd_t)
+systemd_getattr_unit_files(sl_platformd_t)
+logging_send_syslog_msg(sl_platformd_t)
+
+# The pinned backend detects a booted OSTree host from its runtime marker.
+gen_require(`
+    type install_var_run_t;
+')
+allow sl_platformd_t install_var_run_t:file read_file_perms;
+
+# bootc compares the PID 1 mount namespace and inspects SELinux state.
+kernel_read_system_state(sl_platformd_t)
+# Its deployment inspection queries statfs on the persistent root filesystem.
+# Metadata only: no filesystem mount, relabel or write permission is added.
+fs_getattr_xattr_fs(sl_platformd_t)
+# The pinned status path remounts /sysroot only after entering its private
+# namespace. Execute the fixed mount helper without a domain transition.
+mount_exec(sl_platformd_t)
+fs_remount_xattr_fs(sl_platformd_t)
+# findmnt/lsblk inspect udev's database and device metadata. Do not grant raw
+# block reads: those can bypass file-level SELinux confinement.
+udev_read_db(sl_platformd_t)
+storage_getattr_fixed_disk_dev(sl_platformd_t)
+# lsblk resolves public device owner/group names and reads libmount's cache.
+# Do not use auth_read_passwd: its optional SSSD IPC is unnecessary here.
+auth_read_passwd_file(sl_platformd_t)
+mount_read_pid_files(sl_platformd_t)
+
+# libostree status takes an exclusive ostree/lock, then unlinks it on release.
+# Bootc bootstraps the physical /ostree as usr_t; the disk build labels only
+# that directory from this image's policy after installation. Retain Fedora's
+# public base-directory readers, without assigning executable/mount attributes.
+type sl_platformd_ostree_t;
+files_ro_base_file(sl_platformd_ostree_t)
+type sl_platformd_lock_t;
+files_type(sl_platformd_lock_t)
+allow sl_platformd_t sl_platformd_ostree_t:dir { list_dir_perms write add_name remove_name };
+allow sl_platformd_t sl_platformd_lock_t:file { create getattr open read write lock unlink };
+gen_require(`
+    attribute domain;
+')
+# Keep ordinary root bootc and the confined backend on the same lock type.
+# Only this basename transitions; the daemon cannot create the directory type
+# as files, nor write/create ordinary usr_t deployment/repository files.
+type_transition domain sl_platformd_ostree_t:file sl_platformd_lock_t "lock";
+# Namespace inspection needs PID 1 directory traversal and namespace-link
+# reads as well as the PTRACE_MODE_READ file check. This maintained interface
+# grants read-only process state, not attach/trace. Linux bounds stay unchanged.
+init_read_state(sl_platformd_t)
+selinux_get_enforce_mode(sl_platformd_t)
+
+# bootc's supported SELinux preflight creates a private temporary file, invokes
+# chcon, then copies/relabels/re-execs itself when the invalid-label test fails.
+# CAP_MAC_ADMIN stays absent: no SELinux-administration permission is granted.
+# Re-execution of install_exec_t stays in sl_platformd_t (no install_t transition).
+type sl_platformd_tmp_t;
+files_tmp_file(sl_platformd_tmp_t)
+files_tmp_filetrans(sl_platformd_t, sl_platformd_tmp_t, { dir file })
+allow sl_platformd_t sl_platformd_tmp_t:dir manage_dir_perms;
+allow sl_platformd_t sl_platformd_tmp_t:file { manage_file_perms relabelfrom };
+allow sl_platformd_t install_exec_t:file { relabelto unlink setattr };
+corecmd_exec_bin(sl_platformd_t)
+gen_require(`
+    type selinux_config_t;
+')
+allow sl_platformd_t selinux_config_t:dir list_dir_perms;
+allow sl_platformd_t selinux_config_t:file mmap_read_file_perms;
+allow sl_platformd_t selinux_config_t:lnk_file read_lnk_file_perms;
+
+seutil_read_file_contexts(sl_platformd_t)
+# The pinned preflight computes its checksum from the installed module store.
+# This interface lists/reads the store; it does not manage or load policy.
+seutil_read_module_store(sl_platformd_t)

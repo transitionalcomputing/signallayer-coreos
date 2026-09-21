@@ -39,8 +39,10 @@ assert table["label"] == "gpt", table
 assert any(p["type"].lower() == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
            for p in table["partitions"]), table
 PY
-lsblk --output NAME,SIZE,FSTYPE,PARTTYPE "$loop"
-lsblk --noheadings --raw --paths --output NAME,FSTYPE "$loop" > "$work/devices"
+# Probe the read-only media directly; reused loop devices can retain incomplete
+# udev properties after partscan even when their filesystems are valid.
+lsblk --properties-by blkid --output NAME,SIZE,FSTYPE,PARTTYPE "$loop"
+lsblk --properties-by blkid --noheadings --raw --paths --output NAME,FSTYPE "$loop" > "$work/devices"
 while read -r device fs; do
     case "$fs" in
         ext4) options=ro,noload ;;
@@ -70,6 +72,26 @@ release=$(find "${mounts[@]}" -type f -path '*/ostree/deploy/*/deploy/*/usr/lib/
 cat "$origin" | tee "$report_dir/deployment-origin.txt"
 grep -q 'container-image-reference=.*localhost/signallayer-coreos:0.0.1' "$origin"
 cmp "$report_dir/source-release" "$release"
+if [[ -f $report_dir/source-ostree-context ]]; then
+    # The host kernel presents image-only contexts as unlabeled_t to callers
+    # without MAC_ADMIN. Read the stored ext4 xattr directly, without -w or
+    # loading the image policy into the host.
+    root_device=$(findmnt --noheadings --output SOURCE --target "${repo%/repo/config}")
+    debugfs -R "ea_get -f \"$work/ostree-context.raw\" /ostree security.selinux" "$root_device"
+    python3 - "$repo" "$report_dir/source-ostree-context" "$report_dir/ostree-context.json" "$work/ostree-context.raw" <<'PY'
+import json, os, pathlib, sys
+directory = pathlib.Path(sys.argv[1]).parent.parent
+expected = pathlib.Path(sys.argv[2]).read_text().strip()
+actual = pathlib.Path(sys.argv[4]).read_bytes().decode().rstrip("\0")
+report = {"directory": str(directory), "expected": expected, "actual": actual,
+          "reader": "debugfs (read-only ext4 xattr)",
+          "host_view": os.getxattr(directory, "security.selinux").decode().rstrip("\0"),
+          "matches_image_policy": actual == expected}
+pathlib.Path(sys.argv[3]).write_text(json.dumps(report, indent=2) + "\n")
+assert report["matches_image_policy"], report
+print("Physical OSTree directory label matches the source image policy:", actual)
+PY
+fi
 cat "$release" | tee "$report_dir/deployment-release.txt"
 prepare_root="${release%/signallayer/release}/ostree/prepare-root.conf"
 cmp "$report_dir/source-prepare-root.conf" "$prepare_root"

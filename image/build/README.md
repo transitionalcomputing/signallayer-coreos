@@ -52,6 +52,20 @@ Each run creates an ignored directory under `image/build/output/` containing
 `signallayer-coreos-0.0.1-x86_64.qcow2`, the input OCI archive, copied blueprint,
 source image inspection and release/configuration, builder version, OSBuild
 manifest/log, checksums in `build-report.txt`, and offline inspection reports.
+For Phase 3B images, `prepare-boot-manifest.py` adds one standard OSBuild SELinux
+label stage to the generated manifest. It applies the source policy's dedicated
+physical `/ostree` directory label after bootc installation, before qcow2 export;
+offline inspection verifies that xattr. All existing stages remain unchanged.
+The direct invocation mirrors the pinned CLI's container setup, using its
+disposable cache volume and tmpfs-backed `install_exec_t` entry point. This
+permits writing image-only SELinux contexts while the host stays enforcing;
+no image policy is loaded on the host. Offline inspection reads the stored
+ext4 xattr with read-only `debugfs`, avoiding the host's `unlabeled_t` view of
+unknown contexts. Native inspection requires `findmnt` and `debugfs`.
+The pinned builder's `manifest --help` and `osbuild --help` define this path;
+pre-hardening images with the original `usr_t` context keep the original
+`image-builder build` path. See [platform hardening](../../docs/platform-hardening.md)
+for the observed lock denial and scope of this installation correction.
 A failed preflight or build retains its report; an old disk cannot be mistaken
 for a successful new run. The fixed builder, immutable input, copied blueprint
 and fixed random seed define repeatable inputs, not byte-identical disk files.

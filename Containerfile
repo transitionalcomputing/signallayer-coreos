@@ -11,6 +11,15 @@ COPY platformd ./platformd
 COPY corectl ./corectl
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 
+# Policy authoring/analysis tools never enter the final runtime image.
+FROM quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74 AS policy-tools
+RUN dnf -y install --setopt=install_weak_deps=False selinux-policy-devel setools-console make && dnf clean all
+
+FROM policy-tools AS policy-build
+COPY image/platform/selinux /policy
+WORKDIR /policy
+RUN make -f /usr/share/selinux/devel/Makefile sl_platformd.pp
+
 # Official Fedora 44 bootc base, pinned to its linux/amd64 manifest.
 FROM quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74
 
@@ -23,11 +32,18 @@ LABEL containers.bootc="1" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.opencontainers.image.source="https://github.com/transitionalcomputing/signallayer-coreos"
 
+# Status uses these public crypto files through a fixed OPENSSL_CONF. Preserve
+# Fedora's providers/crypto-policy include without permitting cert_t key reads.
 RUN set -eu; \
     case "${SOURCE_REVISION}${BUILD_ID}" in \
         *[!A-Za-z0-9._+-]*) echo 'Build metadata must use letters, digits, dot, underscore, plus, or hyphen.' >&2; exit 1 ;; \
     esac; \
     install -d -m 0755 /usr/lib/signallayer; \
+    install -d -m 0755 /usr/lib/signallayer/openssl.d; \
+    install -m 0644 /etc/pki/tls/openssl.d/pkcs11-provider.conf /usr/lib/signallayer/openssl.d/; \
+    sed 's@^\.include /etc/pki/tls/openssl.d$@.include /usr/lib/signallayer/openssl.d@' \
+        /etc/pki/tls/openssl.cnf > /usr/lib/signallayer/openssl.cnf; \
+    chmod 0644 /usr/lib/signallayer/openssl.cnf; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
         'VERSION="0.0.1"' \
@@ -40,5 +56,24 @@ COPY --from=platform-build /build/target/release/sl-platformd /usr/bin/sl-platfo
 COPY --from=platform-build /build/target/release/corectl /usr/bin/corectl
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
 COPY image/platform/org.signallayer.Platform1.conf /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf
+COPY image/platform/udisks2-polkit.conf /usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf
+COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_platformd.pp
+# The pinned bootc base sets store-root=/etc/selinux. Install offline, without
+# loading policy in the build container. bootc labels installed files from the
+# image's resulting file_contexts; OCI-layer chcon/xattrs are not relied upon.
+# Omit inherited standalone module build helpers after installation; retain
+# runtime policycoreutils and the supported policy store/backend.
+RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
+    test "$(matchpathcon -n /usr/bin/sl-platformd)" = system_u:object_r:sl_platformd_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
+    test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
+    test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \
+    rm -f /usr/bin/semodule_expand /usr/bin/semodule_link \
+          /usr/bin/semodule_package /usr/bin/semodule_unpackage \
+          /usr/share/selinux/devel/include/services/container.if \
+          /usr/share/selinux/devel/include/distributed/passt.if && \
+    rmdir /usr/share/selinux/devel/include/services \
+          /usr/share/selinux/devel/include/distributed \
+          /usr/share/selinux/devel/include /usr/share/selinux/devel
 RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
     ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service

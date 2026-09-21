@@ -23,7 +23,7 @@ main() {
         echo 'Run with sudo; the source image must be in rootful Podman storage.'
         exit 1
     fi
-    for tool in podman qemu-img sha256sum python3 losetup lsblk sfdisk mount umount file cmp; do
+    for tool in podman qemu-img sha256sum python3 losetup lsblk sfdisk mount umount file cmp findmnt debugfs; do
         command -v "$tool" >/dev/null || { echo "Missing required tool: $tool"; exit 1; }
     done
     [[ $(podman info --format '{{.Host.Arch}}') == amd64 ]] || { echo 'Podman must use native amd64 Linux.'; exit 1; }
@@ -42,7 +42,9 @@ main() {
     sha256sum "$run_dir/source.oci.tar" "$run_dir/qcow2.toml"
     podman pull --arch amd64 "$builder"
     podman run --rm --privileged --security-opt label=disable \
-        --volume "$run_dir:/output" --entrypoint /bin/bash "$builder" \
+        --volume "$run_dir:/output" \
+        --volume "$build_dir/prepare-boot-manifest.py:/prepare-boot-manifest.py:ro" \
+        --entrypoint /bin/bash "$builder" \
         -Eeuo pipefail -c '
         expected_id=$1
         image-builder version --format=json | tee /output/builder-version.json
@@ -55,10 +57,38 @@ main() {
         podman run --rm --entrypoint /bin/cat localhost/signallayer-coreos:0.0.1 /usr/lib/signallayer/release > /output/source-release
         podman run --rm --entrypoint /bin/cat localhost/signallayer-coreos:0.0.1 /usr/lib/ostree/prepare-root.conf > /output/source-prepare-root.conf
         image-builder bootc inspect --ref localhost/signallayer-coreos:0.0.1 --format=json > /output/bootc-inspect.json
-        image-builder build --bootc-ref localhost/signallayer-coreos:0.0.1 \
+        podman run --rm --entrypoint /usr/sbin/matchpathcon localhost/signallayer-coreos:0.0.1 \
+            -n -m dir /ostree > /output/source-ostree-context
+        if [[ $(cat /output/source-ostree-context) == system_u:object_r:usr_t:s0 ]]; then
+            # Retain the original path for pre-hardening baseline images.
+            image-builder build --bootc-ref localhost/signallayer-coreos:0.0.1 \
+                --arch x86_64 --bootc-default-fs ext4 --blueprint /output/qcow2.toml \
+                --output-dir /output --output-name signallayer-coreos-0.0.1-x86_64 \
+                --seed 1 --with-manifest --with-buildlog qcow2
+        else
+            image-builder manifest --bootc-ref localhost/signallayer-coreos:0.0.1 \
             --arch x86_64 --bootc-default-fs ext4 --blueprint /output/qcow2.toml \
-            --output-dir /output --output-name signallayer-coreos-0.0.1-x86_64 \
-            --seed 1 --with-manifest --with-buildlog qcow2
+            --seed 1 qcow2 > /output/image-builder-manifest.json
+            python3 /prepare-boot-manifest.py /output/image-builder-manifest.json \
+            /output/source-ostree-context /output/signallayer-coreos-0.0.1-x86_64.osbuild-manifest.json
+            # Match the pinned CLI pkg/setup.EnsureEnvironment before invoking
+            # OSBuild directly: its volume supports xattrs, and install_t can
+            # write image contexts unknown to the host without loading policy.
+            store=/var/cache/image-builder/store
+            mkdir -p "$store"
+            chcon system_u:object_r:root_t:s0 "$store"
+            mkdir -p /run/osbuild
+            mountpoint -q /run/osbuild || mount -t tmpfs tmpfs /run/osbuild
+            cp -p /usr/bin/osbuild /run/osbuild/osbuild
+            chcon system_u:object_r:install_exec_t:s0 /run/osbuild/osbuild
+            mount -t devtmpfs devtmpfs /dev
+            mount --bind /run/osbuild/osbuild /usr/bin/osbuild
+            osbuild --store "$store" --cache-max-size=21474836480 \
+            --export qcow2 --output-directory /output/osbuild \
+            /output/signallayer-coreos-0.0.1-x86_64.osbuild-manifest.json \
+            2>&1 | tee /output/signallayer-coreos-0.0.1-x86_64.buildlog
+            mv /output/osbuild/qcow2/disk.qcow2 /output/signallayer-coreos-0.0.1-x86_64.qcow2
+        fi
         ' build-qcow2 "$source_id"
 
     disk="$run_dir/signallayer-coreos-0.0.1-x86_64.qcow2"

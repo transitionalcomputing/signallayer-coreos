@@ -61,11 +61,13 @@ and protected home, kernel tunables and control groups. The daemon writes no
 persistent application state. Bootc manages its own inspection/locking inside
 its private namespace; runtime checks verify that global root/sysroot remain
 read-only after the API calls.
-SELinux and immutable-root settings are inherited unchanged from the pinned
-Fedora base. The custom binary runs in Fedora's default generic
-`unconfined_service_t` domain; no domain override, permissive setting or policy
-exception is installed. A dedicated daemon SELinux policy is not part of this
-phase. Rust tooling lives only in the build stage.
+Global SELinux enforcement and immutable-root settings remain inherited from
+the pinned Fedora base. Phase 3B adds an image-owned dedicated enforcing
+`sl_platformd_t` domain and automatic executable labeling, with supported bootc
+children confined in that domain. Policy compilation/analysis and Rust tooling
+remain outside the final runtime image. See [the hardening boundary and runtime
+acceptance](platform-hardening.md) for the policy integration, permissions and
+negative/recovery tests; a custom label alone is not acceptance evidence.
 
 ## Native validation
 

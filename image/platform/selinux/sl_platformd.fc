@@ -1,0 +1,4 @@
+/usr/bin/sl-platformd -- gen_context(system_u:object_r:sl_platformd_exec_t,s0)
+/usr/lib/signallayer(/.*)? gen_context(system_u:object_r:sl_platformd_release_t,s0)
+/ostree -d gen_context(system_u:object_r:sl_platformd_ostree_t,s0)
+/ostree/lock -- gen_context(system_u:object_r:sl_platformd_lock_t,s0)
