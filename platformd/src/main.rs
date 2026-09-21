@@ -1,13 +1,14 @@
 use serde_json::Value;
 use sl_protocol::{
-    Deployment, Health, HealthState, PlatformError, Status, BUS, PATH, SCHEMA_VERSION,
+    Deployment, Health, HealthState, PlatformError, Status, UpdateFailure, UpdateState,
+    UpdateStatus, BUS, PATH, SCHEMA_VERSION,
 };
 use std::{collections::BTreeMap, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
     sync::Semaphore,
-    time::timeout,
+    time::{sleep, timeout},
 };
 
 mod checked_interface;
@@ -15,10 +16,25 @@ use checked_interface::CheckedPlatform;
 
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 const BACKEND_TIMEOUT: Duration = Duration::from_secs(15);
+const SYSTEMD_TIMEOUT: Duration = Duration::from_secs(3);
+const SYSTEMD_BUS: &str = "org.freedesktop.systemd1";
+const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
+const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
+const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
+const SYSTEMD_SERVICE: &str = "org.freedesktop.systemd1.Service";
+const UPDATE_UNIT: &str = "sl-update.service";
 
 struct Platform {
     connection: zbus::Connection,
     requests: Semaphore,
+    update_starts: Semaphore,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WorkerObservation {
+    active_state: String,
+    result: String,
+    exit_status: i32,
 }
 
 #[zbus::interface(name = "org.signallayer.Platform1")]
@@ -27,19 +43,16 @@ impl Platform {
         let _permit = self.requests.try_acquire().map_err(|_| {
             PlatformError::Busy("A status observation is already in progress".into())
         })?;
+        let worker = observe_update_worker(&self.connection).await?;
         let release = std::fs::read_to_string("/usr/lib/signallayer/release").map_err(|_| {
             PlatformError::MetadataUnavailable("Image release metadata is unreadable".into())
         })?;
         let backend =
             backend_command("/usr/bin/bootc", &["status", "--json"], BACKEND_TIMEOUT).await?;
-        let manager = zbus::Proxy::new(
-            &self.connection,
-            "org.freedesktop.systemd1",
-            "/org/freedesktop/systemd1",
-            "org.freedesktop.systemd1.Manager",
-        )
-        .await
-        .map_err(|_| health_error())?;
+        let manager =
+            zbus::Proxy::new(&self.connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER)
+                .await
+                .map_err(|_| health_error())?;
         let health = timeout(Duration::from_secs(3), async {
             let state: String = manager.get_property("SystemState").await?;
             let failed: u32 = manager.get_property("NFailedUnits").await?;
@@ -48,9 +61,82 @@ impl Platform {
         .await
         .map_err(|_| health_error())?
         .map_err(|_| health_error())?;
-        let status = status_from_observations(&release, &backend, health)?;
+        let status = status_from_observations(&release, &backend, health, &worker)?;
         serde_json::to_string(&status).map_err(|_| invalid("Status serialization failed"))
     }
+
+    async fn start_update(&self) -> Result<(), PlatformError> {
+        let _permit = self.update_starts.try_acquire().map_err(|_| {
+            PlatformError::Busy("An update start request is already in progress".into())
+        })?;
+        start_update_worker(&self.connection).await
+    }
+}
+
+fn update_unavailable() -> PlatformError {
+    PlatformError::UpdateUnavailable("The fixed update worker could not be controlled".into())
+}
+
+async fn update_unit_path(
+    manager: &zbus::Proxy<'_>,
+) -> Result<zbus::zvariant::OwnedObjectPath, zbus::Error> {
+    manager.call("LoadUnit", &(UPDATE_UNIT,)).await
+}
+
+async fn observe_update_worker(
+    connection: &zbus::Connection,
+) -> Result<WorkerObservation, PlatformError> {
+    timeout(SYSTEMD_TIMEOUT, async {
+        let manager =
+            zbus::Proxy::new(connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER).await?;
+        let path = update_unit_path(&manager).await?;
+        let unit = zbus::Proxy::new(connection, SYSTEMD_BUS, path.as_str(), SYSTEMD_UNIT).await?;
+        let service =
+            zbus::Proxy::new(connection, SYSTEMD_BUS, path.as_str(), SYSTEMD_SERVICE).await?;
+        Ok::<_, zbus::Error>(WorkerObservation {
+            active_state: unit.get_property("ActiveState").await?,
+            result: service.get_property("Result").await?,
+            exit_status: service.get_property("ExecMainStatus").await?,
+        })
+    })
+    .await
+    .map_err(|_| update_unavailable())?
+    .map_err(|_| update_unavailable())
+}
+
+async fn start_update_worker(connection: &zbus::Connection) -> Result<(), PlatformError> {
+    timeout(SYSTEMD_TIMEOUT, async {
+        let manager =
+            zbus::Proxy::new(connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER).await?;
+        let path = update_unit_path(&manager).await?;
+        let unit = zbus::Proxy::new(connection, SYSTEMD_BUS, path.as_str(), SYSTEMD_UNIT).await?;
+        let active: String = unit.get_property("ActiveState").await?;
+        if active != "inactive" && active != "failed" {
+            return Err(PlatformError::Busy(
+                "The update worker is already running".into(),
+            ));
+        }
+        let previous_invocation: Vec<u8> = unit.get_property("InvocationID").await?;
+        let _: zbus::zvariant::OwnedObjectPath =
+            manager.call("StartUnit", &(UPDATE_UNIT, "fail")).await?;
+        loop {
+            let active: String = unit.get_property("ActiveState").await?;
+            let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
+            if !matches!(active.as_str(), "inactive" | "failed")
+                || invocation != previous_invocation
+            {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+        Ok::<_, PlatformError>(())
+    })
+    .await
+    .map_err(|_| update_unavailable())?
+    .map_err(|error| match error {
+        PlatformError::Busy(_) => error,
+        _ => update_unavailable(),
+    })
 }
 
 fn health_error() -> PlatformError {
@@ -207,6 +293,7 @@ fn status_from_observations(
     release: &str,
     backend: &[u8],
     health: Health,
+    worker: &WorkerObservation,
 ) -> Result<Status, PlatformError> {
     let mut fields = BTreeMap::new();
     for line in release.lines().filter(|line| !line.trim().is_empty()) {
@@ -250,6 +337,19 @@ fn status_from_observations(
         .pointer("/status/booted")
         .filter(|value| value.is_object())
         .ok_or_else(|| invalid("No booted deployment was observed"))?;
+    let booted = deployment(booted)?;
+    let staged_value = value
+        .pointer("/status/staged")
+        .ok_or_else(|| invalid("Staged deployment observation is missing"))?;
+    let (staged, staged_queued) = if staged_value.is_null() {
+        (None, false)
+    } else {
+        let download_only = staged_value
+            .get("downloadOnly")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| invalid("Staged deployment mode is missing or invalid"))?;
+        (Some(deployment(staged_value)?), !download_only)
+    };
     let rollback = value
         .pointer("/status/rollback")
         .ok_or_else(|| invalid("Rollback observation is missing"))?;
@@ -258,6 +358,7 @@ fn status_from_observations(
     } else {
         Some(deployment(rollback)?)
     };
+    let update = update_from_observations(&booted, staged, staged_queued, worker);
     Ok(Status {
         schema_version: SCHEMA_VERSION.into(),
         product: required("NAME")?.into(),
@@ -265,10 +366,57 @@ fn status_from_observations(
         platform_api_version: required("PLATFORM_API_VERSION")?.into(),
         source_revision: optional("SOURCE_REVISION"),
         build_id: optional("BUILD_ID"),
-        booted: deployment(booted)?,
+        booted,
         retained_rollback,
+        update,
         health,
     })
+}
+
+fn update_from_observations(
+    booted: &Deployment,
+    staged: Option<Deployment>,
+    staged_queued: bool,
+    worker: &WorkerObservation,
+) -> UpdateStatus {
+    let staged_differs = staged
+        .as_ref()
+        .is_some_and(|deployment| deployment.deployment_id != booted.deployment_id);
+    let running = !matches!(worker.active_state.as_str(), "inactive" | "failed");
+    let failed = worker.active_state == "failed" || worker.result != "success";
+    let (state, failure) = if running {
+        (UpdateState::Running, None)
+    } else if failed {
+        let result = if worker
+            .result
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            worker.result.as_str()
+        } else {
+            "failed"
+        };
+        (
+            UpdateState::Failed,
+            Some(UpdateFailure {
+                code: "WorkerFailed".into(),
+                message: format!(
+                    "The update worker failed ({result}, status {})",
+                    worker.exit_status
+                ),
+            }),
+        )
+    } else if staged_differs && staged_queued {
+        (UpdateState::Staged, None)
+    } else {
+        (UpdateState::Idle, None)
+    };
+    UpdateStatus {
+        state,
+        staged,
+        reboot_required: staged_differs && staged_queued,
+        failure,
+    }
 }
 
 #[tokio::main]
@@ -281,6 +429,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             CheckedPlatform(Platform {
                 connection: connection.clone(),
                 requests: Semaphore::new(1),
+                update_starts: Semaphore::new(1),
             }),
         )
         .await?;
@@ -297,13 +446,22 @@ mod tests {
         serde_json::json!({"apiVersion":"org.containers.bootc/v1", "kind":"BootcHost", "status": {
             "booted": {"ostree":{"checksum":"a".repeat(64), "deploySerial":0},
                 "image":{"image":{"image":"localhost/signallayer-coreos:0.0.1"}, "imageDigest":format!("sha256:{}", "b".repeat(64))}},
+            "staged":null,
             "rollback":null}})
+    }
+    fn worker(active_state: &str, result: &str, exit_status: i32) -> WorkerObservation {
+        WorkerObservation {
+            active_state: active_state.into(),
+            result: result.into(),
+            exit_status,
+        }
     }
     fn parse(value: Value) -> Result<Status, PlatformError> {
         status_from_observations(
             RELEASE,
             &serde_json::to_vec(&value).unwrap(),
             observed_health("running".into(), 0),
+            &worker("inactive", "success", 0),
         )
     }
     #[test]
@@ -315,6 +473,7 @@ mod tests {
         assert_eq!(status.source_revision, None);
         assert_eq!(status.build_id, None);
         assert_eq!(status.booted.deployment_id, format!("{}.0", "a".repeat(64)));
+        assert_eq!(status.update.state, UpdateState::Idle);
     }
     #[test]
     fn missing_or_invalid_observations_fail() {
@@ -329,16 +488,80 @@ mod tests {
         let mut value = fixture();
         value["status"]["booted"]["image"]["imageDigest"] = "invalid".into();
         assert!(parse(value).is_err());
-        assert!(
-            status_from_observations(RELEASE, b"broken", observed_health("running".into(), 0))
-                .is_err()
-        );
+        assert!(status_from_observations(
+            RELEASE,
+            b"broken",
+            observed_health("running".into(), 0),
+            &worker("inactive", "success", 0)
+        )
+        .is_err());
         assert!(status_from_observations(
             "",
             &serde_json::to_vec(&fixture()).unwrap(),
-            observed_health("running".into(), 0)
+            observed_health("running".into(), 0),
+            &worker("inactive", "success", 0)
         )
         .is_err());
+    }
+
+    #[test]
+    fn update_state_uses_worker_and_fresh_deployments() {
+        let mut value = fixture();
+        value["status"]["staged"] = serde_json::json!({
+            "ostree":{"checksum":"c".repeat(64), "deploySerial":1},
+            "image":{"image":{"image":"localhost/signallayer-coreos:0.0.1"},
+                "imageDigest":format!("sha256:{}", "d".repeat(64))},
+            "downloadOnly":false
+        });
+        let backend = serde_json::to_vec(&value).unwrap();
+        let status = status_from_observations(
+            RELEASE,
+            &backend,
+            observed_health("running".into(), 0),
+            &worker("inactive", "success", 0),
+        )
+        .unwrap();
+        assert_eq!(status.update.state, UpdateState::Staged);
+        assert!(status.update.reboot_required);
+        assert_eq!(
+            status.update.staged.unwrap().deployment_id,
+            format!("{}.1", "c".repeat(64))
+        );
+
+        let running = status_from_observations(
+            RELEASE,
+            &backend,
+            observed_health("running".into(), 0),
+            &worker("activating", "success", 0),
+        )
+        .unwrap();
+        assert_eq!(running.update.state, UpdateState::Running);
+        assert!(!running.update.failure.is_some());
+
+        let failed = status_from_observations(
+            RELEASE,
+            &backend,
+            observed_health("running".into(), 0),
+            &worker("failed", "exit-code", 1),
+        )
+        .unwrap();
+        assert_eq!(failed.update.state, UpdateState::Failed);
+        assert_eq!(failed.update.failure.unwrap().code, "WorkerFailed");
+    }
+
+    #[test]
+    fn download_only_is_never_reboot_required() {
+        let mut value = fixture();
+        value["status"]["staged"] = serde_json::json!({
+            "ostree":{"checksum":"c".repeat(64), "deploySerial":1},
+            "image":{"image":{"image":"localhost/signallayer-coreos:0.0.1"},
+                "imageDigest":format!("sha256:{}", "d".repeat(64))},
+            "downloadOnly":true
+        });
+        let status = parse(value).unwrap();
+        assert_eq!(status.update.state, UpdateState::Idle);
+        assert!(!status.update.reboot_required);
+        assert!(status.update.staged.is_some());
     }
     #[test]
     fn health_is_only_healthy_for_running_without_failures() {

@@ -25,9 +25,11 @@ Current prototype capabilities:
 - uses an immutable root
 - exposes `sl-platformd`
 - supports `corectl status`
+- stages bootc updates with `corectl update`
 
-`sl-platformd` currently exposes read-only platform status. Update and rollback
-lifecycle validation is planned.
+`sl-platformd` exposes read-only platform status and a root-only request to
+stage the configured bootc image for the next boot. Activation, automatic
+reboot, and rollback are not implemented.
 
 ## Architecture
 
@@ -57,6 +59,7 @@ See:
 - [`docs/architecture.md`](docs/architecture.md)
 - [`docs/platform-api.md`](docs/platform-api.md)
 - [`docs/flavor-contract.md`](docs/flavor-contract.md)
+- [`docs/update-staging.md`](docs/update-staging.md)
 
 ## Repository Layout
 

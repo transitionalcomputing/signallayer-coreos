@@ -11,6 +11,29 @@ gen_require(`
 domtrans_pattern(init_t, sl_platformd_exec_t, sl_platformd_t)
 allow init_t sl_platformd_t:process2 nnp_transition;
 
+# PID 1 checks the unit-file label for service control. Platformd can start and
+# observe this one image-owned unit type, not generic systemd units.
+type sl_update_unit_file_t;
+systemd_unit_file(sl_update_unit_file_t)
+allow sl_platformd_t sl_update_unit_file_t:service { start status };
+
+# Bootc creates staged state with O_TMPFILE, before a basename exists. Keep its
+# runtime directory distinct, then transition regular files created there by
+# Fedora's trusted install_t update domain. This does not expose generic /run
+# files or externally provisioned /run/ostree/auth.json credentials.
+type sl_bootc_runtime_t;
+files_pid_file(sl_bootc_runtime_t)
+type sl_bootc_state_t;
+files_pid_file(sl_bootc_state_t)
+gen_require(`
+    type install_t;
+')
+allow install_t sl_bootc_runtime_t:dir manage_dir_perms;
+type_transition install_t sl_bootc_runtime_t:file sl_bootc_state_t;
+allow install_t sl_bootc_state_t:file manage_file_perms;
+allow sl_platformd_t sl_bootc_runtime_t:dir search_dir_perms;
+allow sl_platformd_t sl_bootc_state_t:file read_file_perms;
+
 type sl_platformd_release_t;
 files_type(sl_platformd_release_t)
 allow sl_platformd_t sl_platformd_release_t:dir list_dir_perms;

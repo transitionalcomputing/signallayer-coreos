@@ -179,6 +179,8 @@ def evaluate_platform(evidence, expected_release):
                     "build_id": None if release.get("BUILD_ID", "unknown") == "unknown" else release["BUILD_ID"],
                     "booted": deployment(backend["booted"]),
                     "retained_rollback": deployment(backend["rollback"]) if backend["rollback"] else None,
+                    "update": {"state": "idle", "staged": None,
+                               "reboot_required": False, "failure": None},
                     "health": {"state": "healthy", "system_state": "running", "failed_units": 0}}
         for key in ("platform_json", "platform_unprivileged_json", "platform_final_json"):
             checks[key + "_matches_observations"] = ok(key) and json.loads(text(key)) == expected

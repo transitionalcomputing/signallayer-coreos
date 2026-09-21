@@ -128,3 +128,24 @@ analysis requires generic configuration-directory writes to remain denied.
 Held-child evidence also requires the fixed OpenSSL, static-userdb and private
 libmount-cache environment values. See the proportionality rationale in the
 hardening document.
+
+For Phase 3C, build a fresh qcow2 that passed the normal offline inspection,
+keep the next image available from the host registry on port 5000, and run:
+
+```bash
+sudo python3 tests/boot/boot-update-qcow2.py \
+  image/build/output/COREOS_BUILD_DIRECTORY/signallayer-coreos-0.0.1-x86_64.qcow2 \
+  --ovmf-code /usr/share/edk2/ovmf/OVMF_CODE.fd \
+  --ovmf-vars /usr/share/edk2/ovmf/OVMF_VARS.fd \
+  --timeout 900
+```
+
+The dedicated KVM runner first proves that a bounded failed update leaves the
+running deployment healthy. It then exposes the host registry only through a
+disposable guest-local proxy and invokes the fixed `corectl update` path. PASS
+requires a prompt D-Bus response, a concurrent `Busy` result, the exact fixed
+unit command, Fedora's `install_t` bootc transition, successful A-to-B staging
+with `downloadOnly=false`, an unchanged boot ID, no reboot, enforcing SELinux,
+and the original immutable-root guarantees. Artifacts are retained under an
+ignored `image/build/output/phase3c-acceptance-*` directory. See
+[the update-staging contract](../../docs/update-staging.md).

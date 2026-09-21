@@ -77,14 +77,15 @@ impl Interface for CheckedPlatform {
         msg: &'call Message,
         name: MemberName<'call>,
     ) -> DispatchResult2<'call> {
-        if name.as_str() == "GetStatus"
+        if matches!(name.as_str(), "GetStatus" | "StartUpdate")
             && (msg.body().signature() != &zbus::zvariant::Signature::Unit
                 || !msg.body().is_empty())
         {
-            return DispatchResult2::new_async(connection, msg, async {
-                Err::<String, _>(fdo::Error::InvalidArgs(
-                    "GetStatus takes no arguments".into(),
-                ))
+            let method = name.as_str().to_owned();
+            return DispatchResult2::new_async(connection, msg, async move {
+                Err::<String, _>(fdo::Error::InvalidArgs(format!(
+                    "{method} takes no arguments"
+                )))
             });
         }
         self.0.call(server, connection, msg, name)

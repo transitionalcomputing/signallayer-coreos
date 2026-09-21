@@ -17,16 +17,42 @@ pub struct Status {
     pub build_id: Option<String>,
     pub booted: Deployment,
     pub retained_rollback: Option<Deployment>,
+    pub update: UpdateStatus,
     pub health: Health,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Deployment {
     /// Opaque identifier: clients must not infer a storage path from this value.
     pub deployment_id: String,
     pub image_reference: Option<String>,
     pub image_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateStatus {
+    pub state: UpdateState,
+    pub staged: Option<Deployment>,
+    pub reboot_required: bool,
+    pub failure: Option<UpdateFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateState {
+    Idle,
+    Running,
+    Staged,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateFailure {
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,6 +78,7 @@ pub enum PlatformError {
     InvalidBackendData(String),
     MetadataUnavailable(String),
     HealthUnavailable(String),
+    UpdateUnavailable(String),
     Busy(String),
     #[zbus(error)]
     ZBus(zbus::Error),
@@ -64,4 +91,5 @@ pub enum PlatformError {
 )]
 pub trait Platform {
     fn get_status(&self) -> zbus::Result<String>;
+    fn start_update(&self) -> zbus::Result<()>;
 }

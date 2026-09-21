@@ -55,6 +55,8 @@ RUN set -eu; \
 COPY --from=platform-build /build/target/release/sl-platformd /usr/bin/sl-platformd
 COPY --from=platform-build /build/target/release/corectl /usr/bin/corectl
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
+COPY image/platform/sl-update.service /usr/lib/systemd/system/sl-update.service
+COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
 COPY image/platform/org.signallayer.Platform1.conf /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf
 COPY image/platform/udisks2-polkit.conf /usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf
 COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_platformd.pp
@@ -65,6 +67,14 @@ COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_
 # runtime policycoreutils and the supported policy store/backend.
 RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(matchpathcon -n /usr/bin/sl-platformd)" = system_u:object_r:sl_platformd_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/bin/bootc)" = system_u:object_r:install_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-update.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
+    test "$(matchpathcon -n -m dir /run/ostree)" = system_u:object_r:sl_bootc_runtime_t:s0 && \
+    test "$(matchpathcon -n /run/ostree/staged-deployment)" = system_u:object_r:sl_bootc_state_t:s0 && \
+    grep -Fqx 'd /run/ostree 0755 root root -' /usr/lib/tmpfiles.d/sl-bootc-runtime.conf && \
+    grep -Fqx 'z /run/ostree 0755 root root -' /usr/lib/tmpfiles.d/sl-bootc-runtime.conf && \
+    grep -Fqx 'ExecStart=/usr/bin/bootc upgrade --quiet' /usr/lib/systemd/system/sl-update.service && \
+    ! grep -Eq -- '--apply|--download-only|ExecStart=.*(sh|bash)' /usr/lib/systemd/system/sl-update.service && \
     test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
     test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
     test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \
