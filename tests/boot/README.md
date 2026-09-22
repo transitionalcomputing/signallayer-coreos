@@ -182,3 +182,27 @@ deployment identities, enforcing SELinux, immutable mounts, and clean poweroff.
 Evidence and the final B-retained/A-active overlay remain in the ignored
 `image/build/output/phase3e-acceptance-*` directory. See
 [the rollback contract](../../docs/rollback.md).
+
+For Phase 3F, build deployment A from the published source with a truthful
+source revision and distinct build ID, construct and inspect a new A qcow2,
+then build deployment B from the same source with only a different build ID.
+Publish B to the development registry and run:
+
+```bash
+sudo python3 tests/boot/boot-lifecycle-qcow2.py \
+  image/build/output/COREOS_BUILD_DIRECTORY/signallayer-coreos-0.0.1-x86_64.qcow2 \
+  --expected-a-digest sha256:A_OCI_DIGEST \
+  --expected-b-digest sha256:B_OCI_DIGEST \
+  --ovmf-code /usr/share/edk2/ovmf/OVMF_CODE.fd \
+  --ovmf-vars /usr/share/edk2/ovmf/OVMF_VARS.fd \
+  --timeout 1800
+```
+
+The KVM runner starts from the fresh standalone A disk and keeps one QEMU
+process, disposable overlay, variable store, and virtual hardware definition
+through the complete A-to-B-to-A lifecycle. It requires an empty rollback slot
+on Boot 1, observes both fixed workers in `install_t`, disables the registry
+before rollback selection, and verifies exact OCI and deployment identities,
+all three boot IDs, health and immutable-root invariants, clean shutdown, and
+an unchanged source qcow2. Evidence and the final A-active/B-retained overlay
+remain in the ignored `image/build/output/phase3f-acceptance-*` directory.
