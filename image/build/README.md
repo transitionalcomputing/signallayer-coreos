@@ -1,5 +1,11 @@
 # CoreOS 0.0.1 development disk
 
+> **Developer Preview registry limitation:** the validated v0.0.1 qcow2 uses
+> `localhost/signallayer-coreos:0.0.1` as its bootc origin. Lifecycle tests
+> expose a local development registry through a disposable fixture. Public
+> registry origin configuration, TLS and authentication were not validated.
+> This image is not a turnkey Internet-updating appliance.
+
 Run from the repository root on **native x86_64 Linux**, for example Fedora 44.
 Requirements: rootful Podman, Bash, Python 3, `qemu-img`, `file`, coreutils,
 util-linux (`losetup`, `lsblk`, `sfdisk`, `mount`), usable loop devices, and

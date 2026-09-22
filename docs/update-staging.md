@@ -1,4 +1,4 @@
-# Phase 3C update staging
+# CoreOS 0.0.1 update staging
 
 CoreOS 0.0.1 stages the configured bootc image through this fixed path:
 
@@ -62,4 +62,4 @@ systemd restrictions and a bounded capability set. It intentionally omits
 `openat2(RESOLVE_IN_ROOT)` return `ENOSYS`.
 
 Automatic activation, reboot, rollback, scheduling, channels, and fleet
-management are outside Phase 3C.
+management are not included in CoreOS 0.0.1.

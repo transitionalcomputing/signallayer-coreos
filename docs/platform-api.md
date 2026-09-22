@@ -4,6 +4,13 @@
 **Version:** 0.1
 **Project:** SignalLayerIT CoreOS
 
+> This is the forward-looking architecture and API contract. CoreOS 0.0.1
+> implements only the documented local system D-Bus status, update-staging and
+> rollback-selection surface; the full proposed surface below is not yet
+> implemented. See [platform status](platform-status.md),
+> [update staging](update-staging.md), [update activation](update-activation.md)
+> and [rollback](rollback.md) for the exact validated 0.0.1 behavior.
+
 ## Purpose
 
 The SignalLayer Platform API defines the stable interface between the CoreOS

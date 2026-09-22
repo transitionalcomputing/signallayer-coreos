@@ -1,7 +1,7 @@
-# Phase 3D update activation
+# CoreOS 0.0.1 update activation
 
-Phase 3D proves activation of an update staged through the fixed Phase 3C
-path. Activation uses one normal graceful system reboot; it does not add a
+CoreOS 0.0.1 activation uses an update staged through the fixed update path.
+The validated lifecycle uses one normal graceful system reboot; it does not add a
 reboot or rollback operation to the platform API.
 
 The acceptance runner boots deployment A under KVM, stages a distinct B with
@@ -17,5 +17,6 @@ reboot requirement, and A to be retained as the rollback deployment. It also
 rechecks systemd, `sl-platformd`, networking, SELinux enforcement, relevant
 AVCs, composefs/read-only mounts, and rejected writes to `/` and `/usr`.
 
-The test performs no rollback. Its disposable overlay is retained after clean
-shutdown as a B-active/A-retained input for Phase 3E.
+The activation acceptance test performs no rollback. Its disposable overlay was
+retained after clean shutdown as the B-active/A-retained input for rollback
+acceptance.

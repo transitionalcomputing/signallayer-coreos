@@ -1,4 +1,4 @@
-# Phase 3E manual rollback
+# CoreOS 0.0.1 manual rollback
 
 CoreOS 0.0.1 exposes explicit rollback selection through one fixed path:
 
@@ -35,4 +35,4 @@ receives no installer or generic systemd authority.
 Bootc performs its normal `/etc` three-way deployment handling when changing
 the selected deployment. CoreOS 0.0.1 does not add another configuration
 persistence layer. Automatic rollback, health-triggered fallback, reboot,
-boot-attempt policy, and deployment pinning remain outside this phase.
+boot-attempt policy, and deployment pinning are not included in CoreOS 0.0.1.
