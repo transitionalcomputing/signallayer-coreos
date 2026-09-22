@@ -1,8 +1,8 @@
-# SignalLayerIT CoreOS — Platform API
+# SignalLayer CoreOS — Platform API
 
 **Status:** Draft
 **Version:** 0.1
-**Project:** SignalLayerIT CoreOS
+**Project:** SignalLayer CoreOS
 
 > This is the forward-looking architecture and API contract. CoreOS 0.0.1
 > implements only the documented local system D-Bus status, update-staging and
@@ -95,7 +95,7 @@ reasonable operation rather than a generic privileged escape hatch.
 ## Authority
 
 `sl-platformd` is the authoritative implementation of privileged Platform API
-operations in SignalLayerIT CoreOS.
+operations in SignalLayer CoreOS.
 
 Clients may include:
 

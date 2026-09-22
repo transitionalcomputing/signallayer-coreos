@@ -1,13 +1,18 @@
-# SignalLayerIT CoreOS — Flavor Contract
+# SignalLayer CoreOS — Flavor Contract
 
 **Status:** Draft
 **Version:** 0.1
-**Project:** SignalLayerIT CoreOS
+**Project:** SignalLayer CoreOS
+
+> **Document scope:** This draft describes the intended durable boundary
+> between CoreOS and future flavors. SignalLayer CoreOS 0.0.1 does not implement
+> the full flavor/session model described here. The
+> [0.0.1 release notes](releases/0.0.1.md) define the current release surface.
 
 ## Purpose
 
 The SignalLayer Flavor Contract defines the supported relationship between
-SignalLayerIT CoreOS and higher-level SignalLayer operating-system flavors.
+SignalLayer CoreOS and higher-level SignalLayer operating-system flavors.
 
 A flavor provides the application environment and user experience.
 

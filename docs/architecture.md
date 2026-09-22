@@ -1,12 +1,18 @@
-# SignalLayerIT CoreOS — Architecture
+# SignalLayer CoreOS — Architecture
 
 **Status:** Draft
 **Version:** 0.1
-**Project:** SignalLayerIT CoreOS
+**Project:** SignalLayer CoreOS
+
+> **Document scope:** This draft records architectural boundaries and design
+> direction. It is not a claim that every described capability exists in
+> SignalLayer CoreOS 0.0.1. See the [0.0.1 release notes](releases/0.0.1.md)
+> and [current Platform API documents](platform-api.md) for the implemented and
+> validated release surface.
 
 ## Purpose
 
-This document defines the architectural boundaries of SignalLayerIT CoreOS.
+This document defines the architectural boundaries of SignalLayer CoreOS.
 
 It describes what components exist, which responsibilities they own, how they interact, and where stable interfaces must exist.
 
@@ -18,7 +24,7 @@ Architectural boundaries should change deliberately.
 
 ## System Model
 
-SignalLayerIT CoreOS is the hardware-facing substrate beneath SignalLayer application operating systems.
+SignalLayer CoreOS is the hardware-facing substrate beneath SignalLayer application operating systems.
 
 At a high level:
 
@@ -34,7 +40,7 @@ At a high level:
                   SignalLayer Platform API
                             |
 +---------------------------v--------------------------+
-|               SignalLayerIT CoreOS                   |
+|                SignalLayer CoreOS                    |
 |                                                      |
 |  sessiond     corectl       platform libraries       |
 |       \          |                 /                  |
@@ -911,7 +917,7 @@ If these questions do not have clear answers, the feature is not architecturally
 
 ## Summary
 
-SignalLayerIT CoreOS is responsible for providing a stable, secure, recoverable platform beneath SignalLayer operating-system flavors.
+SignalLayer CoreOS is responsible for providing a stable, secure, recoverable platform beneath SignalLayer operating-system flavors.
 
 Its architecture intentionally separates:
 
