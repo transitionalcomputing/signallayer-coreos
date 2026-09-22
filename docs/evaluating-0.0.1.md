@@ -43,6 +43,11 @@ Compare the result with the matching entry in the published `SHA256SUMS`:
 | qcow2 | `a533d14420ad0483090d98b117bc5dd042d9bab9af46bf0e9a2aec8ef7740fa7` |
 | OCI archive | `98b92981e019dd3c32ef589fcc07847c13f1c6dc73d3ed3d9bc9fc5a2c67b7a1` |
 
+The published `SHA256SUMS` also includes entries for `RELEASE-NOTES.md` and
+`SMOKE-BOOT.json`, which are not separate GitHub Release assets. Verify each
+downloaded payload against its individual entry instead of running an
+unfiltered `sha256sum -c SHA256SUMS`.
+
 On macOS, the equivalent calculation is `shasum -a 256 FILE`. The qcow2
 itself was validated only on x86_64 Linux with KVM and OVMF.
 
