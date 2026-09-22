@@ -1,5 +1,6 @@
 /usr/bin/sl-platformd -- gen_context(system_u:object_r:sl_platformd_exec_t,s0)
 /usr/lib/systemd/system/sl-update\.service -- gen_context(system_u:object_r:sl_update_unit_file_t,s0)
+/usr/lib/systemd/system/sl-rollback\.service -- gen_context(system_u:object_r:sl_update_unit_file_t,s0)
 /run/ostree -d gen_context(system_u:object_r:sl_bootc_runtime_t,s0)
 /run/ostree/staged-deployment -- gen_context(system_u:object_r:sl_bootc_state_t,s0)
 /usr/lib/signallayer(/.*)? gen_context(system_u:object_r:sl_platformd_release_t,s0)

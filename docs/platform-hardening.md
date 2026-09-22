@@ -1,9 +1,10 @@
 # Phase 3B platform service boundary
 
-The platform contract is unchanged: the system bus exports only
-`org.signallayer.Platform1.GetStatus() -> s` at
-`/org/signallayer/Platform1`, using schema `0.1`. `corectl` remains an IPC client.
-No platform mutation or administrative methods are implemented.
+The platform boundary remains the system-bus service
+`org.signallayer.Platform1` at `/org/signallayer/Platform1`. Status schema
+`0.2` adds independent update and rollback lifecycle state. `corectl` remains
+an IPC client; administrative mutation methods are root-only and may control
+only their exact image-owned systemd units.
 
 ## Image-owned SELinux integration
 

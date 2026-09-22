@@ -25,11 +25,13 @@ Current prototype capabilities:
 - uses an immutable root
 - exposes `sl-platformd`
 - supports `corectl status`
-- stages bootc updates with `corectl update`
+- stages updates with `corectl update`
+- queues an already-retained deployment with `corectl rollback`
 
-`sl-platformd` exposes read-only platform status and a root-only request to
-stage the configured bootc image for the next boot. Activation, automatic
-reboot, and rollback are not implemented.
+`sl-platformd` exposes read-only platform status and root-only requests to
+stage the configured bootc image or select the retained rollback deployment
+for the next boot. Activation requires an ordinary operator-controlled reboot;
+automatic reboot and automatic rollback are not implemented.
 
 ## Architecture
 

@@ -1,11 +1,11 @@
 # Phase 3A read-only platform status
 
-The implementation is deliberately limited to status. It does not implement
-mutation methods from the draft Platform API.
+The status observation remains read-only. Administrative update and rollback
+requests are separate bounded methods described in their lifecycle documents.
 
 System D-Bus service and interface: `org.signallayer.Platform1`.
 Object path: `/org/signallayer/Platform1`.
-Method: `GetStatus() -> s`, containing a JSON object with `schema_version: "0.1"`.
+Method: `GetStatus() -> s`, containing a JSON object with `schema_version: "0.2"`.
 Rust definitions and the client proxy are shared in `crates/protocol`.
 `corectl status` formats this observation; `corectl status --json` emits it.
 Neither client mode reconstructs status from guest files or backend commands.
@@ -24,6 +24,10 @@ The response contains:
 - `retained_rollback`: another deployment object or null, based solely on bootc's
   observed retained rollback target. This does not certify known-good status,
   authorize rollback, or assert a deployment acceptance policy.
+- `update`: semantic update worker/staged state and reboot requirement.
+- `rollback`: semantic rollback worker/queued state and reboot requirement.
+  Bootc's `rollbackQueued` observation is authoritative; no separate state
+  database exists.
 - `health`: `state` (`healthy` or `degraded`), `system_state`, `failed_units`.
   Healthy means a valid booted deployment was observed, systemd's live
   `SystemState` is `running`, and `NFailedUnits` is zero. It makes no assertion
@@ -39,7 +43,8 @@ shared deadline; the CLI has a 25-second D-Bus method deadline.
 
 D-Bus errors use prefix `org.signallayer.Platform1.Error` with suffixes
 `BackendUnavailable`, `BackendTimeout`, `InvalidBackendData`,
-`MetadataUnavailable`, `HealthUnavailable`, or `Busy`. They contain concise
+`MetadataUnavailable`, `HealthUnavailable`, `UpdateUnavailable`,
+`RollbackUnavailable`, `Conflict`, or `Busy`. They contain concise
 messages without backend output. Backend diagnostics go to the journal.
 A failed CLI returns nonzero; human errors go to stderr, while `--json` emits
 `{"error":{"code":"...","message":"..."}}` on stdout. A missing bus/service

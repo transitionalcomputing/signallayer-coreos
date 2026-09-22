@@ -173,7 +173,7 @@ def evaluate_platform(evidence, expected_release):
                     "image_reference": image["image"]["image"] if image else None,
                     "image_digest": image["imageDigest"] if image else None}
 
-        expected = {"schema_version": "0.1", "product": release["NAME"], "version": release["VERSION"],
+        expected = {"schema_version": "0.2", "product": release["NAME"], "version": release["VERSION"],
                     "platform_api_version": release["PLATFORM_API_VERSION"],
                     "source_revision": None if release.get("SOURCE_REVISION", "unknown") == "unknown" else release["SOURCE_REVISION"],
                     "build_id": None if release.get("BUILD_ID", "unknown") == "unknown" else release["BUILD_ID"],
@@ -181,6 +181,8 @@ def evaluate_platform(evidence, expected_release):
                     "retained_rollback": deployment(backend["rollback"]) if backend["rollback"] else None,
                     "update": {"state": "idle", "staged": None,
                                "reboot_required": False, "failure": None},
+                    "rollback": {"state": "idle", "reboot_required": False,
+                                 "failure": None},
                     "health": {"state": "healthy", "system_state": "running", "failed_units": 0}}
         for key in ("platform_json", "platform_unprivileged_json", "platform_final_json"):
             checks[key + "_matches_observations"] = ok(key) and json.loads(text(key)) == expected
@@ -286,7 +288,7 @@ def evaluate_hardening(evidence):
         except (ValueError, TypeError):
             primary = None
         checks["security_phase3a_reference_status"] = bool(
-            isinstance(primary, dict) and primary.get("schema_version") == "0.1" and
+            isinstance(primary, dict) and primary.get("schema_version") == "0.2" and
             "error" not in primary
         )
         # Preserve granular hardening diagnostics if a retained Phase 3A
@@ -295,7 +297,7 @@ def evaluate_hardening(evidence):
         expected = primary if checks["security_phase3a_reference_status"] else json.loads(
             text("security_first_status")
         )
-        if expected.get("schema_version") != "0.1" or "error" in expected:
+        if expected.get("schema_version") != "0.2" or "error" in expected:
             raise ValueError("No successful platform observation is available")
         for key in ("security_initial_json", "security_after_bus_json", "security_timeout_recovery",
                     "security_restart_inflight_recovery", "security_restart_1_json", "security_restart_2_json",

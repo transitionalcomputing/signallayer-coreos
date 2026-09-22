@@ -160,3 +160,25 @@ collecting health and retention evidence. The resulting ignored
 `phase3d-acceptance-*` directory retains the B-active/A-retained overlay for
 Phase 3E together with machine-readable evidence. See
 [the activation contract](../../docs/update-activation.md).
+
+For Phase 3E, publish the candidate image at the same development registry
+reference used by the retained Phase 3D deployment, then run:
+
+```bash
+sudo python3 tests/boot/boot-rollback-qcow2.py \
+  image/build/output/phase3d-acceptance-TIMESTAMP/b-active-a-retained.qcow2 \
+  --ovmf-code /usr/share/edk2/ovmf/OVMF_CODE.fd \
+  --ovmf-vars /usr/share/edk2/ovmf/OVMF_VARS.fd \
+  --timeout 1800
+```
+
+The KVM runner keeps one disposable overlay through candidate staging,
+candidate activation, offline rollback selection, and rollback activation.
+It disables the guest-local registry proxy before invoking the exact fixed
+rollback worker and proves that the retained deployment is selected without a
+download. PASS also requires the root-only and zero-argument D-Bus boundary,
+the `install_t` worker transition, independent update/rollback status, exact
+deployment identities, enforcing SELinux, immutable mounts, and clean poweroff.
+Evidence and the final B-retained/A-active overlay remain in the ignored
+`image/build/output/phase3e-acceptance-*` directory. See
+[the rollback contract](../../docs/rollback.md).

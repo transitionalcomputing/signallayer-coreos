@@ -1,4 +1,4 @@
-use sl_protocol::{PlatformProxy, Status, UpdateState, SCHEMA_VERSION};
+use sl_protocol::{PlatformProxy, RollbackState, Status, UpdateState, SCHEMA_VERSION};
 use std::{process::ExitCode, time::Duration};
 
 fn report_error(json: bool, code: &str, message: &str) -> ExitCode {
@@ -46,13 +46,12 @@ async fn main() -> ExitCode {
     {
         ["status"] | ["status", "--json"] => "status",
         ["update"] | ["update", "--json"] => "update",
-        _ => {
-            return report_error(
-                json,
-                "Usage",
-                "Usage: corectl status [--json] | corectl update [--json]",
-            )
-        }
+        ["rollback"] | ["rollback", "--json"] => "rollback",
+        _ => return report_error(
+            json,
+            "Usage",
+            "Usage: corectl status [--json] | corectl update [--json] | corectl rollback [--json]",
+        ),
     };
     let connection = match zbus::connection::Builder::system() {
         Ok(builder) => match builder
@@ -95,6 +94,22 @@ async fn main() -> ExitCode {
                     println!("{}", serde_json::json!({"state":"running"}));
                 } else {
                     println!("Update staging started. Use `corectl status` to observe it.");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                let (code, message) = bus_error(&error);
+                report_error(json, code, &message)
+            }
+        };
+    }
+    if action == "rollback" {
+        return match proxy.start_rollback().await {
+            Ok(()) => {
+                if json {
+                    println!("{}", serde_json::json!({"state":"running"}));
+                } else {
+                    println!("Rollback selection started. Use `corectl status` to observe it.");
                 }
                 ExitCode::SUCCESS
             }
@@ -156,6 +171,20 @@ async fn main() -> ExitCode {
                     .unwrap_or("unknown worker failure")
             ),
         };
+        let rollback = match &status.rollback.state {
+            RollbackState::Idle => "idle".to_owned(),
+            RollbackState::Running => "running".to_owned(),
+            RollbackState::Queued => "queued (reboot required)".to_owned(),
+            RollbackState::Failed => format!(
+                "failed ({})",
+                status
+                    .rollback
+                    .failure
+                    .as_ref()
+                    .map(|failure| failure.message.as_str())
+                    .unwrap_or("unknown worker failure")
+            ),
+        };
         println!("{} {}\nPlatform API: {}\nSource: {}\nBuild: {}\nDeployment: {}\nImage: {}\nDigest: {}\nRetained rollback: {}\nHealth: {:?} (systemd {}; {} failed units)",
             status.product, status.version, status.platform_api_version,
             status.source_revision.as_deref().unwrap_or("unknown"), status.build_id.as_deref().unwrap_or("unknown"),
@@ -164,6 +193,7 @@ async fn main() -> ExitCode {
             status.retained_rollback.as_ref().map(|deployment| deployment.deployment_id.as_str()).unwrap_or("none"),
             status.health.state, status.health.system_state, status.health.failed_units);
         println!("Update: {update}");
+        println!("Rollback: {rollback}");
     }
     ExitCode::SUCCESS
 }

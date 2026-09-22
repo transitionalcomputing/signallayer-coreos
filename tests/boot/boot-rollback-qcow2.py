@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+"""Prove Phase 3E offline rollback selection and activation under KVM."""
+
+import argparse
+import base64
+import datetime
+import hashlib
+import json
+import pathlib
+import shutil
+import subprocess
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            value.update(block)
+    return value.hexdigest()
+
+
+def records(path):
+    found = {}
+    if not path.exists():
+        return found
+    for line in path.read_text(errors="replace").splitlines():
+        fields = line.split("\t", 2)
+        if len(fields) != 3:
+            continue
+        try:
+            found[fields[0]] = {
+                "exit_code": int(fields[1]),
+                "output": base64.b64decode(fields[2], validate=True).decode(
+                    errors="replace"
+                ),
+            }
+        except (ValueError, UnicodeError):
+            pass
+    return found
+
+
+def evaluate(evidence):
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def parsed(key):
+        return json.loads(text(key))
+
+    def expected_platform_avcs(key):
+        return ok(key) and all(
+            "denied  { write }" in line
+            and 'comm="bootc"' in line
+            and 'name="objects"' in line
+            and "scontext=system_u:system_r:sl_platformd_t:s0" in line
+            and "tclass=dir" in line
+            and "permissive=0" in line
+            for line in text(key).splitlines()
+        )
+
+    def identity(deployment):
+        ostree = deployment["ostree"]
+        return (
+            f"{ostree['checksum']}.{ostree['deploySerial']}",
+            deployment["image"]["imageDigest"],
+        )
+
+    checks = {}
+    try:
+        seed = parsed("seed_bootc")["status"]
+        staged = parsed("staged_candidate_bootc")["status"]
+        candidate = parsed("candidate_bootc")["status"]
+        queued = parsed("queued_bootc")["status"]
+        after = parsed("after_rollback_bootc")["status"]
+        candidate_corectl = parsed("candidate_corectl")
+        queued_corectl = parsed("queued_corectl")
+        after_corectl = parsed("after_rollback_corectl")
+        phase_a = identity(seed["booted"])
+        phase_b = identity(staged["staged"])
+        checks.update(
+            {
+                "seed_healthy_and_unstaged": seed["staged"] is None
+                and seed.get("rollbackQueued") is False,
+                "candidate_staged_by_existing_update_path": identity(staged["booted"])
+                == phase_a
+                and phase_b != phase_a
+                and staged["staged"]["downloadOnly"] is False,
+                "candidate_activated_and_a_retained": identity(candidate["booted"])
+                == phase_b
+                and identity(candidate["rollback"]) == phase_a
+                and candidate["staged"] is None
+                and candidate.get("rollbackQueued") is False,
+                "candidate_schema_0_2_idle_states": candidate_corectl["schema_version"]
+                == "0.2"
+                and candidate_corectl["update"]["state"] == "idle"
+                and candidate_corectl["rollback"]["state"] == "idle",
+                "rollback_queued_without_changing_deployments": identity(queued["booted"])
+                == phase_b
+                and identity(queued["rollback"]) == phase_a
+                and queued["staged"] is None
+                and queued.get("rollbackQueued") is True,
+                "corectl_reports_queued_independent_state": queued_corectl["update"]["state"]
+                == "idle"
+                and queued_corectl["update"]["reboot_required"] is False
+                and queued_corectl["rollback"]["state"] == "queued"
+                and queued_corectl["rollback"]["reboot_required"] is True,
+                "exact_a_booted_after_rollback": identity(after["booted"]) == phase_a,
+                "b_retained_after_rollback": identity(after["rollback"]) == phase_b,
+                "rollback_queue_cleared": after.get("rollbackQueued") is False
+                and after["staged"] is None,
+                "post_rollback_corectl_reports_a": after_corectl["booted"]["deployment_id"]
+                == phase_a[0]
+                and after_corectl["booted"]["image_digest"] == phase_a[1],
+            }
+        )
+    except (KeyError, TypeError, ValueError):
+        checks["machine_readable_lifecycle_evidence"] = False
+
+    unit = text("rollback_unit")
+    process = text("rollback_process")
+    result = text("rollback_result")
+    journal = text("rollback_journal").lower()
+    try:
+        conflicting_rollback = parsed("conflicting_rollback")["error"]["code"]
+        conflicting_update = parsed("conflicting_update")["error"]["code"]
+    except (KeyError, TypeError, ValueError):
+        conflicting_rollback = conflicting_update = ""
+    checks.update(
+        {
+            "probe_completed": ok("complete") and text("complete") == "done",
+            "existing_update_path_succeeded": ok("start_update")
+            and ok("update_wait")
+            and "Result=success" in text("update_result"),
+            "start_rollback_returned_promptly": ok("start_rollback")
+            and int(text("start_rollback_elapsed_ns") or 3_000_000_000)
+            < 3_000_000_000,
+            "fixed_rollback_command": "ExecStart=/usr/bin/bootc rollback" in unit
+            and "--apply" not in unit
+            and "--soft-reboot" not in unit
+            and "/bin/sh" not in unit
+            and "/bin/bash" not in unit,
+            "dedicated_unit_label": "sl_update_unit_file_t:s0"
+            in text("rollback_unit_label"),
+            "worker_exact_install_domain": ok("rollback_process")
+            and "system_u:system_r:install_t:s0" in process
+            and "cmdline=/usr/bin/bootc rollback " in process
+            and "cgroup=0::/system.slice/sl-rollback.service" in process,
+            "rollback_worker_succeeded": ok("rollback_wait")
+            and "Result=success" in result
+            and "ExecMainStatus=0" in result,
+            "unprivileged_request_denied_without_unit_start": not ok(
+                "unprivileged_rollback"
+            )
+            and text("rollback_invocation_before")
+            == text("rollback_invocation_after_unprivileged"),
+            "malformed_request_denied_without_unit_start": not ok(
+                "malformed_rollback"
+            )
+            and "StartRollback takes no arguments" in text("malformed_rollback")
+            and text("rollback_invocation_before")
+            == text("rollback_invocation_after_malformed"),
+            "queued_mutations_rejected": not ok("conflicting_rollback")
+            and not ok("conflicting_update")
+            and conflicting_rollback in ("Busy", "Conflict")
+            and conflicting_update in ("Busy", "Conflict"),
+            "registry_unavailable_for_rollback": ok("registry_listener")
+            and not text("registry_listener")
+            and not ok("registry_unavailable"),
+            "rollback_did_not_download": not any(
+                word in journal
+                for word in ("downloading", "fetching image", "pulling image")
+            ),
+            "one_activation_and_one_rollback_reboot": text(
+                "activation_reboot_requested"
+            )
+            == text("rollback_reboot_requested")
+            == "systemctl reboot",
+            "boot_ids_match_lifecycle": text("boot_id_seed")
+            != text("boot_id_candidate")
+            and text("boot_id_candidate") == text("boot_id_queued")
+            and text("boot_id_after_rollback") != text("boot_id_queued"),
+            "clean_shutdown": text("clean_shutdown_requested")
+            == "systemctl poweroff",
+            "selinux_enforcing_all_boots": all(
+                text(f"selinux_{suffix}") == "Enforcing"
+                for suffix in ("seed", "candidate", "queued", "after_rollback")
+            ),
+            "no_unexpected_relevant_avcs": all(
+                expected_platform_avcs(key)
+                for key in ("avcs_seed", "avcs_candidate", "avcs_after_rollback")
+            ),
+            "systemd_healthy_all_boots": all(
+                text(f"target_{suffix}") == "active"
+                and text(f"system_state_{suffix}") == "running"
+                and not text(f"failed_{suffix}")
+                and text(f"platform_service_{suffix}") == "active"
+                for suffix in ("seed", "candidate", "queued", "after_rollback")
+            ),
+            "network_healthy_all_boots": all(
+                text(f"network_manager_{suffix}") == "active"
+                and bool(text(f"address_{suffix}"))
+                and bool(text(f"route_{suffix}"))
+                for suffix in ("seed", "candidate", "queued", "after_rollback")
+            ),
+            "immutable_writes_rejected_all_boots": all(
+                not ok(f"{kind}_write_{suffix}")
+                and "Read-only file system" in text(f"{kind}_write_{suffix}")
+                for suffix in ("seed", "candidate", "queued", "after_rollback")
+                for kind in ("root", "usr")
+            ),
+        }
+    )
+    for suffix in ("seed", "candidate", "queued", "after_rollback"):
+        try:
+            mounts = parsed(f"mounts_{suffix}")["filesystems"]
+            flat = {}
+
+            def visit(items):
+                for item in items:
+                    flat[item["target"]] = item
+                    visit(item.get("children", []))
+
+            visit(mounts)
+            checks[f"immutable_mounts_{suffix}"] = flat["/"]["fstype"] == "overlay" and all(
+                "ro" in flat[path]["options"].split(",")
+                for path in ("/", "/sysroot")
+            )
+        except (KeyError, TypeError, ValueError):
+            checks[f"immutable_mounts_{suffix}"] = False
+    return checks
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("disk", type=pathlib.Path)
+    parser.add_argument(
+        "--ovmf-code",
+        type=pathlib.Path,
+        default=pathlib.Path("/usr/share/edk2/ovmf/OVMF_CODE.fd"),
+    )
+    parser.add_argument(
+        "--ovmf-vars",
+        type=pathlib.Path,
+        default=pathlib.Path("/usr/share/edk2/ovmf/OVMF_VARS.fd"),
+    )
+    parser.add_argument("--timeout", type=int, default=1800)
+    args = parser.parse_args()
+    disk = args.disk.resolve(strict=True)
+    output = pathlib.Path(__file__).resolve().parents[2] / "image/build/output"
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    run = output / f"phase3e-acceptance-{stamp}"
+    run.mkdir(parents=True)
+    probe = pathlib.Path(__file__).with_name("guest-rollback-probe.sh").read_bytes()
+    (run / "probe.sh").write_bytes(probe)
+    unit = b"""[Unit]\nDescription=Disposable Phase 3E rollback probe\nDefaultDependencies=no\nConditionPathExists=!/etc/initrd-release\nAfter=multi-user.target NetworkManager.service\n[Service]\nType=simple\nImportCredential=phase3e-probe.sh\nExecStart=/usr/bin/bash %d/phase3e-probe.sh\nStandardOutput=journal+console\nStandardError=journal+console\nTimeoutStartSec=29min\n"""
+    dropin = b"[Unit]\nWants=phase3e-probe.service\n"
+    overlay = run / "rollback-lifecycle.qcow2"
+    subprocess.run(
+        [
+            "qemu-img",
+            "create",
+            "-f",
+            "qcow2",
+            "-F",
+            "qcow2",
+            "-b",
+            str(disk),
+            str(overlay),
+        ],
+        check=True,
+    )
+    variables = run / "OVMF_VARS.fd"
+    shutil.copyfile(args.ovmf_vars, variables)
+
+    def credential(name, value):
+        return (
+            "type=11,value=io.systemd.credential.binary:"
+            + name
+            + "="
+            + base64.b64encode(value).decode()
+        )
+
+    command = [
+        "qemu-system-x86_64",
+        "-machine",
+        "q35,accel=kvm",
+        "-cpu",
+        "host",
+        "-smp",
+        "4",
+        "-m",
+        "4096",
+        "-drive",
+        f"if=pflash,format=raw,readonly=on,file={args.ovmf_code.resolve()}",
+        "-drive",
+        f"if=pflash,format=raw,file={variables}",
+        "-drive",
+        f"if=none,id=os,format=qcow2,file={overlay}",
+        "-device",
+        "virtio-blk-pci,drive=os",
+        "-nic",
+        "user,model=virtio-net-pci,mac=52:54:00:00:03:0e",
+        "-display",
+        "none",
+        "-monitor",
+        "none",
+        "-serial",
+        f"file:{run / 'serial.log'}",
+        "-device",
+        "virtio-serial-pci",
+        "-chardev",
+        f"file,id=evidence,path={run / 'evidence.tsv'}",
+        "-device",
+        "virtserialport,chardev=evidence,name=org.signallayer.phase3e-test",
+        "-smbios",
+        credential("systemd.extra-unit.phase3e-probe.service", unit),
+        "-smbios",
+        credential("systemd.unit-dropin.multi-user.target", dropin),
+        "-smbios",
+        credential("phase3e-probe.sh", probe),
+    ]
+    (run / "qemu-command.json").write_text(json.dumps(command, indent=2) + "\n")
+    report = {
+        "phase": "3E",
+        "result": "FAIL",
+        "output": str(run),
+        "disk": str(disk),
+        "disk_sha256": digest(disk),
+        "probe_sha256": hashlib.sha256(probe).hexdigest(),
+        "qemu_version": subprocess.check_output(
+            ["qemu-system-x86_64", "--version"], text=True
+        ).splitlines()[0],
+        "retained_overlay": str(overlay),
+    }
+    with (run / "registry-target.json").open("wb") as target:
+        subprocess.run(
+            [
+                "skopeo",
+                "inspect",
+                "--tls-verify=false",
+                "docker://localhost:5000/signallayer-coreos:0.0.1",
+            ],
+            stdout=target,
+            check=True,
+        )
+    with (run / "qemu.stdout").open("wb") as stdout, (
+        run / "qemu.stderr"
+    ).open("wb") as stderr:
+        try:
+            result = subprocess.run(
+                command, stdout=stdout, stderr=stderr, timeout=args.timeout
+            )
+            report["qemu_exit"] = result.returncode
+        except subprocess.TimeoutExpired:
+            report["qemu_exit"] = 124
+    evidence = records(run / "evidence.tsv")
+    (run / "evidence.json").write_text(
+        json.dumps(evidence, indent=2, sort_keys=True) + "\n"
+    )
+    report["checks"] = evaluate(evidence)
+    report["source_disk_unchanged"] = digest(disk) == report["disk_sha256"]
+    report["retained_overlay_exists"] = overlay.exists()
+    report["result"] = (
+        "PASS"
+        if report.get("qemu_exit") == 0
+        and report["source_disk_unchanged"]
+        and report["retained_overlay_exists"]
+        and all(report["checks"].values())
+        else "FAIL"
+    )
+    (run / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(json.dumps(report, indent=2))
+    return 0 if report["result"] == "PASS" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

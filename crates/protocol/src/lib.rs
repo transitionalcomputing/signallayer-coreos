@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 pub const BUS: &str = "org.signallayer.Platform1";
 pub const PATH: &str = "/org/signallayer/Platform1";
 pub const INTERFACE: &str = "org.signallayer.Platform1";
-pub const SCHEMA_VERSION: &str = "0.1";
+pub const SCHEMA_VERSION: &str = "0.2";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -18,6 +18,7 @@ pub struct Status {
     pub booted: Deployment,
     pub retained_rollback: Option<Deployment>,
     pub update: UpdateStatus,
+    pub rollback: RollbackStatus,
     pub health: Health,
 }
 
@@ -55,6 +56,30 @@ pub struct UpdateFailure {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RollbackStatus {
+    pub state: RollbackState,
+    pub reboot_required: bool,
+    pub failure: Option<RollbackFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RollbackState {
+    Idle,
+    Running,
+    Queued,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RollbackFailure {
+    pub code: String,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct Health {
@@ -79,6 +104,8 @@ pub enum PlatformError {
     MetadataUnavailable(String),
     HealthUnavailable(String),
     UpdateUnavailable(String),
+    RollbackUnavailable(String),
+    Conflict(String),
     Busy(String),
     #[zbus(error)]
     ZBus(zbus::Error),
@@ -92,4 +119,5 @@ pub enum PlatformError {
 pub trait Platform {
     fn get_status(&self) -> zbus::Result<String>;
     fn start_update(&self) -> zbus::Result<()>;
+    fn start_rollback(&self) -> zbus::Result<()>;
 }

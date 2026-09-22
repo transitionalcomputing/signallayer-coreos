@@ -1,7 +1,7 @@
 use serde_json::Value;
 use sl_protocol::{
-    Deployment, Health, HealthState, PlatformError, Status, UpdateFailure, UpdateState,
-    UpdateStatus, BUS, PATH, SCHEMA_VERSION,
+    Deployment, Health, HealthState, PlatformError, RollbackFailure, RollbackState, RollbackStatus,
+    Status, UpdateFailure, UpdateState, UpdateStatus, BUS, PATH, SCHEMA_VERSION,
 };
 use std::{collections::BTreeMap, process::Stdio, time::Duration};
 use tokio::{
@@ -23,11 +23,12 @@ const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
 const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
 const SYSTEMD_SERVICE: &str = "org.freedesktop.systemd1.Service";
 const UPDATE_UNIT: &str = "sl-update.service";
+const ROLLBACK_UNIT: &str = "sl-rollback.service";
 
 struct Platform {
     connection: zbus::Connection,
     requests: Semaphore,
-    update_starts: Semaphore,
+    mutation_starts: Semaphore,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,7 +44,12 @@ impl Platform {
         let _permit = self.requests.try_acquire().map_err(|_| {
             PlatformError::Busy("A status observation is already in progress".into())
         })?;
-        let worker = observe_update_worker(&self.connection).await?;
+        let update_worker = observe_worker(&self.connection, UPDATE_UNIT)
+            .await
+            .map_err(|_| update_unavailable())?;
+        let rollback_worker = observe_worker(&self.connection, ROLLBACK_UNIT)
+            .await
+            .map_err(|_| rollback_unavailable())?;
         let release = std::fs::read_to_string("/usr/lib/signallayer/release").map_err(|_| {
             PlatformError::MetadataUnavailable("Image release metadata is unreadable".into())
         })?;
@@ -61,15 +67,61 @@ impl Platform {
         .await
         .map_err(|_| health_error())?
         .map_err(|_| health_error())?;
-        let status = status_from_observations(&release, &backend, health, &worker)?;
+        let status =
+            status_from_observations(&release, &backend, health, &update_worker, &rollback_worker)?;
         serde_json::to_string(&status).map_err(|_| invalid("Status serialization failed"))
     }
 
     async fn start_update(&self) -> Result<(), PlatformError> {
-        let _permit = self.update_starts.try_acquire().map_err(|_| {
-            PlatformError::Busy("An update start request is already in progress".into())
+        let _permit = self.mutation_starts.try_acquire().map_err(|_| {
+            PlatformError::Busy("A deployment mutation start is already in progress".into())
         })?;
-        start_update_worker(&self.connection).await
+        let rollback = observe_worker(&self.connection, ROLLBACK_UNIT)
+            .await
+            .map_err(|_| rollback_unavailable())?;
+        if worker_running(&rollback) {
+            return Err(PlatformError::Busy(
+                "The rollback worker is already running".into(),
+            ));
+        }
+        let state = observe_mutation_state().await?;
+        if state.rollback_queued {
+            return Err(PlatformError::Conflict(
+                "A rollback is already queued for the next boot".into(),
+            ));
+        }
+        start_worker(&self.connection, UPDATE_UNIT, update_unavailable).await
+    }
+
+    async fn start_rollback(&self) -> Result<(), PlatformError> {
+        let _permit = self.mutation_starts.try_acquire().map_err(|_| {
+            PlatformError::Busy("A deployment mutation start is already in progress".into())
+        })?;
+        let update = observe_worker(&self.connection, UPDATE_UNIT)
+            .await
+            .map_err(|_| update_unavailable())?;
+        if worker_running(&update) {
+            return Err(PlatformError::Busy(
+                "The update worker is already running".into(),
+            ));
+        }
+        let state = observe_mutation_state().await?;
+        if state.staged {
+            return Err(PlatformError::Conflict(
+                "An unapplied update is staged; rollback selection was not changed".into(),
+            ));
+        }
+        if !state.retained_rollback {
+            return Err(PlatformError::RollbackUnavailable(
+                "No retained rollback deployment exists".into(),
+            ));
+        }
+        if state.rollback_queued {
+            return Err(PlatformError::Conflict(
+                "A rollback is already queued for the next boot".into(),
+            ));
+        }
+        start_worker(&self.connection, ROLLBACK_UNIT, rollback_unavailable).await
     }
 }
 
@@ -77,19 +129,65 @@ fn update_unavailable() -> PlatformError {
     PlatformError::UpdateUnavailable("The fixed update worker could not be controlled".into())
 }
 
-async fn update_unit_path(
-    manager: &zbus::Proxy<'_>,
-) -> Result<zbus::zvariant::OwnedObjectPath, zbus::Error> {
-    manager.call("LoadUnit", &(UPDATE_UNIT,)).await
+fn rollback_unavailable() -> PlatformError {
+    PlatformError::RollbackUnavailable("The fixed rollback worker could not be controlled".into())
 }
 
-async fn observe_update_worker(
+#[derive(Debug, PartialEq, Eq)]
+struct MutationState {
+    staged: bool,
+    retained_rollback: bool,
+    rollback_queued: bool,
+}
+
+async fn observe_mutation_state() -> Result<MutationState, PlatformError> {
+    let backend = backend_command("/usr/bin/bootc", &["status", "--json"], BACKEND_TIMEOUT).await?;
+    mutation_state_from_backend(&backend)
+}
+
+fn mutation_state_from_backend(backend: &[u8]) -> Result<MutationState, PlatformError> {
+    let value: Value =
+        serde_json::from_slice(backend).map_err(|_| invalid("bootc status is not valid JSON"))?;
+    if value.get("apiVersion").and_then(Value::as_str) != Some("org.containers.bootc/v1")
+        || value.get("kind").and_then(Value::as_str) != Some("BootcHost")
+    {
+        return Err(invalid("Unsupported bootc status schema"));
+    }
+    let status = value
+        .get("status")
+        .and_then(Value::as_object)
+        .ok_or_else(|| invalid("Bootc deployment status is missing"))?;
+    Ok(MutationState {
+        staged: !status
+            .get("staged")
+            .ok_or_else(|| invalid("Staged deployment observation is missing"))?
+            .is_null(),
+        retained_rollback: !status
+            .get("rollback")
+            .ok_or_else(|| invalid("Rollback observation is missing"))?
+            .is_null(),
+        rollback_queued: status
+            .get("rollbackQueued")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| invalid("Rollback queue observation is missing or invalid"))?,
+    })
+}
+
+async fn unit_path(
+    manager: &zbus::Proxy<'_>,
+    unit: &str,
+) -> Result<zbus::zvariant::OwnedObjectPath, zbus::Error> {
+    manager.call("LoadUnit", &(unit,)).await
+}
+
+async fn observe_worker(
     connection: &zbus::Connection,
-) -> Result<WorkerObservation, PlatformError> {
+    unit_name: &str,
+) -> Result<WorkerObservation, ()> {
     timeout(SYSTEMD_TIMEOUT, async {
         let manager =
             zbus::Proxy::new(connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER).await?;
-        let path = update_unit_path(&manager).await?;
+        let path = unit_path(&manager, unit_name).await?;
         let unit = zbus::Proxy::new(connection, SYSTEMD_BUS, path.as_str(), SYSTEMD_UNIT).await?;
         let service =
             zbus::Proxy::new(connection, SYSTEMD_BUS, path.as_str(), SYSTEMD_SERVICE).await?;
@@ -100,25 +198,33 @@ async fn observe_update_worker(
         })
     })
     .await
-    .map_err(|_| update_unavailable())?
-    .map_err(|_| update_unavailable())
+    .map_err(|_| ())?
+    .map_err(|_| ())
 }
 
-async fn start_update_worker(connection: &zbus::Connection) -> Result<(), PlatformError> {
+fn worker_running(worker: &WorkerObservation) -> bool {
+    !matches!(worker.active_state.as_str(), "inactive" | "failed")
+}
+
+async fn start_worker(
+    connection: &zbus::Connection,
+    unit_name: &str,
+    unavailable: fn() -> PlatformError,
+) -> Result<(), PlatformError> {
     timeout(SYSTEMD_TIMEOUT, async {
         let manager =
             zbus::Proxy::new(connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER).await?;
-        let path = update_unit_path(&manager).await?;
+        let path = unit_path(&manager, unit_name).await?;
         let unit = zbus::Proxy::new(connection, SYSTEMD_BUS, path.as_str(), SYSTEMD_UNIT).await?;
         let active: String = unit.get_property("ActiveState").await?;
         if active != "inactive" && active != "failed" {
             return Err(PlatformError::Busy(
-                "The update worker is already running".into(),
+                "The requested deployment worker is already running".into(),
             ));
         }
         let previous_invocation: Vec<u8> = unit.get_property("InvocationID").await?;
         let _: zbus::zvariant::OwnedObjectPath =
-            manager.call("StartUnit", &(UPDATE_UNIT, "fail")).await?;
+            manager.call("StartUnit", &(unit_name, "fail")).await?;
         loop {
             let active: String = unit.get_property("ActiveState").await?;
             let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
@@ -132,10 +238,10 @@ async fn start_update_worker(connection: &zbus::Connection) -> Result<(), Platfo
         Ok::<_, PlatformError>(())
     })
     .await
-    .map_err(|_| update_unavailable())?
+    .map_err(|_| unavailable())?
     .map_err(|error| match error {
         PlatformError::Busy(_) => error,
-        _ => update_unavailable(),
+        _ => unavailable(),
     })
 }
 
@@ -293,7 +399,8 @@ fn status_from_observations(
     release: &str,
     backend: &[u8],
     health: Health,
-    worker: &WorkerObservation,
+    update_worker: &WorkerObservation,
+    rollback_worker: &WorkerObservation,
 ) -> Result<Status, PlatformError> {
     let mut fields = BTreeMap::new();
     for line in release.lines().filter(|line| !line.trim().is_empty()) {
@@ -358,7 +465,12 @@ fn status_from_observations(
     } else {
         Some(deployment(rollback)?)
     };
-    let update = update_from_observations(&booted, staged, staged_queued, worker);
+    let rollback_queued = value
+        .pointer("/status/rollbackQueued")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| invalid("Rollback queue observation is missing or invalid"))?;
+    let update = update_from_observations(&booted, staged, staged_queued, update_worker);
+    let rollback = rollback_from_observations(rollback_queued, rollback_worker);
     Ok(Status {
         schema_version: SCHEMA_VERSION.into(),
         product: required("NAME")?.into(),
@@ -369,8 +481,46 @@ fn status_from_observations(
         booted,
         retained_rollback,
         update,
+        rollback,
         health,
     })
+}
+
+fn rollback_from_observations(rollback_queued: bool, worker: &WorkerObservation) -> RollbackStatus {
+    let running = worker_running(worker);
+    let failed = worker.active_state == "failed" || worker.result != "success";
+    let (state, failure) = if running {
+        (RollbackState::Running, None)
+    } else if failed {
+        let result = if worker
+            .result
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        {
+            worker.result.as_str()
+        } else {
+            "failed"
+        };
+        (
+            RollbackState::Failed,
+            Some(RollbackFailure {
+                code: "WorkerFailed".into(),
+                message: format!(
+                    "The rollback worker failed ({result}, status {})",
+                    worker.exit_status
+                ),
+            }),
+        )
+    } else if rollback_queued {
+        (RollbackState::Queued, None)
+    } else {
+        (RollbackState::Idle, None)
+    };
+    RollbackStatus {
+        state,
+        reboot_required: rollback_queued,
+        failure,
+    }
 }
 
 fn update_from_observations(
@@ -429,7 +579,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             CheckedPlatform(Platform {
                 connection: connection.clone(),
                 requests: Semaphore::new(1),
-                update_starts: Semaphore::new(1),
+                mutation_starts: Semaphore::new(1),
             }),
         )
         .await?;
@@ -447,7 +597,8 @@ mod tests {
             "booted": {"ostree":{"checksum":"a".repeat(64), "deploySerial":0},
                 "image":{"image":{"image":"localhost/signallayer-coreos:0.0.1"}, "imageDigest":format!("sha256:{}", "b".repeat(64))}},
             "staged":null,
-            "rollback":null}})
+            "rollback":null,
+            "rollbackQueued":false}})
     }
     fn worker(active_state: &str, result: &str, exit_status: i32) -> WorkerObservation {
         WorkerObservation {
@@ -462,6 +613,7 @@ mod tests {
             &serde_json::to_vec(&value).unwrap(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
+            &worker("inactive", "success", 0),
         )
     }
     #[test]
@@ -474,6 +626,7 @@ mod tests {
         assert_eq!(status.build_id, None);
         assert_eq!(status.booted.deployment_id, format!("{}.0", "a".repeat(64)));
         assert_eq!(status.update.state, UpdateState::Idle);
+        assert_eq!(status.rollback.state, RollbackState::Idle);
     }
     #[test]
     fn missing_or_invalid_observations_fail() {
@@ -492,6 +645,7 @@ mod tests {
             RELEASE,
             b"broken",
             observed_health("running".into(), 0),
+            &worker("inactive", "success", 0),
             &worker("inactive", "success", 0)
         )
         .is_err());
@@ -499,6 +653,7 @@ mod tests {
             "",
             &serde_json::to_vec(&fixture()).unwrap(),
             observed_health("running".into(), 0),
+            &worker("inactive", "success", 0),
             &worker("inactive", "success", 0)
         )
         .is_err());
@@ -519,6 +674,7 @@ mod tests {
             &backend,
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
+            &worker("inactive", "success", 0),
         )
         .unwrap();
         assert_eq!(status.update.state, UpdateState::Staged);
@@ -533,6 +689,7 @@ mod tests {
             &backend,
             observed_health("running".into(), 0),
             &worker("activating", "success", 0),
+            &worker("inactive", "success", 0),
         )
         .unwrap();
         assert_eq!(running.update.state, UpdateState::Running);
@@ -543,6 +700,7 @@ mod tests {
             &backend,
             observed_health("running".into(), 0),
             &worker("failed", "exit-code", 1),
+            &worker("inactive", "success", 0),
         )
         .unwrap();
         assert_eq!(failed.update.state, UpdateState::Failed);
@@ -562,6 +720,56 @@ mod tests {
         assert_eq!(status.update.state, UpdateState::Idle);
         assert!(!status.update.reboot_required);
         assert!(status.update.staged.is_some());
+    }
+
+    #[test]
+    fn rollback_state_uses_authoritative_queue_and_worker() {
+        let mut value = fixture();
+        value["status"]["rollback"] = value["status"]["booted"].clone();
+        value["status"]["rollbackQueued"] = true.into();
+        let queued = parse(value.clone()).unwrap();
+        assert_eq!(queued.rollback.state, RollbackState::Queued);
+        assert!(queued.rollback.reboot_required);
+        assert_eq!(queued.update.state, UpdateState::Idle);
+
+        let backend = serde_json::to_vec(&value).unwrap();
+        let running = status_from_observations(
+            RELEASE,
+            &backend,
+            observed_health("running".into(), 0),
+            &worker("inactive", "success", 0),
+            &worker("activating", "success", 0),
+        )
+        .unwrap();
+        assert_eq!(running.rollback.state, RollbackState::Running);
+
+        let failed = status_from_observations(
+            RELEASE,
+            &backend,
+            observed_health("running".into(), 0),
+            &worker("inactive", "success", 0),
+            &worker("failed", "exit-code", 1),
+        )
+        .unwrap();
+        assert_eq!(failed.rollback.state, RollbackState::Failed);
+        assert_eq!(failed.rollback.failure.unwrap().code, "WorkerFailed");
+    }
+
+    #[test]
+    fn rollback_preconditions_are_derived_from_bootc() {
+        let empty = mutation_state_from_backend(&serde_json::to_vec(&fixture()).unwrap()).unwrap();
+        assert!(!empty.staged);
+        assert!(!empty.retained_rollback);
+        assert!(!empty.rollback_queued);
+
+        let mut value = fixture();
+        value["status"]["staged"] = value["status"]["booted"].clone();
+        value["status"]["rollback"] = value["status"]["booted"].clone();
+        value["status"]["rollbackQueued"] = true.into();
+        let state = mutation_state_from_backend(&serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(state.staged);
+        assert!(state.retained_rollback);
+        assert!(state.rollback_queued);
     }
     #[test]
     fn health_is_only_healthy_for_running_without_failures() {

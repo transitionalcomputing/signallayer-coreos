@@ -77,7 +77,7 @@ impl Interface for CheckedPlatform {
         msg: &'call Message,
         name: MemberName<'call>,
     ) -> DispatchResult2<'call> {
-        if matches!(name.as_str(), "GetStatus" | "StartUpdate")
+        if matches!(name.as_str(), "GetStatus" | "StartUpdate" | "StartRollback")
             && (msg.body().signature() != &zbus::zvariant::Signature::Unit
                 || !msg.body().is_empty())
         {
