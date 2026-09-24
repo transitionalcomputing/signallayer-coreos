@@ -41,6 +41,15 @@ that config to match the Phase 2A immutable source image ID, and compares
 the running bootc digest with this archive manifest. OCI export can change
 the original Podman manifest digest without changing the image config ID.
 
+For Phase 4B, add `--phase4b` to the first-boot command. This retains the
+Phase 3A platform and immutable-root checks and adds the unprivileged
+`sl-sessiond` identity, capability, SELinux, D-Bus ownership, status-equivalence,
+mutation-denial, and bounded Platform-unavailable checks. The broker policy
+admits only `GetPlatformStatus`, so it may reject generic D-Bus introspection;
+the evaluator accepts that exact rejection together with a successful status
+call. Evidence is saved under an ignored `image/build/output/phase4b-*`
+directory.
+
 The probe uses existing systemd
 [hypervisor credentials](https://systemd.io/CREDENTIALS/) and
 [temporary unit support](https://github.com/systemd/systemd/blob/v259/man/systemd-debug-generator.xml).

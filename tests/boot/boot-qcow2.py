@@ -194,6 +194,82 @@ def evaluate_platform(evidence, expected_release):
     return checks
 
 
+def evaluate_session(evidence):
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    checks = {
+        "session_platform_active": ok("session_platform_active") and text("session_platform_active") == "active",
+        "session_active": ok("session_active") and text("session_active") == "active",
+        "session_dedicated_identity": ok("session_identity") and "uid=0(root)" not in text("session_identity") and "gid=0(root)" not in text("session_identity") and "groups=" in text("session_identity") and "," not in text("session_identity").split("groups=", 1)[1],
+        "session_name_owned": ok("session_owner") and text("session_owner").startswith("s \":"),
+        "session_stays_active_on_platform_failure": ok("session_active_during_platform_failure") and text("session_active_during_platform_failure") == "active",
+        "session_platform_restored": ok("session_platform_stop") and ok("session_platform_restart"),
+        "session_system_running": ok("session_final_system_state") and text("session_final_system_state") == "running" and ok("session_final_failed_units") and not text("session_final_failed_units"),
+    }
+    try:
+        unit = dict(line.split("=", 1) for line in text("session_unit").splitlines())
+        checks["session_unit_unprivileged"] = ok("session_unit") and all(unit.get(key) == value for key, value in {
+            "User": "sl-sessiond", "Group": "sl-sessiond", "CapabilityBoundingSet": "",
+            "AmbientCapabilities": "", "NoNewPrivileges": "yes", "PrivateDevices": "yes",
+            "PrivateTmp": "yes", "ProtectSystem": "strict", "ProtectHome": "yes",
+            "RestrictAddressFamilies": "AF_UNIX",
+            "FragmentPath": "/usr/lib/systemd/system/sl-sessiond.service"}.items()) and "/usr/bin/sl-sessiond" in unit.get("ExecStart", "")
+        process = text("session_process").split()
+        checks["session_process_confined"] = ok("session_process") and len(process) >= 3 and process[0] == "sl-sessiond" and process[1] == "system_u:system_r:sl_sessiond_t:s0" and process[2:] == ["/usr/bin/sl-sessiond"]
+        status = dict(line.split(":", 1) for line in text("session_process_status").splitlines() if ":" in line)
+        checks["session_process_no_capabilities"] = ok("session_process_status") and all(int(status.get(key, "1"), 16) == 0 for key in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")) and status.get("NoNewPrivs", "").strip() == "1" and all(value != "0" for value in status.get("Uid", "0").split()) and all(value != "0" for value in status.get("Gid", "0").split())
+
+        def session_payload(key):
+            envelope = json.loads(text(key))
+            if envelope.get("type") != "s" or len(envelope.get("data", [])) != 1:
+                raise ValueError("invalid busctl JSON envelope")
+            return json.loads(envelope["data"][0])
+
+        platform_status = json.loads(text("session_platform_status"))
+        session_status = session_payload("session_status")
+        unprivileged_status = session_payload("session_unprivileged_status")
+        recovered_status = session_payload("session_recovered_status")
+        checks["session_status_schema_0_2"] = ok("session_status") and session_status.get("schema_version") == "0.2" and session_status.get("platform_api_version") == "0.1"
+        checks["session_status_matches_platform"] = ok("session_platform_status") and platform_status == session_status == unprivileged_status == recovered_status
+    except (ValueError, KeyError, TypeError):
+        checks["session_evidence_valid"] = False
+    introspection = text("session_introspection")
+    introspection_is_read_only = (
+        ok("session_introspection")
+        and "GetPlatformStatus" in introspection
+        and all(name not in introspection for name in ("StartUpdate", "StartRollback", "StartReboot"))
+    )
+    # The installed broker policy admits only GetPlatformStatus, so an
+    # ordinary Introspect call may itself be rejected. A successful status
+    # call plus that exact broker rejection is the equivalent runtime proof.
+    introspection_is_blocked = (
+        not ok("session_introspection") and "access denied" in introspection.lower()
+    )
+    checks["session_read_only_interface"] = ok("session_status") and (
+        introspection_is_read_only or introspection_is_blocked
+    )
+    checks["session_mutations_denied"] = all(
+        not ok(key)
+        and (
+            "accessdenied" in text(key).lower().replace(" ", "")
+            or "not allowed" in text(key).lower()
+        )
+        for key in ("session_update_denied", "session_rollback_denied")
+    )
+    # busctl renders the bounded D-Bus error message but does not include the
+    # typed error name in its human-readable failure output.
+    checks["session_bounded_unavailable_error"] = (
+        not ok("session_unavailable")
+        and text("session_unavailable") == "Call failed: Platform status is temporarily unavailable"
+    )
+    checks["session_no_selinux_denials"] = ok("session_audit") and not any("avc:" in line.lower() and "denied" in line.lower() and "sl_sessiond_t" in line for line in text("session_audit").splitlines())
+    return checks
+
+
 def repository_writability_denials(evidence):
     """Recognize a denied access query, never a mutation or unmatched AVC."""
     import re
@@ -524,6 +600,7 @@ def main():
     parser.add_argument("disk", type=Path)
     parser.add_argument("--phase3a", action="store_true", help="Also validate the read-only platform service and CLI")
     parser.add_argument("--phase3b", action="store_true", help="Retain Phase 3A checks and validate confinement, bus boundaries and recovery")
+    parser.add_argument("--phase4b", action="store_true", help="Retain Phase 3A checks and validate the unprivileged Session1 status path")
     parser.add_argument("--policy-tools-image", default="localhost/slit-policy-tools:phase3b", help="Native setools build-stage image for analyzing the guest's loaded policy")
     parser.add_argument("--source-release", type=Path)
     parser.add_argument("--source-image", type=Path)
@@ -536,10 +613,12 @@ def main():
     args = parser.parse_args()
     if args.phase3b:
         args.phase3a = True
+    if args.phase4b:
+        args.phase3a = True
     output = Path(__file__).resolve().parents[2] / "image/build/output"
     output.mkdir(parents=True, exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
-    report = {"phase": "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
+    run = Path(tempfile.mkdtemp(prefix="phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
+    report = {"phase": "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
     process = None
     qmp = None
     disk_hash = None
@@ -621,6 +700,10 @@ collect security_initial_failed_details sh -c 'systemctl --failed --no-legend --
             probe = probe.replace("__SL_BOUNDARY_SOURCE__", boundary.read_text())
             report["boundary_probe_sha256"] = checksum(boundary)
             subprocess.run(["podman", "image", "exists", args.policy_tools_image], check=True, timeout=30)
+        if args.phase4b:
+            extension = Path(__file__).with_name("guest-session-probe.sh")
+            probe = probe.replace(marker, extension.read_text() + "\n" + marker)
+            report["session_probe_sha256"] = checksum(extension)
         unit = """[Unit]
 Description=Temporary CoreOS boot evidence probe
 DefaultDependencies=no
@@ -677,6 +760,8 @@ StandardError=journal+console
                 if args.phase3b:
                     report["checks"].update(evaluate_hardening(evidence))
                     report["checks"].update(inspect_loaded_policy(evidence, run, args.policy_tools_image))
+                if args.phase4b:
+                    report["checks"].update(evaluate_session(evidence))
                 (run / "guest-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
                 break
             time.sleep(0.25)

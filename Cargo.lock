@@ -71,9 +71,9 @@ name = "corectl"
 version = "0.0.1"
 dependencies = [
  "serde_json",
+ "sl-platform-client",
  "sl-protocol",
  "tokio",
- "zbus",
 ]
 
 [[package]]
@@ -421,6 +421,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-platform-client"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "sl-protocol",
+ "zbus",
+]
+
+[[package]]
 name = "sl-platformd"
 version = "0.0.1"
 dependencies = [
@@ -435,6 +444,16 @@ name = "sl-protocol"
 version = "0.0.1"
 dependencies = [
  "serde",
+ "zbus",
+]
+
+[[package]]
+name = "sl-sessiond"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "sl-platform-client",
+ "tokio",
  "zbus",
 ]
 

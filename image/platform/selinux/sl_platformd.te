@@ -1,5 +1,29 @@
 policy_module(sl_platformd, 0.1.0)
 
+# The management-facing session service is a separate unprivileged domain. It
+# can use the system bus and exchange messages with the read-only Platform
+# service, but receives no machine inspection, mutation, capability, or unit
+# control permissions.
+type sl_sessiond_t;
+type sl_sessiond_exec_t;
+init_daemon_domain(sl_sessiond_t, sl_sessiond_exec_t)
+gen_require(`
+    type init_t;
+')
+domtrans_pattern(init_t, sl_sessiond_exec_t, sl_sessiond_t)
+allow init_t sl_sessiond_t:process2 nnp_transition;
+
+libs_use_ld_so(sl_sessiond_t)
+libs_use_shared_libs(sl_sessiond_t)
+files_read_usr_files(sl_sessiond_t)
+miscfiles_read_localization(sl_sessiond_t)
+dev_read_urand(sl_sessiond_t)
+dbus_system_bus_client(sl_sessiond_t)
+gen_require(`
+    class dbus acquire_svc;
+')
+allow sl_sessiond_t self:dbus acquire_svc;
+
 # PID 1 transitions on the image-owned entry point. No permissive/unconfined
 # attribute is assigned to this domain or its inherited bootc children.
 type sl_platformd_t;
@@ -70,6 +94,8 @@ gen_require(`
 ')
 allow sl_platformd_t self:dbus acquire_svc;
 init_dbus_chat(sl_platformd_t)
+allow sl_sessiond_t sl_platformd_t:dbus send_msg;
+allow sl_platformd_t sl_sessiond_t:dbus send_msg;
 # PID 1 separately checks status permission for read-only Manager properties.
 # bootc also stats packaged units: metadata only, without unit contents/control.
 init_status(sl_platformd_t)

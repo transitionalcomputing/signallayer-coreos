@@ -1,6 +1,6 @@
 # SignalLayer CoreOS 0.0.2 management-plane contract
 
-**Status:** Phase 4A implementation contract
+**Status:** Phase 4A contract; Phase 4B validated
 **Release:** SignalLayer CoreOS 0.0.2
 **Platform API:** 0.2
 **Status schema:** 0.3
@@ -102,8 +102,8 @@ a focused local client, not a transport framework.
 
 ## `sl-sessiond` MVP contract
 
-The current `sessiond/` contains only a placeholder. Phase 4B creates the
-workspace binary `sl-sessiond` and its systemd/D-Bus packaging.
+Phase 4B implements the workspace binary `sl-sessiond` and its systemd/D-Bus
+packaging.
 
 - **Identity:** dedicated unprivileged `sl-sessiond` system user; no
   capabilities or administrative group membership.
@@ -284,6 +284,10 @@ hide authorization failures, retry mutations, or invent fallback data.
 ## Phase handoff criteria
 
 ### 4B — shared client and sessiond foundation
+
+**Validated:** the shared client, refactored `corectl`, confined unprivileged
+`sl-sessiond`, and read-only Session1 status path passed unit, policy, image,
+and KVM checks while retaining Platform API 0.1 and status schema 0.2.
 
 - Add `sl-platform-client`, move corectl's D-Bus/status/error mechanics into it,
   and preserve existing CLI behavior and deadlines using Platform API 0.1 and
