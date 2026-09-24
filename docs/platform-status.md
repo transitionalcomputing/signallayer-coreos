@@ -22,8 +22,9 @@ The response contains:
 - `network`: NetworkManager's documented global state and nullable primary
   connection. A primary connection contains one interface plus sorted,
   de-duplicated address/prefix and default-gateway strings. These properties
-  come only from NetworkManager D-Bus and do not expose object paths, DNS,
-  routes, MAC addresses, or secrets.
+  come through a dedicated unprivileged observer whose bus policy permits only
+  NetworkManager `Properties.Get`; they do not expose object paths, DNS, routes,
+  MAC addresses, or secrets.
 - `booted`: `deployment_id` (opaque), `image_reference`, `image_digest`.
   The daemon uses supported `bootc status --json`; on the current OSTree backend
   the opaque identifier combines observed checksum and deployment serial.
@@ -47,7 +48,7 @@ Backend execution uses a fixed absolute executable and arguments, no shell,
 15-second deadline, 64 KiB limits on each output stream, and kill/reap on timeout.
 Only one observation is in flight; concurrent calls receive `Busy` rather than
 starting unbounded privileged subprocesses. Health reads have a three-second
-shared deadline. NetworkManager reads have a separate three-second deadline and
+shared deadline. Network observation has a separate three-second deadline and
 run concurrently with bootc status so the CLI's existing 25-second D-Bus method
 deadline remains unchanged.
 
@@ -111,3 +112,8 @@ schema 0.3 against `/etc/machine-id`, kernel `uname` and boot ID, and direct
 NetworkManager D-Bus properties. It also compares direct Platform, `corectl`,
 and Session1 JSON, verifies deterministic network arrays, confirms Platform API
 0.1 and the absence of `StartReboot`, and checks for related SELinux denials.
+It also proves that `sl-network-observer` has a dedicated unprivileged identity,
+no capabilities, a confined SELinux domain, and a system-bus policy that allows
+NetworkManager `Properties.Get` while rejecting a representative mutation.
+Loaded-policy analysis proves `sl_platformd_t` has no direct NetworkManager
+message permission.

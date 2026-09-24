@@ -1,16 +1,10 @@
 use serde_json::Value;
 use sl_protocol::{
-    Deployment, Health, HealthState, MachineStatus, NetworkState, NetworkStatus, PlatformError,
-    PrimaryConnection, RollbackFailure, RollbackState, RollbackStatus, Status, UpdateFailure,
-    UpdateState, UpdateStatus, BUS, PATH, SCHEMA_VERSION,
+    Deployment, Health, HealthState, MachineStatus, NetworkStatus, PlatformError, RollbackFailure,
+    RollbackState, RollbackStatus, Status, UpdateFailure, UpdateState, UpdateStatus, BUS, PATH,
+    SCHEMA_VERSION,
 };
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
-    ffi::CStr,
-    net::IpAddr,
-    process::Stdio,
-    time::Duration,
-};
+use std::{collections::BTreeMap, ffi::CStr, net::IpAddr, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
@@ -32,13 +26,9 @@ const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
 const SYSTEMD_SERVICE: &str = "org.freedesktop.systemd1.Service";
 const UPDATE_UNIT: &str = "sl-update.service";
 const ROLLBACK_UNIT: &str = "sl-rollback.service";
-const NETWORK_MANAGER_BUS: &str = "org.freedesktop.NetworkManager";
-const NETWORK_MANAGER_PATH: &str = "/org/freedesktop/NetworkManager";
-const NETWORK_MANAGER_INTERFACE: &str = "org.freedesktop.NetworkManager";
-const ACTIVE_CONNECTION_INTERFACE: &str = "org.freedesktop.NetworkManager.Connection.Active";
-const DEVICE_INTERFACE: &str = "org.freedesktop.NetworkManager.Device";
-const IP4_CONFIG_INTERFACE: &str = "org.freedesktop.NetworkManager.IP4Config";
-const IP6_CONFIG_INTERFACE: &str = "org.freedesktop.NetworkManager.IP6Config";
+const NETWORK_OBSERVER_BUS: &str = "org.signallayer.NetworkObserver1";
+const NETWORK_OBSERVER_PATH: &str = "/org/signallayer/NetworkObserver1";
+const NETWORK_OBSERVER_INTERFACE: &str = "org.signallayer.NetworkObserver1";
 
 struct Platform {
     connection: zbus::Connection,
@@ -230,150 +220,75 @@ fn observe_machine() -> Result<MachineStatus, PlatformError> {
     })
 }
 
-fn network_state(value: u32) -> NetworkState {
-    match value {
-        10 | 20 | 30 => NetworkState::Disconnected,
-        40 => NetworkState::Connecting,
-        50 => NetworkState::ConnectedLocal,
-        60 => NetworkState::ConnectedSite,
-        70 => NetworkState::ConnectedGlobal,
-        _ => NetworkState::Unknown,
-    }
-}
-
-fn parse_address_data(
-    entries: Vec<HashMap<String, zbus::zvariant::OwnedValue>>,
-    family: u8,
-) -> Result<BTreeSet<String>, ()> {
-    entries
-        .into_iter()
-        .map(|mut entry| {
-            let address: String = entry
-                .remove("address")
-                .ok_or(())?
-                .try_into()
-                .map_err(|_| ())?;
-            let prefix: u32 = entry
-                .remove("prefix")
-                .ok_or(())?
-                .try_into()
-                .map_err(|_| ())?;
-            let parsed: IpAddr = address.parse().map_err(|_| ())?;
-            if (family == 4 && (!parsed.is_ipv4() || prefix > 32))
-                || (family == 6 && (!parsed.is_ipv6() || prefix > 128))
-            {
-                return Err(());
-            }
-            Ok(format!("{parsed}/{prefix}"))
-        })
-        .collect()
-}
-
-fn parse_gateway(value: String, family: u8) -> Result<Option<String>, ()> {
-    if value.is_empty() {
-        return Ok(None);
-    }
-    let parsed: IpAddr = value.parse().map_err(|_| ())?;
-    if (family == 4 && !parsed.is_ipv4()) || (family == 6 && !parsed.is_ipv6()) {
-        return Err(());
-    }
-    Ok(Some(parsed.to_string()))
-}
-
 async fn observe_network(connection: &zbus::Connection) -> Result<NetworkStatus, PlatformError> {
     timeout(NETWORK_TIMEOUT, async {
-        let manager = zbus::Proxy::new(
+        let observer = zbus::Proxy::new(
             connection,
-            NETWORK_MANAGER_BUS,
-            NETWORK_MANAGER_PATH,
-            NETWORK_MANAGER_INTERFACE,
+            NETWORK_OBSERVER_BUS,
+            NETWORK_OBSERVER_PATH,
+            NETWORK_OBSERVER_INTERFACE,
         )
         .await?;
-        let state: u32 = manager.get_property("State").await?;
-        let primary_path: zbus::zvariant::OwnedObjectPath =
-            manager.get_property("PrimaryConnection").await?;
-        if primary_path.as_str() == "/" {
-            return Ok(NetworkStatus {
-                state: network_state(state),
-                primary_connection: None,
-            });
-        }
-        let active = zbus::Proxy::new(
-            connection,
-            NETWORK_MANAGER_BUS,
-            primary_path.as_str(),
-            ACTIVE_CONNECTION_INTERFACE,
-        )
-        .await?;
-        let devices: Vec<zbus::zvariant::OwnedObjectPath> = active.get_property("Devices").await?;
-        if devices.len() != 1 {
-            return Err(zbus::Error::Failure(
-                "The primary connection does not identify exactly one device".into(),
-            ));
-        }
-        let device = zbus::Proxy::new(
-            connection,
-            NETWORK_MANAGER_BUS,
-            devices[0].as_str(),
-            DEVICE_INTERFACE,
-        )
-        .await?;
-        let interface: String = device.get_property("Interface").await?;
-        if interface.is_empty()
-            || interface.len() > 64
-            || interface
-                .chars()
-                .any(|character| character.is_control() || character.is_whitespace())
-        {
-            return Err(zbus::Error::Failure("Invalid primary interface".into()));
-        }
-
-        let mut addresses = BTreeSet::new();
-        let mut gateways = BTreeSet::new();
-        for (path_property, default_property, config_interface, family) in [
-            ("Ip4Config", "Default", IP4_CONFIG_INTERFACE, 4),
-            ("Ip6Config", "Default6", IP6_CONFIG_INTERFACE, 6),
-        ] {
-            let path: zbus::zvariant::OwnedObjectPath = active.get_property(path_property).await?;
-            if path.as_str() == "/" {
-                continue;
-            }
-            let config = zbus::Proxy::new(
-                connection,
-                NETWORK_MANAGER_BUS,
-                path.as_str(),
-                config_interface,
-            )
-            .await?;
-            let data: Vec<HashMap<String, zbus::zvariant::OwnedValue>> =
-                config.get_property("AddressData").await?;
-            addresses.extend(
-                parse_address_data(data, family).map_err(|_| {
-                    zbus::Error::Failure("Invalid NetworkManager address data".into())
-                })?,
-            );
-            let is_default: bool = active.get_property(default_property).await?;
-            if is_default {
-                let gateway: String = config.get_property("Gateway").await?;
-                if let Some(gateway) = parse_gateway(gateway, family)
-                    .map_err(|_| zbus::Error::Failure("Invalid NetworkManager gateway".into()))?
-                {
-                    gateways.insert(gateway);
-                }
-            }
-        }
-        Ok::<_, zbus::Error>(NetworkStatus {
-            state: network_state(state),
-            primary_connection: Some(PrimaryConnection {
-                interface,
-                addresses: addresses.into_iter().collect(),
-                default_gateways: gateways.into_iter().collect(),
-            }),
-        })
+        let json: String = observer.call("GetNetworkStatus", &()).await?;
+        let status: NetworkStatus = serde_json::from_str(&json)
+            .map_err(|_| zbus::Error::Failure("Invalid network observer response".into()))?;
+        validate_network_status(status)
+            .ok_or_else(|| zbus::Error::Failure("Invalid network observer response".into()))
     })
     .await
     .map_err(|_| network_error())?
     .map_err(|_| network_error())
+}
+
+fn validate_network_status(status: NetworkStatus) -> Option<NetworkStatus> {
+    let Some(primary) = status.primary_connection.as_ref() else {
+        return Some(status);
+    };
+    if primary.interface.is_empty()
+        || primary.interface.len() > 64
+        || primary
+            .interface
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+        || primary.addresses.len() > 256
+        || primary.default_gateways.len() > 32
+        || !strictly_sorted_unique(&primary.addresses)
+        || !strictly_sorted_unique(&primary.default_gateways)
+        || !primary.addresses.iter().all(|value| valid_address(value))
+        || !primary.default_gateways.iter().all(|value| {
+            value
+                .parse::<IpAddr>()
+                .is_ok_and(|parsed| parsed.to_string() == *value)
+        })
+    {
+        return None;
+    }
+    Some(status)
+}
+
+fn strictly_sorted_unique(values: &[String]) -> bool {
+    values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn valid_address(value: &str) -> bool {
+    let Some((address, prefix)) = value.split_once('/') else {
+        return false;
+    };
+    if prefix.contains('/') {
+        return false;
+    }
+    let Ok(address) = address.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    let valid_prefix = if address.is_ipv4() {
+        prefix <= 32
+    } else {
+        prefix <= 128
+    };
+    valid_prefix && format!("{address}/{prefix}") == value
 }
 
 fn update_unavailable() -> PlatformError {
@@ -846,6 +761,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sl_protocol::{NetworkState, PrimaryConnection};
     const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.1\"\nPLATFORM_API_VERSION=\"0.1\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
     fn fixture() -> Value {
         serde_json::json!({"apiVersion":"org.containers.bootc/v1", "kind":"BootcHost", "status": {
@@ -1101,49 +1017,29 @@ mod tests {
     }
 
     #[test]
-    fn network_state_mapping_is_documented_and_complete() {
-        assert_eq!(network_state(0), NetworkState::Unknown);
-        assert_eq!(network_state(10), NetworkState::Disconnected);
-        assert_eq!(network_state(20), NetworkState::Disconnected);
-        assert_eq!(network_state(30), NetworkState::Disconnected);
-        assert_eq!(network_state(40), NetworkState::Connecting);
-        assert_eq!(network_state(50), NetworkState::ConnectedLocal);
-        assert_eq!(network_state(60), NetworkState::ConnectedSite);
-        assert_eq!(network_state(70), NetworkState::ConnectedGlobal);
-        assert_eq!(network_state(999), NetworkState::Unknown);
-    }
+    fn helper_network_status_is_independently_validated() {
+        assert!(validate_network_status(network()).is_some());
 
-    #[test]
-    fn network_addresses_are_validated_sorted_and_deduplicated() {
-        let entry = |address: &str, prefix: u32| {
-            HashMap::from([
-                (
-                    "address".into(),
-                    zbus::zvariant::OwnedValue::from(zbus::zvariant::Str::from(address)),
-                ),
-                ("prefix".into(), zbus::zvariant::OwnedValue::from(prefix)),
-            ])
-        };
-        let addresses = parse_address_data(
-            vec![
-                entry("10.0.2.15", 24),
-                entry("192.0.2.2", 24),
-                entry("10.0.2.15", 24),
-            ],
-            4,
-        )
-        .unwrap();
-        assert_eq!(
-            addresses.into_iter().collect::<Vec<_>>(),
-            vec!["10.0.2.15/24", "192.0.2.2/24"]
-        );
-        assert!(parse_address_data(vec![entry("10.0.2.15", 33)], 4).is_err());
-        assert!(parse_address_data(vec![entry("2001:db8::1", 64)], 4).is_err());
-        assert_eq!(
-            parse_gateway("2001:0db8::1".into(), 6).unwrap(),
-            Some("2001:db8::1".into())
-        );
-        assert!(parse_gateway("2001:db8::1".into(), 4).is_err());
+        let mut invalid = network();
+        invalid.primary_connection.as_mut().unwrap().interface = "bad interface".into();
+        assert!(validate_network_status(invalid).is_none());
+
+        let mut invalid = network();
+        invalid.primary_connection.as_mut().unwrap().addresses =
+            vec!["192.0.2.2/24".into(), "10.0.2.15/24".into()];
+        assert!(validate_network_status(invalid).is_none());
+
+        let mut invalid = network();
+        invalid.primary_connection.as_mut().unwrap().addresses = vec!["10.0.2.15/33".into()];
+        assert!(validate_network_status(invalid).is_none());
+
+        let mut invalid = network();
+        invalid
+            .primary_connection
+            .as_mut()
+            .unwrap()
+            .default_gateways = vec!["2001:0db8::1".into()];
+        assert!(validate_network_status(invalid).is_none());
     }
     #[tokio::test]
     async fn backend_unavailable_and_timeout_are_distinct() {

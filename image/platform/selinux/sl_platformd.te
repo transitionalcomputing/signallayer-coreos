@@ -24,6 +24,23 @@ gen_require(`
 ')
 allow sl_sessiond_t self:dbus acquire_svc;
 
+# NetworkManager observation is isolated in an unprivileged daemon. Its bus
+# policy permits only Properties.Get, while SELinux limits its peers to
+# Platform and NetworkManager. It receives no capabilities or mutation access.
+type sl_network_observer_t;
+type sl_network_observer_exec_t;
+init_daemon_domain(sl_network_observer_t, sl_network_observer_exec_t)
+domtrans_pattern(init_t, sl_network_observer_exec_t, sl_network_observer_t)
+allow init_t sl_network_observer_t:process2 nnp_transition;
+
+libs_use_ld_so(sl_network_observer_t)
+libs_use_shared_libs(sl_network_observer_t)
+files_read_usr_files(sl_network_observer_t)
+miscfiles_read_localization(sl_network_observer_t)
+dev_read_urand(sl_network_observer_t)
+dbus_system_bus_client(sl_network_observer_t)
+allow sl_network_observer_t self:dbus acquire_svc;
+
 # PID 1 transitions on the image-owned entry point. No permissive/unconfined
 # attribute is assigned to this domain or its inherited bootc children.
 type sl_platformd_t;
@@ -96,13 +113,16 @@ allow sl_platformd_t self:dbus acquire_svc;
 init_dbus_chat(sl_platformd_t)
 allow sl_sessiond_t sl_platformd_t:dbus send_msg;
 allow sl_platformd_t sl_sessiond_t:dbus send_msg;
-# Read-only NetworkManager status: the daemon sends property requests and
-# NetworkManager sends replies. No NetworkManager service control is granted.
+# Platform talks only to the network observer; it has no direct NetworkManager
+# message permission. The observer's system-bus policy further restricts its
+# unprivileged identity to the Properties.Get member.
+allow sl_platformd_t sl_network_observer_t:dbus send_msg;
+allow sl_network_observer_t sl_platformd_t:dbus send_msg;
 gen_require(`
     type NetworkManager_t;
 ')
-allow sl_platformd_t NetworkManager_t:dbus send_msg;
-allow NetworkManager_t sl_platformd_t:dbus send_msg;
+allow sl_network_observer_t NetworkManager_t:dbus send_msg;
+allow NetworkManager_t sl_network_observer_t:dbus send_msg;
 # PID 1 separately checks status permission for read-only Manager properties.
 # bootc also stats packaged units: metadata only, without unit contents/control.
 init_status(sl_platformd_t)

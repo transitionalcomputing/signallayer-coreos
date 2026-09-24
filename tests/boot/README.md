@@ -56,8 +56,12 @@ identity, NetworkManager global state, primary interface, addresses and default
 gateways with independent authoritative guest observations. Direct Platform,
 `corectl`, and Session1 JSON must agree exactly. The evaluator also requires
 Platform API 0.1, deterministic address/gateway ordering, no `StartReboot`, and
-no SELinux denial caused by the new read path. Evidence is saved under an
-ignored `image/build/output/phase4c-*` directory.
+no SELinux denial caused by the new read path. It verifies the dedicated
+observer identity, empty capabilities, confined domain and exact executable;
+permits a direct property read while requiring a mutation-shaped NetworkManager
+call to be rejected by the broker; and analyzes the loaded SELinux policy to
+prove `sl_platformd_t` has no direct NetworkManager message permission. Evidence
+is saved under an ignored `image/build/output/phase4c-*` directory.
 
 The probe uses existing systemd
 [hypervisor credentials](https://systemd.io/CREDENTIALS/) and

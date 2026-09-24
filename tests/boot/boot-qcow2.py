@@ -368,6 +368,10 @@ def evaluate_management(evidence):
                 primary["addresses"] == sorted(set(primary["addresses"]))
                 and primary["default_gateways"] == sorted(set(primary["default_gateways"]))
             )
+        observer = payload("management_observer_status")
+        checks["management_observer_matches_platform"] = (
+            ok("management_observer_status") and observer == network
+        )
     except (ValueError, KeyError, TypeError, IndexError):
         checks["management_evidence_valid"] = False
     introspection = text("management_platform_introspection")
@@ -390,11 +394,130 @@ def evaluate_management(evidence):
         and not any(
             "avc:" in line.lower() and "denied" in line.lower()
             and ('comm="sl-platformd"' in line or "networkmanager_t" in line.lower()
-                 or "sl_sessiond_t" in line)
+                 or "sl_sessiond_t" in line or "sl_network_observer_t" in line)
             for line in text("management_audit").splitlines()
         )
     )
+    unit = dict(
+        line.split("=", 1)
+        for line in text("management_observer_unit").splitlines()
+        if "=" in line
+    )
+    process = text("management_observer_process").split()
+    identity = text("management_observer_identity").split(":")
+    groups = text("management_observer_groups")
+    checks["management_observer_unit_hardened"] = (
+        ok("management_observer_unit")
+        and unit.get("ActiveState") == "active"
+        and unit.get("SubState") == "running"
+        and unit.get("User") == "sl-network-observer"
+        and unit.get("Group") == "sl-network-observer"
+        and unit.get("CapabilityBoundingSet") == ""
+        and unit.get("AmbientCapabilities") == ""
+        and unit.get("NoNewPrivileges") == "yes"
+        and "/usr/bin/sl-network-observer" in unit.get("ExecStart", "")
+    )
+    checks["management_observer_unprivileged_identity"] = (
+        ok("management_observer_identity") and len(identity) == 7
+        and identity[0] == "sl-network-observer" and identity[2] != "0"
+        and identity[5] == "/nonexistent" and identity[6] == "/usr/sbin/nologin"
+        and ok("management_observer_groups")
+        and re.fullmatch(r"uid=(\d+)\(sl-network-observer\) gid=\1\(sl-network-observer\) groups=\1\(sl-network-observer\)", groups) is not None
+    )
+    checks["management_observer_confined_process"] = (
+        ok("management_observer_process") and len(process) >= 4
+        and process[1] == "sl-network-observer"
+        and process[2] == "system_u:system_r:sl_network_observer_t:s0"
+        and process[3:] == ["/usr/bin/sl-network-observer"]
+    )
+    capabilities = dict(
+        line.split(":", 1)
+        for line in text("management_observer_capabilities").splitlines()
+        if ":" in line
+    )
+    checks["management_observer_no_effective_capabilities"] = (
+        ok("management_observer_capabilities")
+        and set(capabilities) == {"CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"}
+        and all(value.strip() == "0000000000000000" for value in capabilities.values())
+    )
+    checks["management_observer_nm_read_allowed"] = (
+        ok("management_observer_nm_read")
+        and re.fullmatch(r"u \d+", text("management_observer_nm_read")) is not None
+    )
+    denied = text("management_observer_nm_mutation_denied").lower()
+    set_denied = text("management_observer_nm_set_denied").lower()
+    checks["management_observer_nm_set_denied"] = (
+        not ok("management_observer_nm_set_denied")
+        and ("access denied" in set_denied or "not allowed" in set_denied)
+    )
+    checks["management_observer_nm_mutation_denied"] = (
+        not ok("management_observer_nm_mutation_denied")
+        and ("access denied" in denied or "not allowed" in denied)
+    )
+    try:
+        root = ET.fromstring(text("management_observer_bus_config"))
+        user_policy = next(
+            item for item in root.findall("policy")
+            if item.attrib == {"user": "sl-network-observer"}
+        )
+        rules = [(item.tag, item.attrib) for item in user_policy]
+        checks["management_observer_bus_policy_exact"] = (
+            ok("management_observer_bus_config")
+            and ("allow", {"own": "org.signallayer.NetworkObserver1"}) in rules
+            and ("deny", {"send_destination": "org.freedesktop.NetworkManager"}) in rules
+            and ("allow", {
+                "send_destination": "org.freedesktop.NetworkManager",
+                "send_interface": "org.freedesktop.DBus.Properties",
+                "send_member": "Get",
+            }) in rules
+            and not any(
+                tag == "allow" and attributes.get("send_destination") == "org.freedesktop.NetworkManager"
+                and attributes.get("send_interface") != "org.freedesktop.DBus.Properties"
+                for tag, attributes in rules
+            )
+        )
+    except (StopIteration, ET.ParseError):
+        checks["management_observer_bus_policy_exact"] = False
     return checks
+
+
+def inspect_management_policy(evidence, run, tools_image):
+    value = evidence.get("management_loaded_policy", {})
+    if value.get("exit_code") != 0:
+        return {"management_loaded_policy_analyzed": False}
+    binary = gzip.decompress(base64.b64decode(value["output"], validate=True))
+    if len(binary) > 32 * 1024 * 1024:
+        raise RuntimeError("Unexpectedly large guest policy")
+    policy = run / "management-loaded-policy.bin"
+    policy.write_bytes(binary)
+    queries = {
+        "observer_domain": ["seinfo", "-t", "sl_network_observer_t", "-x", "/policy"],
+        "permissive": ["seinfo", "--permissive", "-x", "/policy"],
+        "observer_entry": ["sesearch", "-T", "-s", "init_t", "-t", "sl_network_observer_exec_t", "-c", "process", "/policy"],
+        "platform_nm": ["sesearch", "-A", "-s", "sl_platformd_t", "-t", "NetworkManager_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "observer_nm": ["sesearch", "-A", "-s", "sl_network_observer_t", "-t", "NetworkManager_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "nm_observer": ["sesearch", "-A", "-s", "NetworkManager_t", "-t", "sl_network_observer_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "platform_observer": ["sesearch", "-A", "-s", "sl_platformd_t", "-t", "sl_network_observer_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "observer_platform": ["sesearch", "-A", "-s", "sl_network_observer_t", "-t", "sl_platformd_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "observer_capabilities": ["sesearch", "-A", "-s", "sl_network_observer_t", "-t", "sl_network_observer_t", "-c", "capability", "/policy"],
+    }
+    analysis = {}
+    for name, query in queries.items():
+        command = ["podman", "run", "--rm", "--network=none", "--volume", str(policy) + ":/policy:ro,Z", tools_image] + query
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        analysis[name] = {"command": command, "exit_code": result.returncode,
+                          "output": result.stdout, "stderr": result.stderr}
+    (run / "management-policy-analysis.json").write_text(json.dumps(analysis, indent=2) + "\n")
+    valid = all(value["exit_code"] == 0 for value in analysis.values())
+    return {
+        "management_loaded_policy_hash_matches": evidence.get("management_loaded_policy_hash", {}).get("exit_code") == 0 and checksum(policy) == evidence["management_loaded_policy_hash"]["output"].split()[0],
+        "management_observer_domain_confined": valid and "type sl_network_observer_t," in analysis["observer_domain"]["output"] and "unconfined" not in analysis["observer_domain"]["output"] and "sl_network_observer_t" not in analysis["permissive"]["output"],
+        "management_observer_entry_transition_loaded": valid and "type_transition init_t sl_network_observer_exec_t:process sl_network_observer_t;" in analysis["observer_entry"]["output"],
+        "management_platform_has_no_direct_nm_access": valid and not analysis["platform_nm"]["output"].strip(),
+        "management_observer_nm_messages_scoped": valid and bool(analysis["observer_nm"]["output"].strip()) and bool(analysis["nm_observer"]["output"].strip()),
+        "management_platform_observer_messages_scoped": valid and bool(analysis["platform_observer"]["output"].strip()) and bool(analysis["observer_platform"]["output"].strip()),
+        "management_observer_has_no_capabilities": valid and not analysis["observer_capabilities"]["output"].strip(),
+    }
 
 
 def repository_writability_denials(evidence):
@@ -839,6 +962,7 @@ collect security_initial_failed_details sh -c 'systemctl --failed --no-legend --
             extension = Path(__file__).with_name("guest-management-probe.sh")
             probe = probe.replace(marker, extension.read_text() + "\n" + marker)
             report["management_probe_sha256"] = checksum(extension)
+            subprocess.run(["podman", "image", "exists", args.policy_tools_image], check=True, timeout=30)
         unit = """[Unit]
 Description=Temporary CoreOS boot evidence probe
 DefaultDependencies=no
@@ -901,6 +1025,8 @@ StandardError=journal+console
                         evidence, "0.3" if args.phase4c else "0.2"))
                 if args.phase4c:
                     report["checks"].update(evaluate_management(evidence))
+                    report["checks"].update(inspect_management_policy(
+                        evidence, run, args.policy_tools_image))
                 (run / "guest-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
                 break
             time.sleep(0.25)

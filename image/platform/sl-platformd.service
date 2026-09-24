@@ -1,6 +1,7 @@
 [Unit]
 Description=SignalLayerIT read-only platform status
-After=dbus.service
+After=dbus.service sl-network-observer.service
+Wants=sl-network-observer.service
 Requires=dbus.service
 
 [Service]

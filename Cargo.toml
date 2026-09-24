@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/protocol", "crates/platform-client", "platformd", "corectl", "sessiond"]
+members = ["crates/protocol", "crates/platform-client", "platformd", "corectl", "sessiond", "network-observer"]
 resolver = "2"
 
 [workspace.package]
