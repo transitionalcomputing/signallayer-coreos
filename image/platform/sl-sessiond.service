@@ -1,0 +1,30 @@
+[Unit]
+Description=SignalLayerIT unprivileged session service
+After=dbus.service sl-platformd.service
+Wants=sl-platformd.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.signallayer.Session1
+ExecStart=/usr/bin/sl-sessiond
+User=sl-sessiond
+Group=sl-sessiond
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

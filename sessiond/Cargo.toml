@@ -1,10 +1,10 @@
 [package]
-name = "corectl"
+name = "sl-sessiond"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 sl-platform-client.workspace = true
-sl-protocol.workspace = true
 serde_json.workspace = true
+zbus.workspace = true
 tokio.workspace = true

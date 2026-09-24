@@ -9,6 +9,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY platformd ./platformd
 COPY corectl ./corectl
+COPY sessiond ./sessiond
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 
 # Policy authoring/analysis tools never enter the final runtime image.
@@ -54,11 +55,15 @@ RUN set -eu; \
 
 COPY --from=platform-build /build/target/release/sl-platformd /usr/bin/sl-platformd
 COPY --from=platform-build /build/target/release/corectl /usr/bin/corectl
+COPY --from=platform-build /build/target/release/sl-sessiond /usr/bin/sl-sessiond
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
+COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.service
 COPY image/platform/sl-update.service /usr/lib/systemd/system/sl-update.service
 COPY image/platform/sl-rollback.service /usr/lib/systemd/system/sl-rollback.service
 COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
+COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/org.signallayer.Platform1.conf /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf
+COPY image/platform/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.Session1.conf
 COPY image/platform/udisks2-polkit.conf /usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf
 COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_platformd.pp
 # The pinned bootc base sets store-root=/etc/selinux. Install offline, without
@@ -68,6 +73,7 @@ COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_
 # runtime policycoreutils and the supported policy store/backend.
 RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(matchpathcon -n /usr/bin/sl-platformd)" = system_u:object_r:sl_platformd_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/bin/sl-sessiond)" = system_u:object_r:sl_sessiond_exec_t:s0 && \
     test "$(matchpathcon -n /usr/bin/bootc)" = system_u:object_r:install_exec_t:s0 && \
     test "$(matchpathcon -n /usr/lib/systemd/system/sl-update.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
     test "$(matchpathcon -n /usr/lib/systemd/system/sl-rollback.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
@@ -90,4 +96,5 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
           /usr/share/selinux/devel/include/distributed \
           /usr/share/selinux/devel/include /usr/share/selinux/devel
 RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
-    ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service
+    ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && \
+    ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service

@@ -1,5 +1,6 @@
-use sl_protocol::{PlatformProxy, RollbackState, Status, UpdateState, SCHEMA_VERSION};
-use std::{process::ExitCode, time::Duration};
+use sl_platform_client::{ClientError, PlatformClient};
+use sl_protocol::{RollbackState, UpdateState};
+use std::process::ExitCode;
 
 fn report_error(json: bool, code: &str, message: &str) -> ExitCode {
     if json {
@@ -13,25 +14,8 @@ fn report_error(json: bool, code: &str, message: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
-fn bus_error(error: &zbus::Error) -> (&str, String) {
-    if let zbus::Error::MethodError(name, message, _) = error {
-        if let Some(code) = name
-            .as_str()
-            .strip_prefix("org.signallayer.Platform1.Error.")
-        {
-            return (
-                code,
-                message
-                    .as_deref()
-                    .unwrap_or("Platform status query failed")
-                    .into(),
-            );
-        }
-    }
-    (
-        "ServiceUnavailable",
-        "The local platform status service could not be reached".into(),
-    )
+fn client_error(json: bool, error: &ClientError) -> ExitCode {
+    report_error(json, error.code(), error.message())
 }
 
 #[tokio::main]
@@ -53,42 +37,12 @@ async fn main() -> ExitCode {
             "Usage: corectl status [--json] | corectl update [--json] | corectl rollback [--json]",
         ),
     };
-    let connection = match zbus::connection::Builder::system() {
-        Ok(builder) => match builder
-            .method_timeout(Duration::from_secs(25))
-            .build()
-            .await
-        {
-            Ok(connection) => connection,
-            Err(_) => {
-                return report_error(
-                    json,
-                    "ServiceUnavailable",
-                    "The system D-Bus is unavailable",
-                )
-            }
-        },
-        Err(_) => {
-            return report_error(
-                json,
-                "ServiceUnavailable",
-                "The system D-Bus is unavailable",
-            )
-        }
-    };
-    let proxy = match PlatformProxy::builder(&connection)
-        .cache_properties(zbus::proxy::CacheProperties::No)
-        .build()
-        .await
-    {
-        Ok(proxy) => proxy,
-        Err(error) => {
-            let (code, message) = bus_error(&error);
-            return report_error(json, code, &message);
-        }
+    let client = match PlatformClient::connect().await {
+        Ok(client) => client,
+        Err(error) => return client_error(json, &error),
     };
     if action == "update" {
-        return match proxy.start_update().await {
+        return match client.start_update().await {
             Ok(()) => {
                 if json {
                     println!("{}", serde_json::json!({"state":"running"}));
@@ -97,14 +51,11 @@ async fn main() -> ExitCode {
                 }
                 ExitCode::SUCCESS
             }
-            Err(error) => {
-                let (code, message) = bus_error(&error);
-                report_error(json, code, &message)
-            }
+            Err(error) => client_error(json, &error),
         };
     }
     if action == "rollback" {
-        return match proxy.start_rollback().await {
+        return match client.start_rollback().await {
             Ok(()) => {
                 if json {
                     println!("{}", serde_json::json!({"state":"running"}));
@@ -113,36 +64,13 @@ async fn main() -> ExitCode {
                 }
                 ExitCode::SUCCESS
             }
-            Err(error) => {
-                let (code, message) = bus_error(&error);
-                report_error(json, code, &message)
-            }
+            Err(error) => client_error(json, &error),
         };
     }
-    let response = match proxy.get_status().await {
-        Ok(response) => response,
-        Err(error) => {
-            let (code, message) = bus_error(&error);
-            return report_error(json, code, &message);
-        }
-    };
-    let status: Status = match serde_json::from_str(&response) {
+    let status = match client.get_status().await {
         Ok(status) => status,
-        Err(_) => {
-            return report_error(
-                json,
-                "InvalidResponse",
-                "The platform returned an invalid status response",
-            )
-        }
+        Err(error) => return client_error(json, &error),
     };
-    if status.schema_version != SCHEMA_VERSION {
-        return report_error(
-            json,
-            "UnsupportedSchema",
-            "The platform status schema is unsupported",
-        );
-    }
     if json {
         println!(
             "{}",
