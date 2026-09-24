@@ -82,8 +82,12 @@ The client library owns:
 
 - constructing the system-bus connection and Platform proxy;
 - the existing 25-second client method deadline;
-- `get_status`, `start_update`, `start_rollback`, and `start_reboot` calls;
-- decoding and validating status schema 0.3; and
+- initially, in Phase 4B, `get_status`, `start_update`, and `start_rollback`
+  calls against Platform API 0.1;
+- initially decoding and validating status schema 0.2 in Phase 4B, then status
+  schema 0.3 in Phase 4C;
+- `start_reboot` and Platform API 0.2 support when controlled reboot is added
+  in Phase 4D; and
 - converting transport, broker, remote-method, invalid-response, and
   unsupported-version failures into a small typed client error.
 
@@ -112,9 +116,10 @@ workspace binary `sl-sessiond` and its systemd/D-Bus packaging.
   persistent database, cached authoritative status, or deployment state.
 - **Upward interface:** system D-Bus service and interface
   `org.signallayer.Session1`, object `/org/signallayer/Session1`, with
-  `GetPlatformStatus() -> s`. The string contains status schema 0.3 JSON
-  validated and reserialized by the shared client. It is read-only and accepts
-  no arguments.
+  `GetPlatformStatus() -> s`. In Phase 4B the string contains existing status
+  schema 0.2 JSON validated and reserialized by the shared client; Phase 4C
+  upgrades this path to status schema 0.3. It is read-only and accepts no
+  arguments.
 - **Health/version:** successful name ownership and request handling are the
   service health signal. The daemon logs its package version at startup. The
   returned CoreOS/API versions come only from Platform status. If Platform
@@ -177,7 +182,17 @@ database is added.
 
 ## API and schema versioning
 
-The 0.0.2 image reports **Platform API 0.2** and **status schema 0.3**.
+Implementation advances in this fixed sequence:
+
+- Phase 4B uses **Platform API 0.1** and **status schema 0.2** through the new
+  shared-client and sessiond architecture. No version changes occur.
+- Phase 4C retains **Platform API 0.1** and adds **status schema 0.3** with the
+  required `machine` and `network` fields.
+- Phase 4D adds `StartReboot`, advances to **Platform API 0.2**, and retains
+  **status schema 0.3**.
+
+The final released 0.0.2 image therefore reports **Platform API 0.2** and
+**status schema 0.3**.
 
 Platform API 0.2 is an additive evolution: `GetStatus`, `StartUpdate`, and
 `StartRollback` retain their exact signatures and behavior, while
@@ -186,10 +201,10 @@ reported Platform API version is below 0.2.
 
 Status 0.3 is the 0.2 object plus required `machine` and `network` fields. It is
 versioned separately because 0.0.1 clients intentionally require an exact
-schema and reject unknown fields. The 0.0.2 shared client accepts schema 0.3;
-it does not silently reinterpret 0.2 as complete management status. This
-explicit incompatibility prevents absent identity/network facts from being
-presented as valid observations.
+schema and reject unknown fields. The Phase 4B shared client accepts schema
+0.2; Phase 4C updates it to accept schema 0.3. It does not silently reinterpret
+0.2 as complete 0.3 management status. This explicit incompatibility prevents
+absent identity/network facts from being presented as valid observations.
 
 ## Controlled reboot contract
 
@@ -271,28 +286,34 @@ hide authorization failures, retry mutations, or invent fallback data.
 ### 4B — shared client and sessiond foundation
 
 - Add `sl-platform-client`, move corectl's D-Bus/status/error mechanics into it,
-  and preserve existing CLI behavior and deadlines.
+  and preserve existing CLI behavior and deadlines using Platform API 0.1 and
+  status schema 0.2. Its initial calls are `get_status`, `start_update`, and
+  `start_rollback`; it does not provide `start_reboot`.
 - Add an unprivileged systemd-managed `sl-sessiond` that owns only
   `org.signallayer.Session1` and implements bounded `GetPlatformStatus` through
-  the shared client.
+  the shared client using existing status schema 0.2.
 - Prove neither consumer invokes machine backends or gains mutation authority;
-  no persistence is added.
+  no persistence is added and no API or schema version changes occur.
 
 ### 4C — management/status surface
 
-- Implement protocol schema 0.3 and Platform API 0.2 release metadata.
+- Implement status schema 0.3 while Platform API remains at 0.1; do not add
+  `StartReboot`.
 - Populate `machine` from systemd/kernel identity and `network` from
   NetworkManager D-Bus, with bounded reads and validation.
-- Prove direct Platform, corectl, and sessiond observations agree for all old
-  fields and the new management fields, including degraded/unavailable paths.
+- Update `sl-platform-client`, corectl, and `sl-sessiond` to consume schema 0.3,
+  and prove their observations agree for all old fields and the new management
+  fields, including degraded/unavailable paths.
 - Preserve all 0.0.1 status, confinement, immutable-root, update, and rollback
   behavior.
 
 ### 4D — controlled reboot
 
 - Add zero-argument `StartReboot`, root-only bus policy, the compile-time fixed
-  unit name, dedicated unit-file label, and the exact fixed command above.
-- Add `corectl reboot`; do not grant `sl-sessiond` the method.
+  unit name, dedicated unit-file label, and the exact fixed command above; at
+  this phase advance Platform API from 0.1 to 0.2 while status remains 0.3.
+- Add `start_reboot` to `sl-platform-client` and `corectl reboot`; do not grant
+  `sl-sessiond` the method.
 - Prove prompt acceptance, Busy/Conflict/failure behavior, exact unit/command,
   no arbitrary parameters, and one orderly reboot into bootc's preselected
   deployment without changing update/rollback policy.
@@ -314,9 +335,13 @@ contract establishes their state and trust model.
 ## Minimal implementation map for 4B–4D
 
 - `Cargo.toml`, `Cargo.lock`: add the focused client crate and sessiond binary.
-- `crates/platform-client/`: shared typed Platform client.
-- `crates/protocol/`: schema 0.3 types, Platform API 0.2 proxy, and reboot error.
-- `corectl/`: consume the client; later add `reboot` presentation.
+- `crates/platform-client/`: shared typed Platform client for existing API 0.1
+  and schema 0.2 in 4B; add schema 0.3 handling in 4C and `start_reboot` with
+  API 0.2 in 4D.
+- `crates/protocol/`: add schema 0.3 types in 4C; add the Platform API 0.2 proxy
+  method and reboot error in 4D.
+- `corectl/`: consume the client in 4B, consume schema 0.3 in 4C, and add
+  `reboot` presentation in 4D.
 - `sessiond/`: unprivileged daemon and read-only upward interface.
 - `platformd/`: machine/network observations and fixed reboot dispatch.
 - `image/platform/`: sessiond packaging and policy; root-only `StartReboot`;
