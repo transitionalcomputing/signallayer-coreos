@@ -421,6 +421,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-network-observer"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "sl-protocol",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "sl-platform-client"
 version = "0.0.1"
 dependencies = [
@@ -433,6 +443,7 @@ dependencies = [
 name = "sl-platformd"
 version = "0.0.1"
 dependencies = [
+ "libc",
  "serde_json",
  "sl-protocol",
  "tokio",

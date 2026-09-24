@@ -1,5 +1,6 @@
 /usr/bin/sl-platformd -- gen_context(system_u:object_r:sl_platformd_exec_t,s0)
 /usr/bin/sl-sessiond -- gen_context(system_u:object_r:sl_sessiond_exec_t,s0)
+/usr/bin/sl-network-observer -- gen_context(system_u:object_r:sl_network_observer_exec_t,s0)
 /usr/lib/systemd/system/sl-update\.service -- gen_context(system_u:object_r:sl_update_unit_file_t,s0)
 /usr/lib/systemd/system/sl-rollback\.service -- gen_context(system_u:object_r:sl_update_unit_file_t,s0)
 /run/ostree -d gen_context(system_u:object_r:sl_bootc_runtime_t,s0)

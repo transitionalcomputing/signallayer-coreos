@@ -134,6 +134,19 @@ mod tests {
             "platform_api_version": "0.1",
             "source_revision": null,
             "build_id": null,
+            "machine": {
+                "machine_id": "0123456789abcdef0123456789abcdef",
+                "architecture": "x86_64",
+                "boot_id": "01234567-89ab-cdef-0123-456789abcdef"
+            },
+            "network": {
+                "state": "connected_global",
+                "primary_connection": {
+                    "interface": "enp0s2",
+                    "addresses": ["10.0.2.15/24"],
+                    "default_gateways": ["10.0.2.2"]
+                }
+            },
             "booted": {
                 "deployment_id": "abc.0",
                 "image_reference": "localhost/signallayer-coreos:0.0.1",
@@ -161,26 +174,52 @@ mod tests {
     }
 
     #[test]
-    fn accepts_exact_phase_4b_schema() {
-        let status = decode_status(&status_json("0.2")).expect("valid status");
-        assert_eq!(status.schema_version, "0.2");
+    fn accepts_exact_phase_4c_schema() {
+        let status = decode_status(&status_json("0.3")).expect("valid status");
+        assert_eq!(status.schema_version, "0.3");
         assert_eq!(status.platform_api_version, "0.1");
+        assert_eq!(status.machine.architecture, "x86_64");
+        assert_eq!(
+            status.network.primary_connection.unwrap().interface,
+            "enp0s2"
+        );
     }
 
     #[test]
     fn rejects_other_schema_versions() {
         assert_eq!(
-            decode_status(&status_json("0.3")).unwrap_err(),
+            decode_status(&status_json("0.2")).unwrap_err(),
+            ClientError::UnsupportedSchema
+        );
+        assert_eq!(
+            decode_status(&status_json("0.4")).unwrap_err(),
             ClientError::UnsupportedSchema
         );
     }
 
     #[test]
     fn rejects_unknown_status_fields() {
-        let mut value: serde_json::Value = serde_json::from_str(&status_json("0.2")).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&status_json("0.3")).unwrap();
         value["future_field"] = serde_json::json!(true);
         assert_eq!(
             decode_status(&value.to_string()).unwrap_err(),
+            ClientError::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_management_status() {
+        let mut missing: serde_json::Value = serde_json::from_str(&status_json("0.3")).unwrap();
+        missing.as_object_mut().unwrap().remove("machine");
+        assert_eq!(
+            decode_status(&missing.to_string()).unwrap_err(),
+            ClientError::InvalidResponse
+        );
+
+        let mut malformed: serde_json::Value = serde_json::from_str(&status_json("0.3")).unwrap();
+        malformed["network"]["primary_connection"]["addresses"] = serde_json::json!("10.0.2.15/24");
+        assert_eq!(
+            decode_status(&malformed.to_string()).unwrap_err(),
             ClientError::InvalidResponse
         );
     }

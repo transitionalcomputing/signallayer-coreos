@@ -1,6 +1,6 @@
 # SignalLayer CoreOS 0.0.2 management-plane contract
 
-**Status:** Phase 4A contract; Phase 4B validated
+**Status:** Phase 4A contract; Phases 4B and 4C validated
 **Release:** SignalLayer CoreOS 0.0.2
 **Platform API:** 0.2
 **Status schema:** 0.3
@@ -36,7 +36,8 @@ and general power management remain deferred.
 
 | Component | Owns | Does not own |
 | --- | --- | --- |
-| `sl-platformd` | Platform authorization; machine observation; validation and dispatch of fixed privileged operations | User/session UX, flavor policy, arbitrary command or unit execution |
+| `sl-platformd` | Platform authorization; machine observation; validation and dispatch of fixed privileged operations | User/session UX, flavor policy, arbitrary command or unit execution, or direct NetworkManager access |
+| `sl-network-observer` | Unprivileged, bounded NetworkManager property observation for Platform status | Network configuration, mutation methods, persistence, or policy decisions |
 | `crates/platform-client` | System-bus connection, typed Platform calls, status decoding/version checks, and consistent client error mapping | Authorization, presentation, Linux inspection, retries or persistent state |
 | `sl-sessiond` | The management-to-Platform read path and, later, flavor/session coordination | Machine mutation, deployment/network implementation, root authority, or duplicated platform state |
 | `corectl` | Administrative CLI argument handling, output, exit status, and operator-facing confirmation | D-Bus plumbing, backend execution, or platform business logic |
@@ -160,9 +161,11 @@ secret, or NetworkManager object path is exposed.
 `network.state` is one of `unknown`, `disconnected`, `connecting`,
 `connected_local`, `connected_site`, or `connected_global`, mapped directly
 from NetworkManager's documented global state. The primary connection,
-interface, IP address data, and gateways come from NetworkManager D-Bus
-properties. Observation is read-only; no `nmcli` subprocess or configuration
-mutation is permitted.
+interface, IP address data, and gateways come through the dedicated
+`sl-network-observer`. Its system-bus policy permits only NetworkManager
+`org.freedesktop.DBus.Properties.Get` calls. `sl-platformd` validates the
+returned object independently and has no direct NetworkManager D-Bus access.
+No `nmcli` subprocess or configuration mutation is permitted.
 
 The complete 0.0.2 management facts are represented as follows:
 
@@ -301,10 +304,16 @@ and KVM checks while retaining Platform API 0.1 and status schema 0.2.
 
 ### 4C — management/status surface
 
+**Validated:** status schema 0.3 machine and NetworkManager observations passed
+focused unit, policy, image, offline disk, and KVM checks while Platform API
+remained at 0.1. Direct Platform, `corectl`, and Session1 results agreed.
+
 - Implement status schema 0.3 while Platform API remains at 0.1; do not add
   `StartReboot`.
-- Populate `machine` from systemd/kernel identity and `network` from
-  NetworkManager D-Bus, with bounded reads and validation.
+- Populate `machine` from systemd/kernel identity and `network` through the
+  dedicated unprivileged NetworkManager observer, with bounded reads and
+  independent validation. Its D-Bus and SELinux boundaries prevent
+  NetworkManager mutation authority from reaching the root Platform service.
 - Update `sl-platform-client`, corectl, and `sl-sessiond` to consume schema 0.3,
   and prove their observations agree for all old fields and the new management
   fields, including degraded/unavailable paths.

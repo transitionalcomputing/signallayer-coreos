@@ -1,0 +1,30 @@
+[Unit]
+Description=SignalLayerIT read-only network observer
+After=dbus.service NetworkManager.service
+Wants=NetworkManager.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.signallayer.NetworkObserver1
+ExecStart=/usr/bin/sl-network-observer
+User=sl-network-observer
+Group=sl-network-observer
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 [package]
-name = "sl-platformd"
+name = "sl-network-observer"
 version.workspace = true
 edition.workspace = true
 
@@ -8,4 +8,3 @@ sl-protocol.workspace = true
 serde_json.workspace = true
 zbus.workspace = true
 tokio.workspace = true
-libc.workspace = true

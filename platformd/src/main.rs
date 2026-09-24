@@ -1,9 +1,10 @@
 use serde_json::Value;
 use sl_protocol::{
-    Deployment, Health, HealthState, PlatformError, RollbackFailure, RollbackState, RollbackStatus,
-    Status, UpdateFailure, UpdateState, UpdateStatus, BUS, PATH, SCHEMA_VERSION,
+    Deployment, Health, HealthState, MachineStatus, NetworkStatus, PlatformError, RollbackFailure,
+    RollbackState, RollbackStatus, Status, UpdateFailure, UpdateState, UpdateStatus, BUS, PATH,
+    SCHEMA_VERSION,
 };
-use std::{collections::BTreeMap, process::Stdio, time::Duration};
+use std::{collections::BTreeMap, ffi::CStr, net::IpAddr, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
     process::Command,
@@ -17,6 +18,7 @@ use checked_interface::CheckedPlatform;
 const OUTPUT_LIMIT: u64 = 64 * 1024;
 const BACKEND_TIMEOUT: Duration = Duration::from_secs(15);
 const SYSTEMD_TIMEOUT: Duration = Duration::from_secs(3);
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(3);
 const SYSTEMD_BUS: &str = "org.freedesktop.systemd1";
 const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
 const SYSTEMD_MANAGER: &str = "org.freedesktop.systemd1.Manager";
@@ -24,6 +26,9 @@ const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
 const SYSTEMD_SERVICE: &str = "org.freedesktop.systemd1.Service";
 const UPDATE_UNIT: &str = "sl-update.service";
 const ROLLBACK_UNIT: &str = "sl-rollback.service";
+const NETWORK_OBSERVER_BUS: &str = "org.signallayer.NetworkObserver1";
+const NETWORK_OBSERVER_PATH: &str = "/org/signallayer/NetworkObserver1";
+const NETWORK_OBSERVER_INTERFACE: &str = "org.signallayer.NetworkObserver1";
 
 struct Platform {
     connection: zbus::Connection,
@@ -53,8 +58,11 @@ impl Platform {
         let release = std::fs::read_to_string("/usr/lib/signallayer/release").map_err(|_| {
             PlatformError::MetadataUnavailable("Image release metadata is unreadable".into())
         })?;
-        let backend =
-            backend_command("/usr/bin/bootc", &["status", "--json"], BACKEND_TIMEOUT).await?;
+        let machine = observe_machine()?;
+        let (backend, network) = tokio::try_join!(
+            backend_command("/usr/bin/bootc", &["status", "--json"], BACKEND_TIMEOUT),
+            observe_network(&self.connection)
+        )?;
         let manager =
             zbus::Proxy::new(&self.connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER)
                 .await
@@ -67,8 +75,15 @@ impl Platform {
         .await
         .map_err(|_| health_error())?
         .map_err(|_| health_error())?;
-        let status =
-            status_from_observations(&release, &backend, health, &update_worker, &rollback_worker)?;
+        let status = status_from_observations(
+            &release,
+            &backend,
+            machine,
+            network,
+            health,
+            &update_worker,
+            &rollback_worker,
+        )?;
         serde_json::to_string(&status).map_err(|_| invalid("Status serialization failed"))
     }
 
@@ -123,6 +138,157 @@ impl Platform {
         }
         start_worker(&self.connection, ROLLBACK_UNIT, rollback_unavailable).await
     }
+}
+
+fn machine_error(message: &str) -> PlatformError {
+    PlatformError::MachineUnavailable(message.into())
+}
+
+fn network_error() -> PlatformError {
+    PlatformError::NetworkUnavailable(
+        "NetworkManager status could not be observed or was invalid".into(),
+    )
+}
+
+fn validated_hex_id(value: &str, length: usize) -> Option<String> {
+    let value = value.trim();
+    (value.len() == length
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && value.bytes().any(|byte| byte != b'0'))
+    .then(|| value.to_owned())
+}
+
+fn validated_boot_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    let valid = value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => byte == b'-',
+            _ => byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte),
+        })
+        && value.bytes().any(|byte| byte != b'0' && byte != b'-');
+    valid.then(|| value.to_owned())
+}
+
+fn normalize_architecture(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return None;
+    }
+    Some(match value.as_str() {
+        "amd64" => "x86_64".into(),
+        "arm64" => "aarch64".into(),
+        _ => value,
+    })
+}
+
+fn observe_machine() -> Result<MachineStatus, PlatformError> {
+    let machine_id = std::fs::read_to_string("/etc/machine-id")
+        .ok()
+        .and_then(|value| validated_hex_id(&value, 32))
+        .ok_or_else(|| machine_error("The system machine ID is unavailable or invalid"))?;
+    let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .ok()
+        .and_then(|value| validated_boot_id(&value))
+        .ok_or_else(|| machine_error("The kernel boot ID is unavailable or invalid"))?;
+    let mut uts = std::mem::MaybeUninit::<libc::utsname>::uninit();
+    // SAFETY: uname initializes the supplied utsname on success, and machine is
+    // a kernel-provided NUL-terminated field in that initialized structure.
+    let architecture = unsafe {
+        if libc::uname(uts.as_mut_ptr()) != 0 {
+            return Err(machine_error(
+                "The running kernel architecture is unavailable",
+            ));
+        }
+        let uts = uts.assume_init();
+        CStr::from_ptr(uts.machine.as_ptr())
+            .to_str()
+            .ok()
+            .and_then(normalize_architecture)
+    }
+    .ok_or_else(|| machine_error("The running kernel architecture is invalid"))?;
+    Ok(MachineStatus {
+        machine_id,
+        architecture,
+        boot_id,
+    })
+}
+
+async fn observe_network(connection: &zbus::Connection) -> Result<NetworkStatus, PlatformError> {
+    timeout(NETWORK_TIMEOUT, async {
+        let observer = zbus::Proxy::new(
+            connection,
+            NETWORK_OBSERVER_BUS,
+            NETWORK_OBSERVER_PATH,
+            NETWORK_OBSERVER_INTERFACE,
+        )
+        .await?;
+        let json: String = observer.call("GetNetworkStatus", &()).await?;
+        let status: NetworkStatus = serde_json::from_str(&json)
+            .map_err(|_| zbus::Error::Failure("Invalid network observer response".into()))?;
+        validate_network_status(status)
+            .ok_or_else(|| zbus::Error::Failure("Invalid network observer response".into()))
+    })
+    .await
+    .map_err(|_| network_error())?
+    .map_err(|_| network_error())
+}
+
+fn validate_network_status(status: NetworkStatus) -> Option<NetworkStatus> {
+    let Some(primary) = status.primary_connection.as_ref() else {
+        return Some(status);
+    };
+    if primary.interface.is_empty()
+        || primary.interface.len() > 64
+        || primary
+            .interface
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+        || primary.addresses.len() > 256
+        || primary.default_gateways.len() > 32
+        || !strictly_sorted_unique(&primary.addresses)
+        || !strictly_sorted_unique(&primary.default_gateways)
+        || !primary.addresses.iter().all(|value| valid_address(value))
+        || !primary.default_gateways.iter().all(|value| {
+            value
+                .parse::<IpAddr>()
+                .is_ok_and(|parsed| parsed.to_string() == *value)
+        })
+    {
+        return None;
+    }
+    Some(status)
+}
+
+fn strictly_sorted_unique(values: &[String]) -> bool {
+    values.windows(2).all(|pair| pair[0] < pair[1])
+}
+
+fn valid_address(value: &str) -> bool {
+    let Some((address, prefix)) = value.split_once('/') else {
+        return false;
+    };
+    if prefix.contains('/') {
+        return false;
+    }
+    let Ok(address) = address.parse::<IpAddr>() else {
+        return false;
+    };
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    let valid_prefix = if address.is_ipv4() {
+        prefix <= 32
+    } else {
+        prefix <= 128
+    };
+    valid_prefix && format!("{address}/{prefix}") == value
 }
 
 fn update_unavailable() -> PlatformError {
@@ -398,6 +564,8 @@ fn deployment(value: &Value) -> Result<Deployment, PlatformError> {
 fn status_from_observations(
     release: &str,
     backend: &[u8],
+    machine: MachineStatus,
+    network: NetworkStatus,
     health: Health,
     update_worker: &WorkerObservation,
     rollback_worker: &WorkerObservation,
@@ -478,6 +646,8 @@ fn status_from_observations(
         platform_api_version: required("PLATFORM_API_VERSION")?.into(),
         source_revision: optional("SOURCE_REVISION"),
         build_id: optional("BUILD_ID"),
+        machine,
+        network,
         booted,
         retained_rollback,
         update,
@@ -591,6 +761,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sl_protocol::{NetworkState, PrimaryConnection};
     const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.1\"\nPLATFORM_API_VERSION=\"0.1\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
     fn fixture() -> Value {
         serde_json::json!({"apiVersion":"org.containers.bootc/v1", "kind":"BootcHost", "status": {
@@ -607,10 +778,29 @@ mod tests {
             exit_status,
         }
     }
+    fn machine() -> MachineStatus {
+        MachineStatus {
+            machine_id: "0123456789abcdef0123456789abcdef".into(),
+            architecture: "x86_64".into(),
+            boot_id: "01234567-89ab-cdef-0123-456789abcdef".into(),
+        }
+    }
+    fn network() -> NetworkStatus {
+        NetworkStatus {
+            state: NetworkState::ConnectedGlobal,
+            primary_connection: Some(PrimaryConnection {
+                interface: "enp0s2".into(),
+                addresses: vec!["10.0.2.15/24".into()],
+                default_gateways: vec!["10.0.2.2".into()],
+            }),
+        }
+    }
     fn parse(value: Value) -> Result<Status, PlatformError> {
         status_from_observations(
             RELEASE,
             &serde_json::to_vec(&value).unwrap(),
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
             &worker("inactive", "success", 0),
@@ -644,6 +834,8 @@ mod tests {
         assert!(status_from_observations(
             RELEASE,
             b"broken",
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
             &worker("inactive", "success", 0)
@@ -652,6 +844,8 @@ mod tests {
         assert!(status_from_observations(
             "",
             &serde_json::to_vec(&fixture()).unwrap(),
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
             &worker("inactive", "success", 0)
@@ -672,6 +866,8 @@ mod tests {
         let status = status_from_observations(
             RELEASE,
             &backend,
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
             &worker("inactive", "success", 0),
@@ -687,6 +883,8 @@ mod tests {
         let running = status_from_observations(
             RELEASE,
             &backend,
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("activating", "success", 0),
             &worker("inactive", "success", 0),
@@ -698,6 +896,8 @@ mod tests {
         let failed = status_from_observations(
             RELEASE,
             &backend,
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("failed", "exit-code", 1),
             &worker("inactive", "success", 0),
@@ -736,6 +936,8 @@ mod tests {
         let running = status_from_observations(
             RELEASE,
             &backend,
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
             &worker("activating", "success", 0),
@@ -746,6 +948,8 @@ mod tests {
         let failed = status_from_observations(
             RELEASE,
             &backend,
+            machine(),
+            network(),
             observed_health("running".into(), 0),
             &worker("inactive", "success", 0),
             &worker("failed", "exit-code", 1),
@@ -789,6 +993,53 @@ mod tests {
             observed_health("degraded".into(), 0).state,
             HealthState::Degraded
         );
+    }
+
+    #[test]
+    fn machine_observations_are_strict_and_normalized() {
+        assert!(validated_hex_id("0123456789ABCDEF0123456789ABCDEF\n", 32).is_none());
+        assert_eq!(
+            validated_hex_id("0123456789abcdef0123456789abcdef\n", 32).as_deref(),
+            Some("0123456789abcdef0123456789abcdef")
+        );
+        assert!(validated_hex_id("00000000000000000000000000000000", 32).is_none());
+        assert!(validated_hex_id("not-a-machine-id", 32).is_none());
+        assert!(validated_boot_id("01234567-89AB-CDEF-0123-456789ABCDEF\n").is_none());
+        assert_eq!(
+            validated_boot_id("01234567-89ab-cdef-0123-456789abcdef\n").as_deref(),
+            Some("01234567-89ab-cdef-0123-456789abcdef")
+        );
+        assert!(validated_boot_id("00000000-0000-0000-0000-000000000000").is_none());
+        assert!(validated_boot_id("0123456789abcdef0123456789abcdef").is_none());
+        assert_eq!(normalize_architecture("AMD64\n").as_deref(), Some("x86_64"));
+        assert_eq!(normalize_architecture("arm64").as_deref(), Some("aarch64"));
+        assert!(normalize_architecture("x86 64").is_none());
+    }
+
+    #[test]
+    fn helper_network_status_is_independently_validated() {
+        assert!(validate_network_status(network()).is_some());
+
+        let mut invalid = network();
+        invalid.primary_connection.as_mut().unwrap().interface = "bad interface".into();
+        assert!(validate_network_status(invalid).is_none());
+
+        let mut invalid = network();
+        invalid.primary_connection.as_mut().unwrap().addresses =
+            vec!["192.0.2.2/24".into(), "10.0.2.15/24".into()];
+        assert!(validate_network_status(invalid).is_none());
+
+        let mut invalid = network();
+        invalid.primary_connection.as_mut().unwrap().addresses = vec!["10.0.2.15/33".into()];
+        assert!(validate_network_status(invalid).is_none());
+
+        let mut invalid = network();
+        invalid
+            .primary_connection
+            .as_mut()
+            .unwrap()
+            .default_gateways = vec!["2001:0db8::1".into()];
+        assert!(validate_network_status(invalid).is_none());
     }
     #[tokio::test]
     async fn backend_unavailable_and_timeout_are_distinct() {

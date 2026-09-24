@@ -17,6 +17,10 @@ collect session_rollback_denied runuser -u sl-sessiond -- busctl --system --auto
 collect session_platform_stop systemctl stop sl-platformd.service
 collect session_unavailable busctl --system --auto-start=no call org.signallayer.Session1 /org/signallayer/Session1 org.signallayer.Session1 GetPlatformStatus
 collect session_active_during_platform_failure systemctl is-active sl-sessiond.service
+# Earlier failure-path checks deliberately restart Platform enough times to
+# reach systemd's start throttle on fast KVM hosts. Clear only that test-created
+# counter before proving the existing Session recovery path.
+collect session_platform_reset_failed systemctl reset-failed sl-platformd.service
 collect session_platform_restart systemctl start sl-platformd.service
 collect session_recovered_status busctl --system --auto-start=no --json=short call org.signallayer.Session1 /org/signallayer/Session1 org.signallayer.Session1 GetPlatformStatus
 collect session_final_system_state systemctl is-system-running
