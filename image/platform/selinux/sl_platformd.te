@@ -96,6 +96,13 @@ allow sl_platformd_t self:dbus acquire_svc;
 init_dbus_chat(sl_platformd_t)
 allow sl_sessiond_t sl_platformd_t:dbus send_msg;
 allow sl_platformd_t sl_sessiond_t:dbus send_msg;
+# Read-only NetworkManager status: the daemon sends property requests and
+# NetworkManager sends replies. No NetworkManager service control is granted.
+gen_require(`
+    type NetworkManager_t;
+')
+allow sl_platformd_t NetworkManager_t:dbus send_msg;
+allow NetworkManager_t sl_platformd_t:dbus send_msg;
 # PID 1 separately checks status permission for read-only Manager properties.
 # bootc also stats packaged units: metadata only, without unit contents/control.
 init_status(sl_platformd_t)

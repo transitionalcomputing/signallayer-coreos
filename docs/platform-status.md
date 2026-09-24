@@ -5,7 +5,7 @@ requests are separate bounded methods described in their lifecycle documents.
 
 System D-Bus service and interface: `org.signallayer.Platform1`.
 Object path: `/org/signallayer/Platform1`.
-Method: `GetStatus() -> s`, containing a JSON object with `schema_version: "0.2"`.
+Method: `GetStatus() -> s`, containing a JSON object with `schema_version: "0.3"`.
 Rust definitions and the client proxy are shared in `crates/protocol`.
 `corectl status` formats this observation; `corectl status --json` emits it.
 Neither client mode reconstructs status from guest files or backend commands.
@@ -16,6 +16,14 @@ The response contains:
 - `source_revision`, `build_id`: installed metadata, or JSON null when missing
   or `unknown`. A dirty build uses a base revision with a dirty marker and a
   build ID derived from the recorded source-file manifest, not a false clean revision.
+- `machine`: validated systemd machine ID, normalized running-kernel
+  architecture, and current kernel boot ID. Missing or malformed authoritative
+  values fail the request; no identity is synthesized.
+- `network`: NetworkManager's documented global state and nullable primary
+  connection. A primary connection contains one interface plus sorted,
+  de-duplicated address/prefix and default-gateway strings. These properties
+  come only from NetworkManager D-Bus and do not expose object paths, DNS,
+  routes, MAC addresses, or secrets.
 - `booted`: `deployment_id` (opaque), `image_reference`, `image_digest`.
   The daemon uses supported `bootc status --json`; on the current OSTree backend
   the opaque identifier combines observed checksum and deployment serial.
@@ -39,11 +47,14 @@ Backend execution uses a fixed absolute executable and arguments, no shell,
 15-second deadline, 64 KiB limits on each output stream, and kill/reap on timeout.
 Only one observation is in flight; concurrent calls receive `Busy` rather than
 starting unbounded privileged subprocesses. Health reads have a three-second
-shared deadline; the CLI has a 25-second D-Bus method deadline.
+shared deadline. NetworkManager reads have a separate three-second deadline and
+run concurrently with bootc status so the CLI's existing 25-second D-Bus method
+deadline remains unchanged.
 
 D-Bus errors use prefix `org.signallayer.Platform1.Error` with suffixes
 `BackendUnavailable`, `BackendTimeout`, `InvalidBackendData`,
-`MetadataUnavailable`, `HealthUnavailable`, `UpdateUnavailable`,
+`MetadataUnavailable`, `MachineUnavailable`, `NetworkUnavailable`,
+`HealthUnavailable`, `UpdateUnavailable`,
 `RollbackUnavailable`, `Conflict`, or `Busy`. They contain concise
 messages without backend output. Backend diagnostics go to the journal.
 A failed CLI returns nonzero; human errors go to stderr, while `--json` emits
@@ -93,3 +104,10 @@ is injected by temporarily hiding bootc only in the daemon's systemd mount
 namespace; no image binary or SELinux policy is changed. Test configuration
 exists only in the disposable guest overlay. Serial, commands, journal and
 machine evidence remain in ignored `image/build/output/`.
+
+For Phase 4C, use `--phase4c --accel kvm --cpus 2 --timeout 1800` with the
+same disk and OVMF arguments. This retains the Phase 4B checks and verifies
+schema 0.3 against `/etc/machine-id`, kernel `uname` and boot ID, and direct
+NetworkManager D-Bus properties. It also compares direct Platform, `corectl`,
+and Session1 JSON, verifies deterministic network arrays, confirms Platform API
+0.1 and the absence of `StartReboot`, and checks for related SELinux denials.

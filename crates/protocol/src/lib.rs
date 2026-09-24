@@ -1,10 +1,10 @@
-//! The Phase 3A status contract. Backend storage details are deliberately absent.
+//! The local Platform status contract. Backend storage details are deliberately absent.
 use serde::{Deserialize, Serialize};
 
 pub const BUS: &str = "org.signallayer.Platform1";
 pub const PATH: &str = "/org/signallayer/Platform1";
 pub const INTERFACE: &str = "org.signallayer.Platform1";
-pub const SCHEMA_VERSION: &str = "0.2";
+pub const SCHEMA_VERSION: &str = "0.3";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -15,11 +15,47 @@ pub struct Status {
     pub platform_api_version: String,
     pub source_revision: Option<String>,
     pub build_id: Option<String>,
+    pub machine: MachineStatus,
+    pub network: NetworkStatus,
     pub booted: Deployment,
     pub retained_rollback: Option<Deployment>,
     pub update: UpdateStatus,
     pub rollback: RollbackStatus,
     pub health: Health,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MachineStatus {
+    pub machine_id: String,
+    pub architecture: String,
+    pub boot_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkStatus {
+    pub state: NetworkState,
+    pub primary_connection: Option<PrimaryConnection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkState {
+    Unknown,
+    Disconnected,
+    Connecting,
+    ConnectedLocal,
+    ConnectedSite,
+    ConnectedGlobal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PrimaryConnection {
+    pub interface: String,
+    pub addresses: Vec<String>,
+    pub default_gateways: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,6 +139,8 @@ pub enum PlatformError {
     InvalidBackendData(String),
     MetadataUnavailable(String),
     HealthUnavailable(String),
+    MachineUnavailable(String),
+    NetworkUnavailable(String),
     UpdateUnavailable(String),
     RollbackUnavailable(String),
     Conflict(String),

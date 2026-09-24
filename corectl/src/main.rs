@@ -120,6 +120,29 @@ async fn main() -> ExitCode {
             status.booted.image_digest.as_deref().unwrap_or("unknown"),
             status.retained_rollback.as_ref().map(|deployment| deployment.deployment_id.as_str()).unwrap_or("none"),
             status.health.state, status.health.system_state, status.health.failed_units);
+        println!(
+            "Machine: {} ({}; boot {})",
+            status.machine.machine_id, status.machine.architecture, status.machine.boot_id
+        );
+        println!("Network: {:?}", status.network.state);
+        if let Some(primary) = &status.network.primary_connection {
+            println!(
+                "Primary connection: {}\nAddresses: {}\nDefault gateways: {}",
+                primary.interface,
+                if primary.addresses.is_empty() {
+                    "none".into()
+                } else {
+                    primary.addresses.join(", ")
+                },
+                if primary.default_gateways.is_empty() {
+                    "none".into()
+                } else {
+                    primary.default_gateways.join(", ")
+                }
+            );
+        } else {
+            println!("Primary connection: none");
+        }
         println!("Update: {update}");
         println!("Rollback: {rollback}");
     }

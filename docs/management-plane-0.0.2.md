@@ -1,6 +1,6 @@
 # SignalLayer CoreOS 0.0.2 management-plane contract
 
-**Status:** Phase 4A contract; Phase 4B validated
+**Status:** Phase 4A contract; Phases 4B and 4C validated
 **Release:** SignalLayer CoreOS 0.0.2
 **Platform API:** 0.2
 **Status schema:** 0.3
@@ -300,6 +300,10 @@ and KVM checks while retaining Platform API 0.1 and status schema 0.2.
   no persistence is added and no API or schema version changes occur.
 
 ### 4C — management/status surface
+
+**Validated:** status schema 0.3 machine and NetworkManager observations passed
+focused unit, policy, image, offline disk, and KVM checks while Platform API
+remained at 0.1. Direct Platform, `corectl`, and Session1 results agreed.
 
 - Implement status schema 0.3 while Platform API remains at 0.1; do not add
   `StartReboot`.

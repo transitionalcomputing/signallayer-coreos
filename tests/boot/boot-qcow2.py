@@ -5,8 +5,10 @@ import base64
 import configparser
 import gzip
 import hashlib
+import ipaddress
 import json
 import platform
+import re
 import shlex
 import shutil
 import socket
@@ -133,7 +135,7 @@ def evaluate(evidence, expected_release, expected_manifest):
     return checks
 
 
-def evaluate_platform(evidence, expected_release):
+def evaluate_platform(evidence, expected_release, status_schema="0.2"):
     def text(key):
         return evidence.get(key, {}).get("output", "").strip()
 
@@ -173,7 +175,7 @@ def evaluate_platform(evidence, expected_release):
                     "image_reference": image["image"]["image"] if image else None,
                     "image_digest": image["imageDigest"] if image else None}
 
-        expected = {"schema_version": "0.2", "product": release["NAME"], "version": release["VERSION"],
+        expected = {"schema_version": status_schema, "product": release["NAME"], "version": release["VERSION"],
                     "platform_api_version": release["PLATFORM_API_VERSION"],
                     "source_revision": None if release.get("SOURCE_REVISION", "unknown") == "unknown" else release["SOURCE_REVISION"],
                     "build_id": None if release.get("BUILD_ID", "unknown") == "unknown" else release["BUILD_ID"],
@@ -184,6 +186,10 @@ def evaluate_platform(evidence, expected_release):
                     "rollback": {"state": "idle", "reboot_required": False,
                                  "failure": None},
                     "health": {"state": "healthy", "system_state": "running", "failed_units": 0}}
+        if status_schema == "0.3":
+            observed = json.loads(text("platform_json"))
+            expected["machine"] = observed["machine"]
+            expected["network"] = observed["network"]
         for key in ("platform_json", "platform_unprivileged_json", "platform_final_json"):
             checks[key + "_matches_observations"] = ok(key) and json.loads(text(key)) == expected
         for key, code in (("platform_service_error", "ServiceUnavailable"), ("platform_backend_error", "BackendUnavailable"), ("platform_capability_error", "BackendUnavailable")):
@@ -194,7 +200,7 @@ def evaluate_platform(evidence, expected_release):
     return checks
 
 
-def evaluate_session(evidence):
+def evaluate_session(evidence, status_schema="0.2"):
     def text(key):
         return evidence.get(key, {}).get("output", "").strip()
 
@@ -233,7 +239,7 @@ def evaluate_session(evidence):
         session_status = session_payload("session_status")
         unprivileged_status = session_payload("session_unprivileged_status")
         recovered_status = session_payload("session_recovered_status")
-        checks["session_status_schema_0_2"] = ok("session_status") and session_status.get("schema_version") == "0.2" and session_status.get("platform_api_version") == "0.1"
+        checks["session_status_schema"] = ok("session_status") and session_status.get("schema_version") == status_schema and session_status.get("platform_api_version") == "0.1"
         checks["session_status_matches_platform"] = ok("session_platform_status") and platform_status == session_status == unprivileged_status == recovered_status
     except (ValueError, KeyError, TypeError):
         checks["session_evidence_valid"] = False
@@ -267,6 +273,127 @@ def evaluate_session(evidence):
         and text("session_unavailable") == "Call failed: Platform status is temporarily unavailable"
     )
     checks["session_no_selinux_denials"] = ok("session_audit") and not any("avc:" in line.lower() and "denied" in line.lower() and "sl_sessiond_t" in line for line in text("session_audit").splitlines())
+    return checks
+
+
+def evaluate_management(evidence):
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    checks = {}
+    try:
+        def payload(key):
+            envelope = json.loads(text(key))
+            if envelope.get("type") != "s" or len(envelope.get("data", [])) != 1:
+                raise ValueError("invalid busctl JSON envelope")
+            return json.loads(envelope["data"][0])
+
+        status = json.loads(text("platform_json"))
+        direct = payload("management_platform_status")
+        session = payload("session_status")
+        checks["management_consumers_agree"] = (
+            ok("platform_json") and ok("management_platform_status")
+            and ok("session_status") and status == direct == session
+        )
+        checks["management_versions"] = (
+            status["schema_version"] == "0.3"
+            and status["platform_api_version"] == "0.1"
+        )
+        machine = status["machine"]
+        checks["management_machine_identity"] = (
+            ok("management_machine_id")
+            and re.fullmatch(r"[0-9a-f]{32}", machine["machine_id"]) is not None
+            and machine["machine_id"] == text("management_machine_id")
+        )
+        checks["management_architecture"] = (
+            ok("management_architecture")
+            and machine["architecture"] == text("management_architecture")
+        )
+        checks["management_boot_identity"] = (
+            ok("management_boot_id")
+            and re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", machine["boot_id"]) is not None
+            and machine["boot_id"] == text("management_boot_id")
+        )
+
+        properties = {}
+        for line in text("management_networkmanager_reference").splitlines():
+            key, value = line.split("=", 1)
+            properties[key] = value
+        state_number = int(shlex.split(properties["state"])[1])
+        state_map = {10: "disconnected", 20: "disconnected", 30: "disconnected",
+                     40: "connecting", 50: "connected_local", 60: "connected_site",
+                     70: "connected_global"}
+        network = status["network"]
+        checks["management_network_state"] = (
+            ok("management_networkmanager_reference")
+            and network["state"] == state_map.get(state_number, "unknown")
+        )
+        primary_path = shlex.split(properties["primary"])[1]
+        primary = network["primary_connection"]
+        if primary_path == "/":
+            checks["management_primary_connection"] = primary is None
+            checks["management_network_deterministic"] = True
+        else:
+            devices = shlex.split(properties["devices"])
+            interface = shlex.split(properties["interface"])[1]
+            checks["management_primary_connection"] = (
+                primary is not None and devices[0] == "ao" and int(devices[1]) == 1
+                and primary["interface"] == interface
+            )
+
+            expected_addresses = []
+            for family in ("ip4", "ip6"):
+                raw = properties.get(family + "_addresses", "")
+                matches = re.findall(
+                    r'"address"\s+s\s+"([^"]+)"\s+"prefix"\s+u\s+(\d+)', raw
+                )
+                for address, prefix in matches:
+                    expected_addresses.append(f"{ipaddress.ip_address(address)}/{int(prefix)}")
+            expected_addresses = sorted(set(expected_addresses))
+
+            expected_gateways = []
+            for family, default in (("ip4", "default4"), ("ip6", "default6")):
+                if shlex.split(properties.get(default, "b false"))[1] != "true":
+                    continue
+                gateway = shlex.split(properties.get(family + "_gateway", 's ""'))[1]
+                if gateway:
+                    expected_gateways.append(str(ipaddress.ip_address(gateway)))
+            expected_gateways = sorted(set(expected_gateways))
+            checks["management_network_addresses"] = primary["addresses"] == expected_addresses
+            checks["management_default_gateways"] = primary["default_gateways"] == expected_gateways
+            checks["management_network_deterministic"] = (
+                primary["addresses"] == sorted(set(primary["addresses"]))
+                and primary["default_gateways"] == sorted(set(primary["default_gateways"]))
+            )
+    except (ValueError, KeyError, TypeError, IndexError):
+        checks["management_evidence_valid"] = False
+    introspection = text("management_platform_introspection")
+    introspection_has_no_reboot = (
+        ok("management_platform_introspection") and "StartReboot" not in introspection
+    )
+    # The installed broker policy authorizes the three exact Platform methods,
+    # so it may reject generic Introspect. The source-level interface audit and
+    # successful schema 0.3 call establish the Phase 4C surface in that case.
+    introspection_is_blocked = (
+        not ok("management_platform_introspection")
+        and "access denied" in introspection.lower()
+    )
+    checks["management_no_phase4d_api"] = (
+        ok("management_platform_status")
+        and (introspection_has_no_reboot or introspection_is_blocked)
+    )
+    checks["management_no_selinux_denials"] = (
+        ok("management_audit")
+        and not any(
+            "avc:" in line.lower() and "denied" in line.lower()
+            and ('comm="sl-platformd"' in line or "networkmanager_t" in line.lower()
+                 or "sl_sessiond_t" in line)
+            for line in text("management_audit").splitlines()
+        )
+    )
     return checks
 
 
@@ -601,6 +728,7 @@ def main():
     parser.add_argument("--phase3a", action="store_true", help="Also validate the read-only platform service and CLI")
     parser.add_argument("--phase3b", action="store_true", help="Retain Phase 3A checks and validate confinement, bus boundaries and recovery")
     parser.add_argument("--phase4b", action="store_true", help="Retain Phase 3A checks and validate the unprivileged Session1 status path")
+    parser.add_argument("--phase4c", action="store_true", help="Retain Phase 4B checks and validate status schema 0.3 management facts")
     parser.add_argument("--policy-tools-image", default="localhost/slit-policy-tools:phase3b", help="Native setools build-stage image for analyzing the guest's loaded policy")
     parser.add_argument("--source-release", type=Path)
     parser.add_argument("--source-image", type=Path)
@@ -615,10 +743,13 @@ def main():
         args.phase3a = True
     if args.phase4b:
         args.phase3a = True
+    if args.phase4c:
+        args.phase4b = True
+        args.phase3a = True
     output = Path(__file__).resolve().parents[2] / "image/build/output"
     output.mkdir(parents=True, exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
-    report = {"phase": "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
+    run = Path(tempfile.mkdtemp(prefix="phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
+    report = {"phase": "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
     process = None
     qmp = None
     disk_hash = None
@@ -704,6 +835,10 @@ collect security_initial_failed_details sh -c 'systemctl --failed --no-legend --
             extension = Path(__file__).with_name("guest-session-probe.sh")
             probe = probe.replace(marker, extension.read_text() + "\n" + marker)
             report["session_probe_sha256"] = checksum(extension)
+        if args.phase4c:
+            extension = Path(__file__).with_name("guest-management-probe.sh")
+            probe = probe.replace(marker, extension.read_text() + "\n" + marker)
+            report["management_probe_sha256"] = checksum(extension)
         unit = """[Unit]
 Description=Temporary CoreOS boot evidence probe
 DefaultDependencies=no
@@ -756,12 +891,16 @@ StandardError=journal+console
             if "complete" in evidence:
                 report["checks"] = evaluate(evidence, expected_release, expected_manifest)
                 if args.phase3a:
-                    report["checks"].update(evaluate_platform(evidence, expected_release))
+                    report["checks"].update(evaluate_platform(
+                        evidence, expected_release, "0.3" if args.phase4c else "0.2"))
                 if args.phase3b:
                     report["checks"].update(evaluate_hardening(evidence))
                     report["checks"].update(inspect_loaded_policy(evidence, run, args.policy_tools_image))
                 if args.phase4b:
-                    report["checks"].update(evaluate_session(evidence))
+                    report["checks"].update(evaluate_session(
+                        evidence, "0.3" if args.phase4c else "0.2"))
+                if args.phase4c:
+                    report["checks"].update(evaluate_management(evidence))
                 (run / "guest-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
                 break
             time.sleep(0.25)
