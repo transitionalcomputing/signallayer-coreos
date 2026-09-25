@@ -63,6 +63,24 @@ call to be rejected by the broker; and analyzes the loaded SELinux policy to
 prove `sl_platformd_t` has no direct NetworkManager message permission. Evidence
 is saved under an ignored `image/build/output/phase4c-*` directory.
 
+For Phase 4D, add `--phase4d --accel kvm --cpus 2 --timeout 1800`. This retains
+the Phase 4C suite with Platform API 0.2 and allows exactly one in-guest reboot
+in the same QEMU process (only 4D omits `-no-reboot`); serial and evidence
+capture continue across it. In BOOT_1, after the existing probes, a non-root
+`StartReboot` from the `sl-sessiond` UID must be denied by bus policy with
+`org.freedesktop.DBus.Error.AccessDenied`. The probe then records the BOOT_1
+`boot_id` on the run overlay and runs `corectl reboot`; exit 0, exit 3 or an
+uncaptured exit status is accepted only if BOOT_2 follows. The same probe runs
+again in BOOT_2, finds the recorded `boot_id`, and writes `post_` records only.
+Required 4D checks: the boot_id changed and links to BOOT_1; QMP logged
+exactly one `RESET`; Platform API 0.2 and status schema 0.3; Platform and
+Session1 status agree; SELinux is Enforcing; no failed units; and the booted
+deployment, update, rollback and retained-rollback state are unchanged. The
+Phase 4C `management_no_phase4d_api` check is replaced by
+`management_platform_api_0_2_reboot_accepted`. Evidence is saved under an
+ignored `image/build/output/phase4d-*` directory. The harness's pure 4D logic
+has standard-library tests: `python3 -m unittest discover -s tests/boot -p 'test_*.py'`.
+
 The probe uses existing systemd
 [hypervisor credentials](https://systemd.io/CREDENTIALS/) and
 [temporary unit support](https://github.com/systemd/systemd/blob/v259/man/systemd-debug-generator.xml).

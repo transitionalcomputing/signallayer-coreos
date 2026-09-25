@@ -200,7 +200,7 @@ def evaluate_platform(evidence, expected_release, status_schema="0.2"):
     return checks
 
 
-def evaluate_session(evidence, status_schema="0.2"):
+def evaluate_session(evidence, status_schema="0.2", api_version="0.1"):
     def text(key):
         return evidence.get(key, {}).get("output", "").strip()
 
@@ -239,7 +239,7 @@ def evaluate_session(evidence, status_schema="0.2"):
         session_status = session_payload("session_status")
         unprivileged_status = session_payload("session_unprivileged_status")
         recovered_status = session_payload("session_recovered_status")
-        checks["session_status_schema"] = ok("session_status") and session_status.get("schema_version") == status_schema and session_status.get("platform_api_version") == "0.1"
+        checks["session_status_schema"] = ok("session_status") and session_status.get("schema_version") == status_schema and session_status.get("platform_api_version") == api_version
         checks["session_status_matches_platform"] = ok("session_platform_status") and platform_status == session_status == unprivileged_status == recovered_status
     except (ValueError, KeyError, TypeError):
         checks["session_evidence_valid"] = False
@@ -276,7 +276,7 @@ def evaluate_session(evidence, status_schema="0.2"):
     return checks
 
 
-def evaluate_management(evidence):
+def evaluate_management(evidence, api_version="0.1"):
     def text(key):
         return evidence.get(key, {}).get("output", "").strip()
 
@@ -300,7 +300,7 @@ def evaluate_management(evidence):
         )
         checks["management_versions"] = (
             status["schema_version"] == "0.3"
-            and status["platform_api_version"] == "0.1"
+            and status["platform_api_version"] == api_version
         )
         machine = status["machine"]
         checks["management_machine_identity"] = (
@@ -812,6 +812,116 @@ def inspect_loaded_policy(evidence, run, tools_image):
     }
 
 
+PHASE4D_NETWORK_ANCHOR = "# Observe normal networking; do not create profiles or change the guest policy."
+PHASE4D_BOUNDARY_MARKER = "__SL_REBOOT_BOUNDARY_SOURCE__"
+# BOOT_1 ends with the real reboot through the product path. SIGTERM is
+# ignored so corectl's exit status can be recorded if the probe survives the
+# start of shutdown; "not captured" is also acceptable when BOOT_2 follows.
+PHASE4D_REBOOT_TAIL = """
+trap '' TERM
+collect reboot_corectl /usr/bin/corectl reboot
+exit 0
+"""
+BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+PHASE4D_CHECKS = (
+    "reboot_nonroot_uid_policy_denied", "reboot_boot_id_changed", "reboot_exactly_one_reset",
+    "reboot_corectl_outcome_acceptable", "post_platform_api_0_2", "post_status_schema_0_3",
+    "post_platform_session_agree", "post_selinux_enforcing", "post_failed_units_zero",
+    "post_booted_deployment_unchanged", "post_update_rollback_unchanged",
+    "management_platform_api_0_2_reboot_accepted",
+)
+
+
+def compose_phase4d_probe(probe, marker, pre, post, boundary):
+    """Add the BOOT_2 branch before normal probing, the BOOT_1 4D probes
+    before the completion marker, and the real reboot after it."""
+    for text, needle, name in ((probe, PHASE4D_NETWORK_ANCHOR, "network anchor"),
+                               (probe, marker, "completion marker"),
+                               (pre, PHASE4D_BOUNDARY_MARKER, "boundary marker")):
+        if text.count(needle) != 1:
+            raise RuntimeError(f"Phase 4D probe {name} is missing or ambiguous")
+    pre = pre.replace(PHASE4D_BOUNDARY_MARKER, boundary)
+    probe = probe.replace(PHASE4D_NETWORK_ANCHOR, post + "\n" + PHASE4D_NETWORK_ANCHOR)
+    probe = probe.replace(marker, pre + "\n" + marker)
+    return probe.rstrip("\n") + "\n" + PHASE4D_REBOOT_TAIL
+
+
+def qmp_events(path):
+    events = []
+    if path.exists():
+        for line in path.read_text(errors="replace").splitlines():
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict) and "event" in message:
+                events.append(message)
+    return events
+
+
+def evaluate_reboot(evidence, events):
+    """Phase 4D: one authorized real reboot, detected by boot_id."""
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    checks = dict.fromkeys(PHASE4D_CHECKS, False)
+    boot1, previous, boot2 = text("reboot_boot_id"), text("post_previous_boot_id"), text("post_boot_id")
+    boot_changed = (
+        all(ok(key) for key in ("reboot_boot_id", "post_previous_boot_id", "post_boot_id"))
+        and all(BOOT_ID.fullmatch(value) for value in (boot1, previous, boot2))
+        and boot1 == previous and boot2 != boot1
+    )
+    resets = [event for event in events if event.get("event") == "RESET"]
+    corectl = evidence.get("reboot_corectl")
+    checks["reboot_boot_id_changed"] = boot_changed
+    checks["reboot_exactly_one_reset"] = len(resets) == 1
+    checks["reboot_corectl_outcome_acceptable"] = boot_changed and (
+        corectl is None or corectl["exit_code"] in (0, 3))
+    error_name = None
+    try:
+        denial = json.loads(text("reboot_nonroot_denied"))
+        request = denial["request"]
+        error_name = denial.get("error_name")
+        checks["reboot_nonroot_uid_policy_denied"] = (
+            not ok("reboot_nonroot_denied") and denial["result"] == "method_error"
+            and error_name == "org.freedesktop.DBus.Error.AccessDenied"
+            and request["uid"] != 0 and request["member"] == "StartReboot"
+            and request["destination"] == request["interface"] == "org.signallayer.Platform1"
+            and request["path"] == "/org/signallayer/Platform1" and request["signature"] == "")
+    except (ValueError, KeyError, TypeError):
+        pass
+    try:
+        pre = json.loads(text("reboot_pre_status"))
+        post = json.loads(text("post_platform_status"))
+        envelope = json.loads(text("post_session_status"))
+        if envelope.get("type") != "s" or len(envelope.get("data", [])) != 1:
+            raise ValueError("invalid busctl JSON envelope")
+        session = json.loads(envelope["data"][0])
+        pre_ok, post_ok = ok("reboot_pre_status"), ok("post_platform_status")
+        checks["post_platform_api_0_2"] = post_ok and post["platform_api_version"] == "0.2"
+        checks["post_status_schema_0_3"] = post_ok and post["schema_version"] == "0.3"
+        checks["post_platform_session_agree"] = post_ok and ok("post_session_status") and post == session
+        checks["post_booted_deployment_unchanged"] = pre_ok and post_ok and pre["booted"] == post["booted"]
+        checks["post_update_rollback_unchanged"] = pre_ok and post_ok and all(
+            pre[key] == post[key] for key in ("update", "rollback", "retained_rollback"))
+        checks["management_platform_api_0_2_reboot_accepted"] = (
+            pre_ok and pre["platform_api_version"] == "0.2" and boot_changed)
+    except (ValueError, KeyError, TypeError, IndexError):
+        pass
+    checks["post_selinux_enforcing"] = ok("post_selinux") and text("post_selinux") == "Enforcing"
+    checks["post_failed_units_zero"] = ok("post_failed_units") and not text("post_failed_units")
+    details = {
+        "boot_ids": {"boot_1": boot1 or None, "boot_2": boot2 or None, "boot_2_previous": previous or None},
+        "reset_events": len(resets),
+        "nonroot_start_reboot_error_name": error_name,
+        "corectl_reboot_exit_code": "not captured" if corectl is None else corectl["exit_code"],
+    }
+    return checks, details
+
+
 class QMP:
     def __init__(self, path, log):
         self.socket = socket.socket(socket.AF_UNIX)
@@ -852,6 +962,7 @@ def main():
     parser.add_argument("--phase3b", action="store_true", help="Retain Phase 3A checks and validate confinement, bus boundaries and recovery")
     parser.add_argument("--phase4b", action="store_true", help="Retain Phase 3A checks and validate the unprivileged Session1 status path")
     parser.add_argument("--phase4c", action="store_true", help="Retain Phase 4B checks and validate status schema 0.3 management facts")
+    parser.add_argument("--phase4d", action="store_true", help="Retain Phase 4C checks, Platform API 0.2, and one real in-guest reboot")
     parser.add_argument("--policy-tools-image", default="localhost/slit-policy-tools:phase3b", help="Native setools build-stage image for analyzing the guest's loaded policy")
     parser.add_argument("--source-release", type=Path)
     parser.add_argument("--source-image", type=Path)
@@ -862,6 +973,8 @@ def main():
     parser.add_argument("--accel", choices=("kvm", "tcg"), default="kvm")
     parser.add_argument("--cpus", type=int, default=2, help="Guest virtual CPU count (default: 2)")
     args = parser.parse_args()
+    if args.phase4d:
+        args.phase4c = True
     if args.phase3b:
         args.phase3a = True
     if args.phase4b:
@@ -871,8 +984,8 @@ def main():
         args.phase3a = True
     output = Path(__file__).resolve().parents[2] / "image/build/output"
     output.mkdir(parents=True, exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
-    report = {"phase": "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
+    run = Path(tempfile.mkdtemp(prefix="phase4d-" if args.phase4d else "phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
+    report = {"phase": "4D" if args.phase4d else "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
     process = None
     qmp = None
     disk_hash = None
@@ -963,6 +1076,14 @@ collect security_initial_failed_details sh -c 'systemctl --failed --no-legend --
             probe = probe.replace(marker, extension.read_text() + "\n" + marker)
             report["management_probe_sha256"] = checksum(extension)
             subprocess.run(["podman", "image", "exists", args.policy_tools_image], check=True, timeout=30)
+        if args.phase4d:
+            pre = Path(__file__).with_name("guest-reboot-probe.sh")
+            post = Path(__file__).with_name("guest-reboot-post-probe.sh")
+            boundary = Path(__file__).with_name("guest-dbus-boundary.py")
+            probe = compose_phase4d_probe(probe, marker, pre.read_text(), post.read_text(), boundary.read_text())
+            report["reboot_probe_sha256"] = checksum(pre)
+            report["reboot_post_probe_sha256"] = checksum(post)
+            report["boundary_probe_sha256"] = checksum(boundary)
         unit = """[Unit]
 Description=Temporary CoreOS boot evidence probe
 DefaultDependencies=no
@@ -989,7 +1110,11 @@ StandardError=journal+console
             "-display", "none", "-monitor", "none", "-serial", f"file:{run}/serial.log",
             "-qmp", f"unix:{run}/qmp.sock,server=on,wait=off",
             "-device", "virtio-serial-pci", "-chardev", f"file,id=evidence,path={run}/guest-evidence.tsv",
-            "-device", "virtserialport,chardev=evidence,name=org.signallayer.boot-test", "-no-reboot"]
+            "-device", "virtserialport,chardev=evidence,name=org.signallayer.boot-test"]
+        # Phase 4D keeps one QEMU process across its one in-guest reboot, with
+        # serial and evidence capture continuing into BOOT_2.
+        if not args.phase4d:
+            command.append("-no-reboot")
         for name, value in credentials.items():
             encoded = base64.b64encode(value.encode()).decode()
             command += ["-smbios", f"type=11,value=io.systemd.credential.binary:{name}={encoded}"]
@@ -1012,7 +1137,7 @@ StandardError=journal+console
                 qmp = QMP(run / "qmp.sock", run / "qmp.jsonl")
                 report["qmp_boot_status"] = qmp.command("query-status")
             evidence = records(run / "guest-evidence.tsv")
-            if "complete" in evidence:
+            if ("post_complete" if args.phase4d else "complete") in evidence:
                 report["checks"] = evaluate(evidence, expected_release, expected_manifest)
                 if args.phase3a:
                     report["checks"].update(evaluate_platform(
@@ -1022,9 +1147,11 @@ StandardError=journal+console
                     report["checks"].update(inspect_loaded_policy(evidence, run, args.policy_tools_image))
                 if args.phase4b:
                     report["checks"].update(evaluate_session(
-                        evidence, "0.3" if args.phase4c else "0.2"))
+                        evidence, "0.3" if args.phase4c else "0.2",
+                        "0.2" if args.phase4d else "0.1"))
                 if args.phase4c:
-                    report["checks"].update(evaluate_management(evidence))
+                    report["checks"].update(evaluate_management(
+                        evidence, "0.2" if args.phase4d else "0.1"))
                     report["checks"].update(inspect_management_policy(
                         evidence, run, args.policy_tools_image))
                 (run / "guest-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
@@ -1035,6 +1162,14 @@ StandardError=journal+console
         if qmp is None:
             raise RuntimeError("No QMP connection established")
         report["qmp_final_status"] = qmp.command("query-status")
+        if args.phase4d:
+            # Events queued since BOOT_1 are logged by the final QMP read.
+            reboot_checks, report["reboot"] = evaluate_reboot(evidence, qmp_events(run / "qmp.jsonl"))
+            # The Phase 4C negative check is replaced by a positive one.
+            report["checks"].pop("management_no_phase4d_api", None)
+            # evaluate_session only records this key when parsing fails.
+            report["checks"].setdefault("session_evidence_valid", True)
+            report["checks"].update(reboot_checks)
         qmp.command("system_powerdown")
         try:
             process.wait(timeout=30)
