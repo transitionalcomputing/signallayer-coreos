@@ -102,9 +102,9 @@ to 4D, `session_platform_restored` and `session_evidence_valid`, now pass.
 
 Superseded run: `phase4d-djguo10v` (FAIL, preserved), built from and tested at
 the product commit. Its only failed check, `post_platform_session_agree`,
-compared two non-atomic live reads while IPv6 autoconfiguration was still
-converging: an address and gateway appeared between the Platform and Session1
-reads. The contract does not promise atomic reads across consumers. The harness
+compared two non-atomic live reads: the later Session1 read included an IPv6
+address and gateway absent from the earlier Platform read, consistent with IPv6
+autoconfiguration still converging (inferred, not established by the evidence). The contract does not promise atomic reads across consumers. The harness
 now requires a converged Platform, Session1, Platform read. The rerun used the
 same acceptance qcow2, verified unchanged before and after.
 
