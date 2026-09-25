@@ -183,6 +183,35 @@ The complete 0.0.2 management facts are represented as follows:
 No redundant `rollback_available`, `next_deployment`, or custom lifecycle
 database is added.
 
+### Accepted boundary: NetworkManager observer (0.0.2)
+
+Accepted for 0.0.2: SignalLayer's NetworkManager observer policy is
+read-only at the D-Bus method level. SignalLayer's bus policy denies the
+observer all methods on NetworkManager except
+`org.freedesktop.DBus.Properties.Get`, so mutation methods such as
+`Properties.Set` and `Reload` are denied by SignalLayer policy. The policy
+does not enforce property-by-property scope within `Properties.Get`; the
+observer implementation constrains which properties SignalLayer actually
+consumes. That remaining read breadth is consciously accepted for 0.0.2 and
+may be revisited in a later hardening release.
+
+Method-level enforcement is established from SignalLayer's bus policy and the
+accepted 4C runtime result. Attribution of the representative `Reload`
+denial specifically to the bus layer, and confirmation that no distro
+mandatory-context rule widens the observer's effective access, remain
+pending review of the preserved 4C evidence and distro policy.
+
+This is not property-level least privilege. The accepted claim is that
+SignalLayer's policy denies mutation authority and constrains the observer
+to read-only D-Bus access, subject to the pending effective-policy
+confirmation above.
+
+Future hardening candidates (not 0.0.2 blockers):
+- Evaluate whether narrower property-scope enforcement is worth the
+  additional complexity.
+- Consider adding an explicit JSON size cap before parsing observer output
+  in sl-platformd.
+
 ## API and schema versioning
 
 Implementation advances in this fixed sequence:
@@ -311,7 +340,8 @@ remained at 0.1. Direct Platform, `corectl`, and Session1 results agreed.
 - Implement status schema 0.3 while Platform API remains at 0.1; do not add
   `StartReboot`.
 - Populate `machine` from systemd/kernel identity and `network` through the
-  dedicated unprivileged NetworkManager observer, with bounded reads and
+  dedicated unprivileged NetworkManager observer, with bounded reads
+  (constrained by the observer implementation; see Accepted boundary) and
   independent validation. Its D-Bus and SELinux boundaries prevent
   NetworkManager mutation authority from reaching the root Platform service.
 - Update `sl-platform-client`, corectl, and `sl-sessiond` to consume schema 0.3,
