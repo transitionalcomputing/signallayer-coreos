@@ -422,6 +422,9 @@ mod tests {
         // zbus 5.19 reports an elapsed method timeout as an io::Error with
         // ErrorKind::TimedOut, converted through From.
         let timed_out = zbus::Error::from(io::Error::new(io::ErrorKind::TimedOut, "timed out"));
-        assert_eq!(map_reboot_error(timed_out), ClientError::RebootOutcomeUnknown);
+        assert_eq!(
+            map_reboot_error(timed_out),
+            ClientError::RebootOutcomeUnknown
+        );
     }
 }
