@@ -26,6 +26,7 @@ const SYSTEMD_UNIT: &str = "org.freedesktop.systemd1.Unit";
 const SYSTEMD_SERVICE: &str = "org.freedesktop.systemd1.Service";
 const UPDATE_UNIT: &str = "sl-update.service";
 const ROLLBACK_UNIT: &str = "sl-rollback.service";
+const REBOOT_UNIT: &str = "sl-reboot.service";
 const NETWORK_OBSERVER_BUS: &str = "org.signallayer.NetworkObserver1";
 const NETWORK_OBSERVER_PATH: &str = "/org/signallayer/NetworkObserver1";
 const NETWORK_OBSERVER_INTERFACE: &str = "org.signallayer.NetworkObserver1";
@@ -138,6 +139,55 @@ impl Platform {
         }
         start_worker(&self.connection, ROLLBACK_UNIT, rollback_unavailable).await
     }
+
+    async fn start_reboot(&self) -> Result<(), PlatformError> {
+        let connection = &self.connection;
+        request_reboot(
+            |unit| observe_worker(connection, unit),
+            || start_worker(connection, REBOOT_UNIT, reboot_unavailable),
+        )
+        .await
+    }
+}
+
+// Frozen 4D order: inspect update, inspect rollback, Conflict if either is
+// active, inspect the reboot worker, Busy if it is active, otherwise start it.
+// No retries and no deployment or boot-state changes.
+async fn request_reboot<Observe, Observed, Start, Started>(
+    observe: Observe,
+    start: Start,
+) -> Result<(), PlatformError>
+where
+    Observe: Fn(&'static str) -> Observed,
+    Observed: std::future::Future<Output = Result<WorkerObservation, ()>>,
+    Start: FnOnce() -> Started,
+    Started: std::future::Future<Output = Result<(), PlatformError>>,
+{
+    let update = observe(UPDATE_UNIT)
+        .await
+        .map_err(|_| reboot_unavailable())?;
+    let rollback = observe(ROLLBACK_UNIT)
+        .await
+        .map_err(|_| reboot_unavailable())?;
+    if worker_running(&update) {
+        return Err(PlatformError::Conflict(
+            "The update worker is running; reboot was not requested".into(),
+        ));
+    }
+    if worker_running(&rollback) {
+        return Err(PlatformError::Conflict(
+            "The rollback worker is running; reboot was not requested".into(),
+        ));
+    }
+    let reboot = observe(REBOOT_UNIT)
+        .await
+        .map_err(|_| reboot_unavailable())?;
+    if worker_running(&reboot) {
+        return Err(PlatformError::Busy(
+            "The reboot worker is already running".into(),
+        ));
+    }
+    start().await
 }
 
 fn machine_error(message: &str) -> PlatformError {
@@ -297,6 +347,10 @@ fn update_unavailable() -> PlatformError {
 
 fn rollback_unavailable() -> PlatformError {
     PlatformError::RollbackUnavailable("The fixed rollback worker could not be controlled".into())
+}
+
+fn reboot_unavailable() -> PlatformError {
+    PlatformError::RebootUnavailable("The fixed reboot worker could not be controlled".into())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -762,7 +816,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use sl_protocol::{NetworkState, PrimaryConnection};
-    const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.1\"\nPLATFORM_API_VERSION=\"0.1\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
+    const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.1\"\nPLATFORM_API_VERSION=\"0.2\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
     fn fixture() -> Value {
         serde_json::json!({"apiVersion":"org.containers.bootc/v1", "kind":"BootcHost", "status": {
             "booted": {"ostree":{"checksum":"a".repeat(64), "deploySerial":0},
@@ -1123,5 +1177,130 @@ mod tests {
             !std::path::Path::new(&format!("/proc/{pid}")).exists(),
             "child remains running or unreaped"
         );
+    }
+
+    const ACTIVE_STATES: [&str; 4] = ["active", "activating", "deactivating", "reloading"];
+    const IDLE_STATES: [&str; 2] = ["inactive", "failed"];
+
+    async fn run_reboot(
+        update: Result<&'static str, ()>,
+        rollback: Result<&'static str, ()>,
+        reboot: Result<&'static str, ()>,
+        start: Result<(), PlatformError>,
+    ) -> (Result<(), PlatformError>, Vec<&'static str>) {
+        let calls = std::cell::RefCell::new(Vec::new());
+        let result = request_reboot(
+            |unit| {
+                calls.borrow_mut().push(unit);
+                let state = match unit {
+                    UPDATE_UNIT => update,
+                    ROLLBACK_UNIT => rollback,
+                    REBOOT_UNIT => reboot,
+                    _ => Err(()),
+                };
+                async move { state.map(|active_state| worker(active_state, "success", 0)) }
+            },
+            || {
+                calls.borrow_mut().push("start");
+                async move { start }
+            },
+        )
+        .await;
+        (result, calls.into_inner())
+    }
+
+    #[test]
+    fn worker_activity_predicate_matches_contract() {
+        for state in ACTIVE_STATES {
+            assert!(worker_running(&worker(state, "success", 0)), "{state}");
+        }
+        for state in IDLE_STATES {
+            assert!(!worker_running(&worker(state, "success", 0)), "{state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reboot_starts_fixed_worker_after_frozen_inspection_order() {
+        let (result, calls) = run_reboot(Ok("inactive"), Ok("inactive"), Ok("inactive"), Ok(())).await;
+        assert!(result.is_ok());
+        assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT, "start"]);
+    }
+
+    #[tokio::test]
+    async fn reboot_is_busy_while_reboot_worker_is_active() {
+        for state in ACTIVE_STATES {
+            let (result, calls) = run_reboot(Ok("inactive"), Ok("inactive"), Ok(state), Ok(())).await;
+            assert!(matches!(result, Err(PlatformError::Busy(_))), "{state}");
+            assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT], "{state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn reboot_conflicts_with_active_deployment_workers() {
+        for state in ACTIVE_STATES {
+            let (result, calls) = run_reboot(Ok(state), Ok("inactive"), Ok("inactive"), Ok(())).await;
+            assert!(matches!(result, Err(PlatformError::Conflict(_))), "update {state}");
+            assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT], "update {state}");
+
+            let (result, calls) = run_reboot(Ok("inactive"), Ok(state), Ok("inactive"), Ok(())).await;
+            assert!(matches!(result, Err(PlatformError::Conflict(_))), "rollback {state}");
+            assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT], "rollback {state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_deployment_workers_do_not_conflict() {
+        for update in IDLE_STATES {
+            for rollback in IDLE_STATES {
+                let (result, calls) = run_reboot(Ok(update), Ok(rollback), Ok("inactive"), Ok(())).await;
+                assert!(result.is_ok(), "{update} {rollback}");
+                assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT, "start"]);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn conflict_takes_precedence_over_busy() {
+        for state in ACTIVE_STATES {
+            let (result, calls) = run_reboot(Ok(state), Ok("inactive"), Ok(state), Ok(())).await;
+            assert!(matches!(result, Err(PlatformError::Conflict(_))), "update {state}");
+            assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT]);
+
+            let (result, calls) = run_reboot(Ok("inactive"), Ok(state), Ok(state), Ok(())).await;
+            assert!(matches!(result, Err(PlatformError::Conflict(_))), "rollback {state}");
+            assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT]);
+        }
+    }
+
+    #[tokio::test]
+    async fn reboot_is_unavailable_when_any_required_unit_cannot_be_inspected() {
+        let (result, calls) = run_reboot(Err(()), Ok("inactive"), Ok("inactive"), Ok(())).await;
+        assert!(matches!(result, Err(PlatformError::RebootUnavailable(_))));
+        assert_eq!(calls, [UPDATE_UNIT]);
+
+        let (result, calls) = run_reboot(Ok("inactive"), Err(()), Ok("inactive"), Ok(())).await;
+        assert!(matches!(result, Err(PlatformError::RebootUnavailable(_))));
+        assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT]);
+
+        // Both deployment workers are inspected before the Conflict decision.
+        let (result, _) = run_reboot(Ok("active"), Err(()), Ok("inactive"), Ok(())).await;
+        assert!(matches!(result, Err(PlatformError::RebootUnavailable(_))));
+
+        let (result, calls) = run_reboot(Ok("inactive"), Ok("inactive"), Err(()), Ok(())).await;
+        assert!(matches!(result, Err(PlatformError::RebootUnavailable(_))));
+        assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT]);
+    }
+
+    #[tokio::test]
+    async fn reboot_start_failure_is_reboot_unavailable() {
+        let (result, calls) = run_reboot(
+            Ok("inactive"),
+            Ok("inactive"),
+            Ok("inactive"),
+            Err(reboot_unavailable()),
+        )
+        .await;
+        assert!(matches!(result, Err(PlatformError::RebootUnavailable(_))));
+        assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT, "start"]);
     }
 }

@@ -143,6 +143,7 @@ pub enum PlatformError {
     NetworkUnavailable(String),
     UpdateUnavailable(String),
     RollbackUnavailable(String),
+    RebootUnavailable(String),
     Conflict(String),
     Busy(String),
     #[zbus(error)]
@@ -158,4 +159,5 @@ pub trait Platform {
     fn get_status(&self) -> zbus::Result<String>;
     fn start_update(&self) -> zbus::Result<()>;
     fn start_rollback(&self) -> zbus::Result<()>;
+    fn start_reboot(&self) -> zbus::Result<()>;
 }
