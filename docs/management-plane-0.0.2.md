@@ -1,6 +1,6 @@
 # SignalLayer CoreOS 0.0.2 management-plane contract
 
-**Status:** Phase 4A contract; Phases 4B and 4C validated
+**Status:** Phase 4A contract; Phases 4B, 4C and 4D validated
 **Release:** SignalLayer CoreOS 0.0.2
 **Platform API:** 0.2
 **Status schema:** 0.3
@@ -268,6 +268,37 @@ and does not interrupt it. If the fixed reboot worker is already active, the
 method returns `Busy`. Failure to inspect or start the exact unit returns
 `RebootUnavailable`. Otherwise the request is accepted once by systemd.
 
+Validated behavior and limits:
+
+- **Evaluation order.** `StartReboot` first acquires the mutation-start permit.
+  If the permit is already held, it returns `Busy`, consistent with
+  `StartUpdate` and `StartRollback`. Once the permit is acquired, it inspects
+  the update worker and then the rollback worker, and returns `Conflict` if
+  either is active. It then inspects the reboot worker and returns `Busy` if it
+  is active. Once the permit is acquired, a deployment-worker `Conflict`
+  therefore takes precedence over a reboot-worker `Busy`. Any failure to
+  inspect a required unit, or to start the reboot worker, returns
+  `RebootUnavailable`.
+- **Active.** A worker is active when its `ActiveState` is anything other than
+  `inactive` or `failed`.
+- **Intended asymmetry.** `StartUpdate` and `StartRollback` return `Busy`
+  against each other; `StartReboot` returns `Conflict` against either
+  deployment worker.
+- **`corectl reboot` exit codes.** 0 means accepted; 1 means rejected or an
+  error; 3 means the outcome is unknown, because the connection closed or the
+  reply timed out while awaiting confirmation, and the system may be
+  rebooting.
+- **Repeated `StartReboot` during the shutdown window.** This is not
+  runtime-verified and is not guaranteed by this contract. No pending-shutdown
+  state is tracked in 0.0.2. Implementation analysis (4D-a1) expects systemd to
+  reject the second start, because the start uses job mode `fail` and the unit
+  conflicts with the queued shutdown; that would surface as
+  `RebootUnavailable`. This depends on systemd's transaction behavior, not on
+  `sl-platformd`, and is a documented limitation.
+- **Verification scope.** `Busy`, `Conflict` and `RebootUnavailable` are
+  verified by unit tests. The KVM acceptance run verified the accepted path,
+  the non-root denial, and the full reboot.
+
 Reboot owns no deployment policy. A staged update or queued rollback is allowed
 when no mutation worker is active; bootc/systemd's already-recorded next-boot
 selection remains authoritative. `StartReboot` neither stages an update,
@@ -354,6 +385,12 @@ restart is carried forward to 4D acceptance.
   behavior.
 
 ### 4D — controlled reboot
+
+**Validated:** fixed-unit `StartReboot`, Platform API 0.2, root-only bus policy,
+and one real reboot through `corectl reboot` passed unit and KVM checks in run
+`phase4d-6pj9cknl` (PASS, 92/92). A non-root call was denied by bus policy,
+BOOT_2 followed with a new boot ID and unchanged deployment state, and Platform
+and Session1 status agreed. See the [0.0.2 evidence register](evidence-register-0.0.2.md).
 
 - Add zero-argument `StartReboot`, root-only bus policy, the compile-time fixed
   unit name, dedicated unit-file label, and the exact fixed command above; at

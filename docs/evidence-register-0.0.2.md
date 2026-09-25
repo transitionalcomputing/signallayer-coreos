@@ -73,6 +73,46 @@ Rescued artifacts: five Phase 4C harness and source bundles preserved from
 non-durable temporary storage, listed in
 `docs/evidence/rescue-2026-09-24.sha256`.
 
+## Phase 4D
+
+Accepted run: `phase4d-6pj9cknl` (2026-09-25, KVM), PASS, 92/92 required
+checks.
+
+- Product commit: `afbc043fdf707d3da80e1a8c47d62b0958cf0598` (tree
+  `d976fe5e8712eedfb271fdd2cb187675a9e9d733`, clean).
+- Harness commit: `7f7b40151a240145a581eb0a74d251dc568f84d9` (tree
+  `c6c3072040c131aa7902aeb61c8d48a1f0f304fc`, clean). It changes only
+  `tests/boot/` relative to the product commit.
+- Acceptance qcow2 sha256:
+  `d005ba25943084f0f87346ac9dd5461da8ad21c4c866427162ee0acdf1b41a95`.
+- OCI image ID and config digest:
+  `7f08142468fbaf2ad3545ac3d2f504153e04803d66b077aa80eadfde613cb33e`.
+- Base: registry pin
+  `quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74`;
+  local image ID
+  `fd0afe29ae8ee618a20265a81d5d9ec6b032fc8912eb91a420082a197081360b`.
+
+The run confirmed Platform API 0.2 and status schema 0.3. A non-root
+`StartReboot` from the `sl-sessiond` UID was denied with
+`org.freedesktop.DBus.Error.AccessDenied`. `corectl reboot` was accepted
+(exit 0), and QMP logged exactly one reset. BOOT_2 had a new boot ID linked to
+BOOT_1, with the booted deployment and update/rollback state unchanged, SELinux
+Enforcing and no failed units. The 4C Session recovery checks carried forward
+to 4D, `session_platform_restored` and `session_evidence_valid`, now pass.
+
+Superseded run: `phase4d-djguo10v` (FAIL, preserved), built from and tested at
+the product commit. Its only failed check, `post_platform_session_agree`,
+compared two non-atomic live reads while IPv6 autoconfiguration was still
+converging: an address and gateway appeared between the Platform and Session1
+reads. The contract does not promise atomic reads across consumers. The harness
+now requires a converged Platform, Session1, Platform read. The rerun used the
+same acceptance qcow2, verified unchanged before and after.
+
+Storage: the dev VM (`phase4d-b/` and `phase4d-b2/`, with `4db.log` and
+`4db2.log`), the maintainer workstation, and the hypervisor's VM backups.
+Per-file checksums: `docs/evidence/phase4d-6pj9cknl.sha256` and
+`docs/evidence/phase4d-djguo10v.sha256`.
+
 ## Base disks
 
 Each preserved run's `boot.qcow2` is a per-run overlay. The base disk
