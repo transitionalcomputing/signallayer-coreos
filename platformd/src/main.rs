@@ -143,6 +143,7 @@ impl Platform {
     async fn start_reboot(&self) -> Result<(), PlatformError> {
         let connection = &self.connection;
         request_reboot(
+            &self.mutation_starts,
             |unit| observe_worker(connection, unit),
             || start_worker(connection, REBOOT_UNIT, reboot_unavailable),
         )
@@ -152,8 +153,10 @@ impl Platform {
 
 // Frozen 4D order: inspect update, inspect rollback, Conflict if either is
 // active, inspect the reboot worker, Busy if it is active, otherwise start it.
-// No retries and no deployment or boot-state changes.
+// The mutation-start permit shared with StartUpdate and StartRollback is held
+// for the whole evaluation. No retries and no deployment or boot-state changes.
 async fn request_reboot<Observe, Observed, Start, Started>(
+    mutation_starts: &Semaphore,
     observe: Observe,
     start: Start,
 ) -> Result<(), PlatformError>
@@ -163,6 +166,9 @@ where
     Start: FnOnce() -> Started,
     Started: std::future::Future<Output = Result<(), PlatformError>>,
 {
+    let _permit = mutation_starts.try_acquire().map_err(|_| {
+        PlatformError::Busy("A deployment mutation start is already in progress".into())
+    })?;
     let update = observe(UPDATE_UNIT)
         .await
         .map_err(|_| reboot_unavailable())?;
@@ -1189,7 +1195,9 @@ mod tests {
         start: Result<(), PlatformError>,
     ) -> (Result<(), PlatformError>, Vec<&'static str>) {
         let calls = std::cell::RefCell::new(Vec::new());
+        let mutation_starts = Semaphore::new(1);
         let result = request_reboot(
+            &mutation_starts,
             |unit| {
                 calls.borrow_mut().push(unit);
                 let state = match unit {
@@ -1202,6 +1210,8 @@ mod tests {
             },
             || {
                 calls.borrow_mut().push("start");
+                // The permit is still held when the reboot worker is started.
+                assert!(mutation_starts.try_acquire().is_err());
                 async move { start }
             },
         )
@@ -1319,5 +1329,26 @@ mod tests {
         .await;
         assert!(matches!(result, Err(PlatformError::RebootUnavailable(_))));
         assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT, "start"]);
+    }
+
+    #[tokio::test]
+    async fn reboot_is_busy_while_a_mutation_start_is_in_progress() {
+        let mutation_starts = Semaphore::new(1);
+        let _held = mutation_starts.try_acquire().unwrap();
+        let calls = std::cell::RefCell::new(Vec::new());
+        let result = request_reboot(
+            &mutation_starts,
+            |unit| {
+                calls.borrow_mut().push(unit);
+                async move { Ok::<_, ()>(worker("inactive", "success", 0)) }
+            },
+            || {
+                calls.borrow_mut().push("start");
+                async move { Ok::<(), PlatformError>(()) }
+            },
+        )
+        .await;
+        assert!(matches!(result, Err(PlatformError::Busy(_))));
+        assert!(calls.into_inner().is_empty());
     }
 }
