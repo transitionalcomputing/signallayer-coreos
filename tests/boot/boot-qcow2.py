@@ -846,6 +846,42 @@ def compose_phase4d_probe(probe, marker, pre, post, boundary):
     return probe.rstrip("\n") + "\n" + PHASE4D_REBOOT_TAIL
 
 
+SESSION_RECOVERY_OK_KEYS = (
+    "session_platform_status", "session_status", "session_unprivileged_status",
+    "session_platform_stop", "session_platform_reset_failed", "session_platform_restart",
+    "session_recovered_status",
+)
+
+
+def session_recovery_evidence_valid(evidence):
+    """Session recovery evidence must be present and valid; absence fails."""
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    if not all(evidence.get(key, {}).get("exit_code") == 0 for key in SESSION_RECOVERY_OK_KEYS):
+        return False
+    # The deliberate Platform outage must have been observed through Session1.
+    if evidence.get("session_unavailable", {}).get("exit_code") in (None, 0):
+        return False
+    try:
+        statuses = [json.loads(text("session_platform_status"))]
+        for key in ("session_status", "session_unprivileged_status", "session_recovered_status"):
+            envelope = json.loads(text(key))
+            if envelope.get("type") != "s" or len(envelope.get("data", [])) != 1:
+                return False
+            statuses.append(json.loads(envelope["data"][0]))
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
+    return all(isinstance(status, dict) and status.get("schema_version") for status in statuses)
+
+
+def corectl_reboot_outcome(corectl):
+    if corectl is None:
+        return "not captured"
+    return {0: "accepted (exit 0)", 3: "indeterminate (exit 3)"}.get(
+        corectl["exit_code"], f"rejected (exit {corectl['exit_code']})")
+
+
 def qmp_events(path):
     events = []
     if path.exists():
@@ -878,7 +914,9 @@ def evaluate_reboot(evidence, events):
     corectl = evidence.get("reboot_corectl")
     checks["reboot_boot_id_changed"] = boot_changed
     checks["reboot_exactly_one_reset"] = len(resets) == 1
-    checks["reboot_corectl_outcome_acceptable"] = boot_changed and (
+    # Andie-approved rule: exit 0, exit 3, or not captured, and only if BOOT_2
+    # followed with exactly one RESET.
+    checks["reboot_corectl_outcome_acceptable"] = boot_changed and len(resets) == 1 and (
         corectl is None or corectl["exit_code"] in (0, 3))
     error_name = None
     try:
@@ -918,6 +956,7 @@ def evaluate_reboot(evidence, events):
         "reset_events": len(resets),
         "nonroot_start_reboot_error_name": error_name,
         "corectl_reboot_exit_code": "not captured" if corectl is None else corectl["exit_code"],
+        "corectl_reboot_outcome": corectl_reboot_outcome(corectl),
     }
     return checks, details
 
@@ -1167,8 +1206,8 @@ StandardError=journal+console
             reboot_checks, report["reboot"] = evaluate_reboot(evidence, qmp_events(run / "qmp.jsonl"))
             # The Phase 4C negative check is replaced by a positive one.
             report["checks"].pop("management_no_phase4d_api", None)
-            # evaluate_session only records this key when parsing fails.
-            report["checks"].setdefault("session_evidence_valid", True)
+            # Explicit: present and valid Session recovery evidence, never a default.
+            report["checks"]["session_evidence_valid"] = session_recovery_evidence_valid(evidence)
             report["checks"].update(reboot_checks)
         qmp.command("system_powerdown")
         try:

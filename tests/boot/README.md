@@ -70,7 +70,8 @@ capture continue across it. In BOOT_1, after the existing probes, a non-root
 `StartReboot` from the `sl-sessiond` UID must be denied by bus policy with
 `org.freedesktop.DBus.Error.AccessDenied`. The probe then records the BOOT_1
 `boot_id` on the run overlay and runs `corectl reboot`; exit 0, exit 3 or an
-uncaptured exit status is accepted only if BOOT_2 follows. The same probe runs
+uncaptured exit status is accepted only if BOOT_2 follows with exactly one
+QMP `RESET`, and the report states which of the three occurred. The same probe runs
 again in BOOT_2, finds the recorded `boot_id`, and writes `post_` records only.
 Required 4D checks: the boot_id changed and links to BOOT_1; QMP logged
 exactly one `RESET`; Platform API 0.2 and status schema 0.3; Platform and

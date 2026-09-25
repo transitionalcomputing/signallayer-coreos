@@ -217,6 +217,59 @@ class RebootEvaluationTests(unittest.TestCase):
         self.assertFalse(any(checks.values()))
 
 
+def session_evidence():
+    envelope = record(json.dumps({"type": "s", "data": [json.dumps(status(BOOT_1))]}))
+    return {
+        "session_platform_status": record(json.dumps(status(BOOT_1))),
+        "session_status": copy.deepcopy(envelope),
+        "session_unprivileged_status": copy.deepcopy(envelope),
+        "session_platform_stop": record(""),
+        "session_unavailable": record("Call failed: Platform status is temporarily unavailable", 1),
+        "session_platform_reset_failed": record(""),
+        "session_platform_restart": record(""),
+        "session_recovered_status": copy.deepcopy(envelope),
+    }
+
+
+class SessionEvidenceTests(unittest.TestCase):
+    def test_present_and_valid_recovery_evidence_passes(self):
+        self.assertTrue(boot.session_recovery_evidence_valid(session_evidence()))
+
+    def test_absent_evidence_fails(self):
+        self.assertFalse(boot.session_recovery_evidence_valid({}))
+
+    def test_each_missing_record_fails(self):
+        for key in session_evidence():
+            evidence = session_evidence()
+            del evidence[key]
+            self.assertFalse(boot.session_recovery_evidence_valid(evidence), key)
+
+    def test_failed_recovery_or_unobserved_outage_fails(self):
+        for key, value in (("session_platform_restart", record("start-limit-hit", 1)),
+                           ("session_recovered_status", record("Call failed: unavailable", 1)),
+                           ("session_unavailable", record("{}", 0)),
+                           ("session_recovered_status", record("not json"))):
+            evidence = session_evidence()
+            evidence[key] = value
+            self.assertFalse(boot.session_recovery_evidence_valid(evidence), key)
+
+
+class CorectlOutcomeTests(unittest.TestCase):
+    def test_report_states_which_outcome_occurred(self):
+        for exit_code, label in ((0, "accepted (exit 0)"), (3, "indeterminate (exit 3)"),
+                                 (None, "not captured"), (1, "rejected (exit 1)")):
+            _, details = boot.evaluate_reboot(passing_evidence(exit_code), ONE_RESET)
+            self.assertEqual(details["corectl_reboot_outcome"], label)
+
+    def test_acceptable_outcomes_require_exactly_one_reset(self):
+        for exit_code in (0, 3, None):
+            for events in ([], ONE_RESET * 2):
+                checks, _ = boot.evaluate_reboot(passing_evidence(exit_code), events)
+                self.assertFalse(checks["reboot_corectl_outcome_acceptable"], (exit_code, len(events)))
+            checks, _ = boot.evaluate_reboot(passing_evidence(exit_code), ONE_RESET)
+            self.assertTrue(checks["reboot_corectl_outcome_acceptable"], exit_code)
+
+
 class QmpEventTests(unittest.TestCase):
     def test_only_events_are_counted(self):
         with tempfile.TemporaryDirectory() as directory:
