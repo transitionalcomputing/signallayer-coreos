@@ -2,16 +2,70 @@ use sl_platform_client::{ClientError, PlatformClient};
 use sl_protocol::{RollbackState, UpdateState};
 use std::process::ExitCode;
 
-fn report_error(json: bool, code: &str, message: &str) -> ExitCode {
-    if json {
-        println!(
-            "{}",
-            serde_json::json!({"error":{"code":code,"message":message}})
-        );
-    } else {
-        eprintln!("corectl: {code}: {message}");
+// Exit codes: 0 success, 1 failure, 3 reboot outcome unknown.
+const EXIT_FAILURE: u8 = 1;
+const EXIT_OUTCOME_UNKNOWN: u8 = 3;
+
+#[derive(Debug, PartialEq, Eq)]
+struct Report {
+    exit: u8,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
+impl Report {
+    fn emit(self) -> ExitCode {
+        if let Some(stdout) = self.stdout {
+            println!("{stdout}");
+        }
+        if let Some(stderr) = self.stderr {
+            eprintln!("{stderr}");
+        }
+        ExitCode::from(self.exit)
     }
-    ExitCode::FAILURE
+}
+
+fn error_report(json: bool, exit: u8, code: &str, message: &str) -> Report {
+    if json {
+        Report {
+            exit,
+            stdout: Some(serde_json::json!({"error":{"code":code,"message":message}}).to_string()),
+            stderr: None,
+        }
+    } else {
+        Report {
+            exit,
+            stdout: None,
+            stderr: Some(format!("corectl: {code}: {message}")),
+        }
+    }
+}
+
+fn report_error(json: bool, code: &str, message: &str) -> ExitCode {
+    error_report(json, EXIT_FAILURE, code, message).emit()
+}
+
+fn reboot_report(json: bool, result: &Result<(), ClientError>) -> Report {
+    match result {
+        Ok(()) => Report {
+            exit: 0,
+            stdout: Some(if json {
+                serde_json::json!({"state":"accepted"}).to_string()
+            } else {
+                "Reboot accepted by systemd. The system is restarting.".into()
+            }),
+            stderr: None,
+        },
+        Err(error @ ClientError::RebootOutcomeUnknown) if json => {
+            error_report(json, EXIT_OUTCOME_UNKNOWN, error.code(), error.message())
+        }
+        Err(error @ ClientError::RebootOutcomeUnknown) => Report {
+            exit: EXIT_OUTCOME_UNKNOWN,
+            stdout: None,
+            stderr: Some(error.message().into()),
+        },
+        Err(error) => error_report(json, EXIT_FAILURE, error.code(), error.message()),
+    }
 }
 
 fn client_error(json: bool, error: &ClientError) -> ExitCode {
@@ -31,10 +85,12 @@ async fn main() -> ExitCode {
         ["status"] | ["status", "--json"] => "status",
         ["update"] | ["update", "--json"] => "update",
         ["rollback"] | ["rollback", "--json"] => "rollback",
+        ["reboot"] | ["reboot", "--json"] => "reboot",
         _ => return report_error(
             json,
             "Usage",
-            "Usage: corectl status [--json] | corectl update [--json] | corectl rollback [--json]",
+            "Usage: corectl status [--json] | corectl update [--json] | \
+             corectl rollback [--json] | corectl reboot [--json]",
         ),
     };
     let client = match PlatformClient::connect().await {
@@ -53,6 +109,9 @@ async fn main() -> ExitCode {
             }
             Err(error) => client_error(json, &error),
         };
+    }
+    if action == "reboot" {
+        return reboot_report(json, &client.start_reboot().await).emit();
     }
     if action == "rollback" {
         return match client.start_rollback().await {
@@ -147,4 +206,71 @@ async fn main() -> ExitCode {
         println!("Rollback: {rollback}");
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepted_reboot_succeeds() {
+        assert_eq!(
+            reboot_report(false, &Ok(())),
+            Report {
+                exit: 0,
+                stdout: Some("Reboot accepted by systemd. The system is restarting.".into()),
+                stderr: None,
+            }
+        );
+        assert_eq!(
+            reboot_report(true, &Ok(())).stdout.as_deref(),
+            Some(r#"{"state":"accepted"}"#)
+        );
+    }
+
+    #[test]
+    fn rejected_reboot_reports_mapped_error_and_fails() {
+        let conflict = Err(ClientError::RemoteMethod {
+            code: "Conflict".into(),
+            message: "The update worker is running; reboot was not requested".into(),
+        });
+        assert_eq!(
+            reboot_report(false, &conflict),
+            Report {
+                exit: EXIT_FAILURE,
+                stdout: None,
+                stderr: Some(
+                    "corectl: Conflict: The update worker is running; reboot was not requested"
+                        .into()
+                ),
+            }
+        );
+        let unsupported = reboot_report(true, &Err(ClientError::Unsupported));
+        assert_eq!(unsupported.exit, EXIT_FAILURE);
+        assert!(unsupported
+            .stdout
+            .unwrap()
+            .contains(r#""code":"Unsupported""#));
+    }
+
+    #[test]
+    fn indeterminate_reboot_has_distinct_exit_and_message() {
+        let unknown = Err(ClientError::RebootOutcomeUnknown);
+        assert_eq!(
+            reboot_report(false, &unknown),
+            Report {
+                exit: EXIT_OUTCOME_UNKNOWN,
+                stdout: None,
+                stderr: Some(
+                    "Reboot request outcome unknown: connection closed while awaiting \
+                     confirmation; the system may be rebooting."
+                        .into()
+                ),
+            }
+        );
+        let json = reboot_report(true, &unknown);
+        assert_eq!(json.exit, EXIT_OUTCOME_UNKNOWN);
+        assert!(json.stdout.unwrap().contains(r#""code":"OutcomeUnknown""#));
+        assert_ne!(EXIT_OUTCOME_UNKNOWN, EXIT_FAILURE);
+    }
 }

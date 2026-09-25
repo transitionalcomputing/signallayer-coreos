@@ -1,7 +1,7 @@
-//! Focused client for the local SignalLayer Platform 0.1 D-Bus API.
+//! Focused client for the local SignalLayer Platform 0.2 D-Bus API.
 
 use sl_protocol::{PlatformProxy, Status, SCHEMA_VERSION};
-use std::{error::Error as StdError, fmt, time::Duration};
+use std::{error::Error as StdError, fmt, io, time::Duration};
 
 pub const METHOD_TIMEOUT: Duration = Duration::from_secs(25);
 
@@ -12,6 +12,8 @@ pub enum ClientError {
     RemoteMethod { code: String, message: String },
     InvalidResponse,
     UnsupportedSchema,
+    Unsupported,
+    RebootOutcomeUnknown,
 }
 
 impl ClientError {
@@ -21,6 +23,8 @@ impl ClientError {
             Self::RemoteMethod { code, .. } => code,
             Self::InvalidResponse => "InvalidResponse",
             Self::UnsupportedSchema => "UnsupportedSchema",
+            Self::Unsupported => "Unsupported",
+            Self::RebootOutcomeUnknown => "OutcomeUnknown",
         }
     }
 
@@ -31,6 +35,11 @@ impl ClientError {
             Self::RemoteMethod { message, .. } => message,
             Self::InvalidResponse => "The platform returned an invalid status response",
             Self::UnsupportedSchema => "The platform status schema is unsupported",
+            Self::Unsupported => "The platform API version does not support this operation",
+            Self::RebootOutcomeUnknown => {
+                "Reboot request outcome unknown: connection closed while awaiting confirmation; \
+                 the system may be rebooting."
+            }
         }
     }
 }
@@ -42,6 +51,35 @@ impl fmt::Display for ClientError {
 }
 
 impl StdError for ClientError {}
+
+/// The Platform API version reported in status, as `major.minor`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PlatformApiVersion {
+    pub major: u32,
+    pub minor: u32,
+}
+
+impl PlatformApiVersion {
+    pub fn parse(value: &str) -> Option<Self> {
+        let (major, minor) = value.split_once('.')?;
+        Some(Self {
+            major: version_component(major)?,
+            minor: version_component(minor)?,
+        })
+    }
+
+    /// True when this version is at least `major.minor`.
+    pub fn supports(self, major: u32, minor: u32) -> bool {
+        self >= Self { major, minor }
+    }
+}
+
+fn version_component(value: &str) -> Option<u32> {
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
+}
 
 #[derive(Clone)]
 pub struct PlatformClient {
@@ -93,6 +131,27 @@ impl PlatformClient {
             .await
             .map_err(map_bus_error)
     }
+
+    /// Requests the fixed controlled reboot. A caller must not assume
+    /// StartReboot exists below Platform API 0.2, so status is read first.
+    pub async fn start_reboot(&self) -> Result<(), ClientError> {
+        require_reboot_support(self.get_status().await)?;
+        self.proxy()
+            .await?
+            .start_reboot()
+            .await
+            .map_err(map_reboot_error)
+    }
+}
+
+fn require_reboot_support(status: Result<Status, ClientError>) -> Result<(), ClientError> {
+    let status = status?;
+    let version = PlatformApiVersion::parse(&status.platform_api_version)
+        .ok_or(ClientError::InvalidResponse)?;
+    if !version.supports(0, 2) {
+        return Err(ClientError::Unsupported);
+    }
+    Ok(())
 }
 
 fn decode_status(response: &str) -> Result<Status, ClientError> {
@@ -102,6 +161,23 @@ fn decode_status(response: &str) -> Result<Status, ClientError> {
         return Err(ClientError::UnsupportedSchema);
     }
     Ok(status)
+}
+
+// The request has already been sent when the connection closes while its
+// reply is pending, so a controlled reboot may be underway.
+fn map_reboot_error(error: zbus::Error) -> ClientError {
+    if let zbus::Error::InputOutput(io_error) = &error {
+        if matches!(
+            io_error.kind(),
+            io::ErrorKind::BrokenPipe
+                | io::ErrorKind::UnexpectedEof
+                | io::ErrorKind::ConnectionReset
+                | io::ErrorKind::ConnectionAborted
+        ) {
+            return ClientError::RebootOutcomeUnknown;
+        }
+    }
+    map_bus_error(error)
 }
 
 fn map_bus_error(error: zbus::Error) -> ClientError {
@@ -131,7 +207,7 @@ mod tests {
             "schema_version": schema_version,
             "product": "SignalLayerIT CoreOS",
             "version": "0.0.1",
-            "platform_api_version": "0.1",
+            "platform_api_version": "0.2",
             "source_revision": null,
             "build_id": null,
             "machine": {
@@ -177,7 +253,7 @@ mod tests {
     fn accepts_exact_phase_4c_schema() {
         let status = decode_status(&status_json("0.3")).expect("valid status");
         assert_eq!(status.schema_version, "0.3");
-        assert_eq!(status.platform_api_version, "0.1");
+        assert_eq!(status.platform_api_version, "0.2");
         assert_eq!(status.machine.architecture, "x86_64");
         assert_eq!(
             status.network.primary_connection.unwrap().interface,
@@ -235,6 +311,99 @@ mod tests {
         assert_eq!(
             ClientError::SystemBusUnavailable.code(),
             "ServiceUnavailable"
+        );
+    }
+
+    fn status_with_api(version: &str) -> Status {
+        let mut value: serde_json::Value = serde_json::from_str(&status_json("0.3")).unwrap();
+        value["platform_api_version"] = serde_json::json!(version);
+        decode_status(&value.to_string()).expect("status reads stay permissive")
+    }
+
+    #[test]
+    fn platform_api_versions_parse_as_major_minor() {
+        assert_eq!(
+            PlatformApiVersion::parse("0.2"),
+            Some(PlatformApiVersion { major: 0, minor: 2 })
+        );
+        assert_eq!(
+            PlatformApiVersion::parse("1.10"),
+            Some(PlatformApiVersion { major: 1, minor: 10 })
+        );
+        for invalid in ["", "0", "0.", ".2", "0.2.1", "v0.2", " 0.2", "0.+2", "0.-1", "a.b"] {
+            assert_eq!(PlatformApiVersion::parse(invalid), None, "{invalid}");
+        }
+    }
+
+    #[test]
+    fn platform_api_support_is_numeric() {
+        let supports = |value| PlatformApiVersion::parse(value).unwrap().supports(0, 2);
+        assert!(!supports("0.1"));
+        assert!(supports("0.2"));
+        assert!(supports("0.10"));
+        assert!(supports("1.0"));
+    }
+
+    #[test]
+    fn start_reboot_is_unsupported_below_platform_api_0_2() {
+        assert_eq!(
+            require_reboot_support(Ok(status_with_api("0.1"))).unwrap_err(),
+            ClientError::Unsupported
+        );
+        assert_eq!(
+            require_reboot_support(Ok(status_with_api("0.0"))).unwrap_err(),
+            ClientError::Unsupported
+        );
+        assert!(require_reboot_support(Ok(status_with_api("0.2"))).is_ok());
+        assert!(require_reboot_support(Ok(status_with_api("0.3"))).is_ok());
+    }
+
+    #[test]
+    fn unparseable_platform_api_version_is_an_invalid_response() {
+        assert_eq!(
+            require_reboot_support(Ok(status_with_api("zero.two"))).unwrap_err(),
+            ClientError::InvalidResponse
+        );
+    }
+
+    #[test]
+    fn failed_status_read_keeps_its_client_error() {
+        for error in [
+            ClientError::ServiceUnavailable,
+            ClientError::SystemBusUnavailable,
+            ClientError::UnsupportedSchema,
+            ClientError::InvalidResponse,
+        ] {
+            let expected = format!("{error:?}");
+            let actual = require_reboot_support(Err(error)).unwrap_err();
+            assert_eq!(format!("{actual:?}"), expected);
+        }
+    }
+
+    #[test]
+    fn status_reads_accept_future_platform_api_versions() {
+        assert_eq!(status_with_api("7.3").platform_api_version, "7.3");
+        assert_eq!(status_with_api("not-a-version").platform_api_version, "not-a-version");
+    }
+
+    #[test]
+    fn closed_connection_during_reboot_is_an_unknown_outcome() {
+        for kind in [
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+        ] {
+            let error = zbus::Error::InputOutput(io::Error::new(kind, "socket closed").into());
+            assert_eq!(map_reboot_error(error), ClientError::RebootOutcomeUnknown);
+        }
+        let timed_out =
+            zbus::Error::InputOutput(io::Error::new(io::ErrorKind::TimedOut, "timeout").into());
+        assert_eq!(map_reboot_error(timed_out), ClientError::ServiceUnavailable);
+        assert_eq!(
+            ClientError::RebootOutcomeUnknown.message(),
+            "Reboot request outcome unknown: connection closed while awaiting confirmation; \
+             the system may be rebooting."
         );
     }
 }

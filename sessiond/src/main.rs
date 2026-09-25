@@ -28,7 +28,9 @@ fn map_platform_error(error: ClientError) -> SessionError {
         }
         ClientError::SystemBusUnavailable
         | ClientError::ServiceUnavailable
-        | ClientError::RemoteMethod { .. } => {
+        | ClientError::RemoteMethod { .. }
+        | ClientError::Unsupported
+        | ClientError::RebootOutcomeUnknown => {
             SessionError::PlatformUnavailable("Platform status is temporarily unavailable".into())
         }
     }
