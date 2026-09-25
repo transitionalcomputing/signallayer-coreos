@@ -1,0 +1,17 @@
+a6ec0d67afb66964e8bfa50039f9443372a41eeb8cfbe408e8a6a9e46d9cca65  ./phase4d-djguo10v/OVMF_VARS.fd
+9751d847f2263a53aeb529b7349f498155ce751057dfc216e71a842a9c43aaef  ./phase4d-djguo10v/boot.qcow2
+b2e7cd0f69bddadf593985ee0601a55ca67037982de455b2b7b2e85d6e2146c3  ./phase4d-djguo10v/guest-evidence.json
+0227be45ec0d6b80774c3a00c006089b41fe559a963a1a7d8fcdec7359cd4054  ./phase4d-djguo10v/guest-evidence.tsv
+4f31f35258e477b1e0246d60ab2ebca506e51bc6122733b0cb60bb94fa337ee1  ./phase4d-djguo10v/guest-probe.sh
+dce982ae12530ebf37afddd4def7687a813851220d52e7cd94f424a50063d288  ./phase4d-djguo10v/management-loaded-policy.bin
+7a0da194f2b71b8176a129c69b469a2f1a5e620481309fca6bbf91607dc40e79  ./phase4d-djguo10v/management-policy-analysis.json
+404ceb4d713be65a62a59f5687ac5c29e5f79e705d89b15c023b18aa0d6eaf78  ./phase4d-djguo10v/probe.service
+d2a5ddc6396502eede505d9a2fda75306705fa95e26348b7a9cc8d7a0c15af41  ./phase4d-djguo10v/qemu-command.json
+095d42e21020404f88883f2551fbb2a8f314ab67fcf54771c169932d6b1a388e  ./phase4d-djguo10v/qemu-command.sh
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./phase4d-djguo10v/qemu.stderr
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./phase4d-djguo10v/qemu.stdout
+00d0fcd95f570d361f9e5b272b95dda095cfbf14a68a2915ba72b72be8d191ca  ./phase4d-djguo10v/qmp.jsonl
+8c35313fe212444e131d2d47df216b16c992de6eba527dbfbdd80d19f0a8ccf3  ./phase4d-djguo10v/report.json
+83015d63a0d68fb4abab65e2b113e5471a69902a7d77ca265ffad71d312f35f9  ./phase4d-djguo10v/serial.log
+50733bc770f66c8bb3a0b813909f0e601469032d22f1c0912ba4f5d50383563d  ./provenance.txt
+d005ba25943084f0f87346ac9dd5461da8ad21c4c866427162ee0acdf1b41a95  ./qcow2/signallayer-coreos-0.0.1-x86_64.qcow2

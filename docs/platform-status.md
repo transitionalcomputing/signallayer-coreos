@@ -1,11 +1,15 @@
 # Phase 3A read-only platform status
 
-The status observation remains read-only. Administrative update and rollback
-requests are separate bounded methods described in their lifecycle documents.
+The status observation remains read-only. Administrative update, rollback and
+reboot requests are separate bounded methods. Update and rollback are described
+in their lifecycle documents, and reboot in the
+[management-plane contract](management-plane-0.0.2.md).
 
 System D-Bus service and interface: `org.signallayer.Platform1`.
 Object path: `/org/signallayer/Platform1`.
 Method: `GetStatus() -> s`, containing a JSON object with `schema_version: "0.3"`.
+Platform API 0.2 (`platform_api_version: "0.2"`) also provides the zero-argument,
+root-only `StartReboot() -> ()`.
 Rust definitions and the client proxy are shared in `crates/protocol`.
 `corectl status` formats this observation; `corectl status --json` emits it.
 Neither client mode reconstructs status from guest files or backend commands.

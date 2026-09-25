@@ -42,7 +42,7 @@ def checked(result):
 
 
 def run(scenario):
-    if scenario not in {"own", "unsupported", "wrong-path", "wrong-interface", "invalid-signature", "status", "identity-only"}:
+    if scenario not in {"own", "unsupported", "wrong-path", "wrong-interface", "invalid-signature", "status", "identity-only", "start-reboot"}:
         raise ValueError("unknown test scenario")
     bus = pointer()
     checked(lib.sd_bus_open_system(c.byref(bus)))
@@ -60,6 +60,9 @@ def run(scenario):
         lib.sd_bus_error_free(c.byref(error))
         if uid.value != os.getuid():
             raise RuntimeError("broker UID differs from process UID")
+        # Phase 4D denial fixture only: never request a reboot as root.
+        if scenario == "start-reboot" and uid.value == 0:
+            raise RuntimeError("start-reboot is a non-root denial fixture")
         if scenario == "identity-only":
             print(json.dumps({"sender": sender.value.decode(), "uid": uid.value}), flush=True)
             return 0
@@ -77,6 +80,8 @@ def run(scenario):
             request["path"] = "/org/signallayer/WrongObject"
         elif scenario == "wrong-interface":
             request["interface"] = "org.signallayer.WrongInterface"
+        elif scenario == "start-reboot":
+            request["member"] = "StartReboot"
         elif scenario == "invalid-signature":
             request.update(signature="s", body=["unexpected"])
             arguments = [c.c_char_p(b"unexpected")]
