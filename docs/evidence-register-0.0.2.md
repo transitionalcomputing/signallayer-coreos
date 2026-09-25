@@ -16,8 +16,9 @@ Each location holds identical copies, verified by sha256:
 
 Per-file checksums: `docs/evidence/*.sha256`.
 
-Each location also holds `base/`, the base disk images that the run
-overlays are backed by.
+The dev VM and workstation copies also hold `base/`, the base disk images
+that the run overlays are backed by. On the builder, the original base
+disks remain in their build directories under `image/build/output/`.
 
 ## Phase 4A
 
