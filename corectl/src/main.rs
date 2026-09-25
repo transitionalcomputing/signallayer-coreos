@@ -275,4 +275,15 @@ mod tests {
         assert!(json.stdout.unwrap().contains(r#""code":"OutcomeUnknown""#));
         assert_ne!(EXIT_OUTCOME_UNKNOWN, EXIT_FAILURE);
     }
+
+    #[test]
+    fn timed_out_reboot_is_indeterminate() {
+        // The client maps a timed-out StartReboot reply to RebootOutcomeUnknown.
+        let report = reboot_report(false, &Err(ClientError::RebootOutcomeUnknown));
+        assert_eq!(report.exit, EXIT_OUTCOME_UNKNOWN);
+        assert_eq!(
+            report.stderr.as_deref(),
+            Some(ClientError::RebootOutcomeUnknown.message())
+        );
+    }
 }

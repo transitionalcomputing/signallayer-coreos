@@ -163,8 +163,9 @@ fn decode_status(response: &str) -> Result<Status, ClientError> {
     Ok(status)
 }
 
-// The request has already been sent when the connection closes while its
-// reply is pending, so a controlled reboot may be underway.
+// The request has already been sent when the connection closes, or the method
+// deadline expires, while its reply is pending, so a controlled reboot may be
+// underway.
 fn map_reboot_error(error: zbus::Error) -> ClientError {
     if let zbus::Error::InputOutput(io_error) = &error {
         if matches!(
@@ -173,6 +174,7 @@ fn map_reboot_error(error: zbus::Error) -> ClientError {
                 | io::ErrorKind::UnexpectedEof
                 | io::ErrorKind::ConnectionReset
                 | io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::TimedOut
         ) {
             return ClientError::RebootOutcomeUnknown;
         }
@@ -405,13 +407,21 @@ mod tests {
             let error = zbus::Error::InputOutput(io::Error::new(kind, "socket closed").into());
             assert_eq!(map_reboot_error(error), ClientError::RebootOutcomeUnknown);
         }
-        let timed_out =
-            zbus::Error::InputOutput(io::Error::new(io::ErrorKind::TimedOut, "timeout").into());
-        assert_eq!(map_reboot_error(timed_out), ClientError::ServiceUnavailable);
+        let kind = io::ErrorKind::ConnectionRefused;
+        let refused = zbus::Error::from(io::Error::new(kind, "refused"));
+        assert_eq!(map_reboot_error(refused), ClientError::ServiceUnavailable);
         assert_eq!(
             ClientError::RebootOutcomeUnknown.message(),
             "Reboot request outcome unknown: connection closed while awaiting confirmation; \
              the system may be rebooting."
         );
+    }
+
+    #[test]
+    fn timed_out_reboot_reply_is_an_unknown_outcome() {
+        // zbus 5.19 reports an elapsed method timeout as an io::Error with
+        // ErrorKind::TimedOut, converted through From.
+        let timed_out = zbus::Error::from(io::Error::new(io::ErrorKind::TimedOut, "timed out"));
+        assert_eq!(map_reboot_error(timed_out), ClientError::RebootOutcomeUnknown);
     }
 }
