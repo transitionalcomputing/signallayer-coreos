@@ -5,10 +5,16 @@ import argparse
 import base64
 import datetime
 import hashlib
+import importlib.util
 import json
 import pathlib
+import re
 import shutil
 import subprocess
+
+HERE = pathlib.Path(__file__).resolve().parent
+UNIT = b"""[Unit]\nDescription=Disposable Phase 3F lifecycle probe\nDefaultDependencies=no\nConditionPathExists=!/etc/initrd-release\nAfter=multi-user.target NetworkManager.service\n[Service]\nType=simple\nImportCredential=phase3f-probe.sh\nExecStart=/usr/bin/bash %d/phase3f-probe.sh\nStandardOutput=journal+console\nStandardError=journal+console\nTimeoutStartSec=29min\n"""
+DROPIN = b"[Unit]\nWants=phase3f-probe.service\n"
 
 
 def digest(path):
@@ -235,70 +241,28 @@ def evaluate(evidence):
     return checks
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("disk", type=pathlib.Path)
-    parser.add_argument(
-        "--ovmf-code",
-        type=pathlib.Path,
-        default=pathlib.Path("/usr/share/edk2/ovmf/OVMF_CODE.fd"),
+def credential(name, value):
+    return (
+        "type=11,value=io.systemd.credential.binary:"
+        + name
+        + "="
+        + base64.b64encode(value).decode()
     )
-    parser.add_argument(
-        "--ovmf-vars",
-        type=pathlib.Path,
-        default=pathlib.Path("/usr/share/edk2/ovmf/OVMF_VARS.fd"),
-    )
-    parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--expected-a-digest", required=True)
-    parser.add_argument("--expected-b-digest", required=True)
-    args = parser.parse_args()
-    disk = args.disk.resolve(strict=True)
-    output = pathlib.Path(__file__).resolve().parents[2] / "image/build/output"
-    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
-    run = output / f"phase3f-acceptance-{stamp}"
-    run.mkdir(parents=True)
-    probe = pathlib.Path(__file__).with_name("guest-lifecycle-probe.sh").read_bytes()
-    (run / "probe.sh").write_bytes(probe)
-    unit = b"""[Unit]\nDescription=Disposable Phase 3F lifecycle probe\nDefaultDependencies=no\nConditionPathExists=!/etc/initrd-release\nAfter=multi-user.target NetworkManager.service\n[Service]\nType=simple\nImportCredential=phase3f-probe.sh\nExecStart=/usr/bin/bash %d/phase3f-probe.sh\nStandardOutput=journal+console\nStandardError=journal+console\nTimeoutStartSec=29min\n"""
-    dropin = b"[Unit]\nWants=phase3f-probe.service\n"
-    overlay = run / "complete-lifecycle.qcow2"
-    subprocess.run(
-        [
-            "qemu-img",
-            "create",
-            "-f",
-            "qcow2",
-            "-F",
-            "qcow2",
-            "-b",
-            str(disk),
-            str(overlay),
-        ],
-        check=True,
-    )
-    variables = run / "OVMF_VARS.fd"
-    shutil.copyfile(args.ovmf_vars, variables)
 
-    def credential(name, value):
-        return (
-            "type=11,value=io.systemd.credential.binary:"
-            + name
-            + "="
-            + base64.b64encode(value).decode()
-        )
 
-    command = [
+def qemu_command(ovmf_code, variables, overlay, run, probe, cpus=4):
+    return [
         "qemu-system-x86_64",
         "-machine",
         "q35,accel=kvm",
         "-cpu",
         "host",
         "-smp",
-        "4",
+        str(cpus),
         "-m",
         "4096",
         "-drive",
-        f"if=pflash,format=raw,readonly=on,file={args.ovmf_code.resolve()}",
+        f"if=pflash,format=raw,readonly=on,file={ovmf_code}",
         "-drive",
         f"if=pflash,format=raw,file={variables}",
         "-drive",
@@ -320,15 +284,223 @@ def main():
         "-device",
         "virtserialport,chardev=evidence,name=org.signallayer.phase3f-test",
         "-smbios",
-        credential("systemd.extra-unit.phase3f-probe.service", unit),
+        credential("systemd.extra-unit.phase3f-probe.service", UNIT),
         "-smbios",
-        credential("systemd.unit-dropin.multi-user.target", dropin),
+        credential("systemd.unit-dropin.multi-user.target", DROPIN),
         "-smbios",
         credential("phase3f-probe.sh", probe),
     ]
+
+
+def runtime_identity_checks(evidence, expected_a_digest, expected_b_digest):
+    checks = {}
+    try:
+        seed = json.loads(evidence["seed_bootc"]["output"])["status"]
+        staged = json.loads(evidence["staged_candidate_bootc"]["output"])["status"]
+        after = json.loads(evidence["after_rollback_bootc"]["output"])["status"]
+        checks["runtime_a_matches_source_oci"] = (
+            seed["booted"]["image"]["imageDigest"] == expected_a_digest
+            and after["booted"]["image"]["imageDigest"] == expected_a_digest
+        )
+        checks["runtime_b_matches_registry_oci"] = (
+            staged["staged"]["image"]["imageDigest"] == expected_b_digest
+            and after["rollback"]["image"]["imageDigest"] == expected_b_digest
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        checks["runtime_expected_oci_identities"] = False
+    return checks
+
+
+def overall_result(report):
+    return (
+        "PASS"
+        if report.get("qemu_exit") == 0
+        and report["source_disk_unchanged"]
+        and report["retained_overlay_exists"]
+        and all(report["checks"].values())
+        else "FAIL"
+    )
+
+
+# Release 0.0.2 mode (4E). The default 3F mode above is unchanged.
+AGREEMENT_START = "    # Platform/Session1 agreement: status reads are not atomic, so boot-time\n"
+AGREEMENT_END = '        collect post_agree_converged echo "$post_converged"\n    fi\n'
+AGREEMENT_SUFFIXES = ("seed", "candidate", "after_rollback")
+STATUS_SUFFIXES = ("seed", "candidate", "queued", "after_rollback")
+BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def load_boot_qcow2():
+    spec = importlib.util.spec_from_file_location("boot_qcow2", HERE / "boot-qcow2.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def agreement_block(prefix):
+    """4D's converged Platform/Session1/Platform read, reused verbatim from
+    guest-reboot-post-probe.sh with only its record prefix changed."""
+    source = (HERE / "guest-reboot-post-probe.sh").read_text()
+    if source.count(AGREEMENT_START) != 1 or source.count(AGREEMENT_END) != 1:
+        raise RuntimeError("4D agreement block markers are missing or ambiguous")
+    start = source.index(AGREEMENT_START)
+    end = source.index(AGREEMENT_END) + len(AGREEMENT_END)
+    return source[start:end].replace("post_agree_", prefix)
+
+
+def compose_release_0_0_2_probe(probe):
+    replacements = (
+        ('chmod 0700 "$state_dir"\n',
+         'chmod 0700 "$state_dir"\n'
+         'cat /proc/sys/kernel/random/boot_id >> "$state_dir/boot-sequence"\n'),
+        ("    collect seed_corectl corectl status --json\n",
+         "    collect seed_corectl corectl status --json\n" + agreement_block("seed_agree_")),
+        ("    collect candidate_corectl corectl status --json\n",
+         "    collect candidate_corectl corectl status --json\n" + agreement_block("candidate_agree_")),
+        ("collect after_rollback_corectl corectl status --json\n",
+         "collect after_rollback_corectl corectl status --json\n" + agreement_block("after_rollback_agree_")),
+        # Both reboots use StartReboot. SIGTERM is ignored so corectl's exit
+        # status can be recorded if the probe survives the start of shutdown.
+        ("    record activation_reboot_requested 'systemctl reboot'\n    systemctl reboot\n",
+         "    record activation_reboot_requested 'corectl reboot'\n    trap '' TERM\n"
+         "    collect activation_reboot_corectl corectl reboot\n"),
+        ("    record rollback_reboot_requested 'systemctl reboot'\n    systemctl reboot\n",
+         "    record rollback_reboot_requested 'corectl reboot'\n    trap '' TERM\n"
+         "    collect rollback_reboot_corectl corectl reboot\n"),
+        ("record clean_shutdown_requested 'systemctl poweroff'\n",
+         'collect boot_sequence cat "$state_dir/boot-sequence"\n'
+         "record clean_shutdown_requested 'systemctl poweroff'\n"),
+    )
+    text = probe.decode()
+    for old, new in replacements:
+        if text.count(old) != 1:
+            raise RuntimeError(f"0.0.2 probe anchor missing or ambiguous: {old.strip()}")
+        text = text.replace(old, new)
+    return text.encode()
+
+
+def evaluate_release_0_0_2(evidence):
+    """3F checks with 0.0.2 expectations; the 3F AVC allowlist is unchanged."""
+    boot_qcow2 = load_boot_qcow2()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    checks = evaluate(evidence)
+    checks.pop("candidate_schema_0_2_idle_states", None)
+    try:
+        statuses = {suffix: json.loads(text(f"{suffix}_corectl")) for suffix in STATUS_SUFFIXES}
+        checks["release_0_0_2_status_all_boots"] = all(
+            ok(f"{suffix}_corectl")
+            and status["schema_version"] == "0.3"
+            and status["platform_api_version"] == "0.2"
+            for suffix, status in statuses.items()
+        )
+        candidate = statuses["candidate"]
+        checks["candidate_schema_0_3_idle_states"] = (
+            candidate["schema_version"] == "0.3"
+            and candidate["update"]["state"] == "idle"
+            and candidate["rollback"]["state"] == "idle"
+        )
+    except (KeyError, TypeError, ValueError):
+        checks["release_0_0_2_status_all_boots"] = False
+        checks["candidate_schema_0_3_idle_states"] = False
+    checks["one_activation_and_one_rollback_reboot"] = (
+        text("activation_reboot_requested")
+        == text("rollback_reboot_requested")
+        == "corectl reboot"
+    )
+    boot_ids = [text(f"boot_id_{suffix}") for suffix in ("seed", "candidate", "after_rollback")]
+    sequence = text("boot_sequence").split()
+    sequence_ok = (
+        ok("boot_sequence")
+        and sequence == boot_ids
+        and len(set(boot_ids)) == 3
+        and all(BOOT_ID.fullmatch(value) for value in boot_ids)
+    )
+    checks["boot_sequence_exactly_three_boots"] = sequence_ok
+    details = {"boot_sequence": sequence, "reboots": {}, "session_agreement": {}}
+    # 4D semantics: exit 0 or 3, or not captured, only if the boot sequence
+    # proves exactly one reboot for each transition.
+    for name in ("activation", "rollback"):
+        recorded = evidence.get(f"{name}_reboot_corectl")
+        checks[f"{name}_reboot_outcome_acceptable"] = sequence_ok and (
+            recorded is None or recorded["exit_code"] in (0, 3)
+        )
+        details["reboots"][name] = boot_qcow2.corectl_reboot_outcome(recorded)
+    for suffix in AGREEMENT_SUFFIXES:
+        prefix = f"{suffix}_agree_"
+        mapped = {
+            "post_agree_" + key[len(prefix):]: value
+            for key, value in evidence.items()
+            if key.startswith(prefix)
+        }
+        checks[f"{suffix}_platform_session_agree"], details["session_agreement"][suffix] = (
+            boot_qcow2.session_agreement(mapped)
+        )
+    return checks, details
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("disk", type=pathlib.Path)
+    parser.add_argument(
+        "--ovmf-code",
+        type=pathlib.Path,
+        default=pathlib.Path("/usr/share/edk2/ovmf/OVMF_CODE.fd"),
+    )
+    parser.add_argument(
+        "--ovmf-vars",
+        type=pathlib.Path,
+        default=pathlib.Path("/usr/share/edk2/ovmf/OVMF_VARS.fd"),
+    )
+    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--expected-a-digest", required=True)
+    parser.add_argument("--expected-b-digest", required=True)
+    parser.add_argument("--cpus", type=int, default=4, help="Guest virtual CPU count (default: 4, as in 3F)")
+    parser.add_argument(
+        "--release-0-0-2",
+        action="store_true",
+        help="4E: schema 0.3, API 0.2, corectl reboot, and converged Platform/Session1 reads",
+    )
+    args = parser.parse_args()
+    disk = args.disk.resolve(strict=True)
+    output = pathlib.Path(__file__).resolve().parents[2] / "image/build/output"
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    prefix = "phase4e-acceptance" if args.release_0_0_2 else "phase3f-acceptance"
+    run = output / f"{prefix}-{stamp}"
+    run.mkdir(parents=True)
+    probe = pathlib.Path(__file__).with_name("guest-lifecycle-probe.sh").read_bytes()
+    if args.release_0_0_2:
+        probe = compose_release_0_0_2_probe(probe)
+    (run / "probe.sh").write_bytes(probe)
+    overlay = run / "complete-lifecycle.qcow2"
+    subprocess.run(
+        [
+            "qemu-img",
+            "create",
+            "-f",
+            "qcow2",
+            "-F",
+            "qcow2",
+            "-b",
+            str(disk),
+            str(overlay),
+        ],
+        check=True,
+    )
+    variables = run / "OVMF_VARS.fd"
+    shutil.copyfile(args.ovmf_vars, variables)
+
+    command = qemu_command(
+        args.ovmf_code.resolve(), variables, overlay, run, probe, args.cpus
+    )
     (run / "qemu-command.json").write_text(json.dumps(command, indent=2) + "\n")
     report = {
-        "phase": "3F",
+        "phase": "4E" if args.release_0_0_2 else "3F",
         "result": "FAIL",
         "output": str(run),
         "disk": str(disk),
@@ -371,31 +543,17 @@ def main():
     (run / "evidence.json").write_text(
         json.dumps(evidence, indent=2, sort_keys=True) + "\n"
     )
-    report["checks"] = evaluate(evidence)
-    try:
-        seed = json.loads(evidence["seed_bootc"]["output"])["status"]
-        staged = json.loads(evidence["staged_candidate_bootc"]["output"])["status"]
-        after = json.loads(evidence["after_rollback_bootc"]["output"])["status"]
-        report["checks"]["runtime_a_matches_source_oci"] = (
-            seed["booted"]["image"]["imageDigest"] == args.expected_a_digest
-            and after["booted"]["image"]["imageDigest"] == args.expected_a_digest
-        )
-        report["checks"]["runtime_b_matches_registry_oci"] = (
-            staged["staged"]["image"]["imageDigest"] == args.expected_b_digest
-            and after["rollback"]["image"]["imageDigest"] == args.expected_b_digest
-        )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-        report["checks"]["runtime_expected_oci_identities"] = False
+    if args.release_0_0_2:
+        report["release"] = "0.0.2"
+        report["checks"], report["release_0_0_2"] = evaluate_release_0_0_2(evidence)
+    else:
+        report["checks"] = evaluate(evidence)
+    report["checks"].update(
+        runtime_identity_checks(evidence, args.expected_a_digest, args.expected_b_digest)
+    )
     report["source_disk_unchanged"] = digest(disk) == report["disk_sha256"]
     report["retained_overlay_exists"] = overlay.exists()
-    report["result"] = (
-        "PASS"
-        if report.get("qemu_exit") == 0
-        and report["source_disk_unchanged"]
-        and report["retained_overlay_exists"]
-        and all(report["checks"].values())
-        else "FAIL"
-    )
+    report["result"] = overall_result(report)
     (run / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
     return 0 if report["result"] == "PASS" else 1
