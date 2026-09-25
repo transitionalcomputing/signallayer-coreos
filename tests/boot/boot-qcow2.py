@@ -875,6 +875,74 @@ def session_recovery_evidence_valid(evidence):
     return all(isinstance(status, dict) and status.get("schema_version") for status in statuses)
 
 
+# Attempts at 0, 5, ..., 120 seconds: at most 25.
+SESSION_AGREEMENT_MAX_ATTEMPTS = 25
+
+
+def _status_differences(left, right, path=""):
+    if isinstance(left, dict) and isinstance(right, dict):
+        found = []
+        for key in sorted(set(left) | set(right)):
+            found += _status_differences(left.get(key, "<absent>"), right.get(key, "<absent>"), f"{path}.{key}")
+        return found
+    return [] if left == right else [path or "."]
+
+
+def session_agreement(evidence):
+    """Pass only from a recorded converged attempt whose Platform, Session1,
+    Platform reads are identical and which is the first such attempt."""
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    details = {"attempts": [], "recorded_attempts": None, "converged_attempt": None}
+    try:
+        count = int(text("post_agree_attempts")) if ok("post_agree_attempts") else 0
+    except ValueError:
+        count = 0
+    details["recorded_attempts"] = count or None
+    if not 1 <= count <= SESSION_AGREEMENT_MAX_ATTEMPTS:
+        return False, details
+    first_agreeing = None
+    for index in range(1, count + 1):
+        parts = ("platform_a", "session", "platform_b")
+        keys = [f"post_agree_{index}_{part}" for part in parts]
+        if not all(key in evidence for key in keys):
+            details["attempts"].append({"index": index, "missing": True})
+            return False, details
+        attempt = {"index": index, "sha256": {
+            part: hashlib.sha256(evidence[key]["output"].encode()).hexdigest()
+            for part, key in zip(parts, keys)}}
+        try:
+            platform_a = json.loads(text(keys[0]))
+            envelope = json.loads(text(keys[1]))
+            if envelope.get("type") != "s" or len(envelope.get("data", [])) != 1:
+                raise ValueError("invalid busctl JSON envelope")
+            session = json.loads(envelope["data"][0])
+            platform_b = json.loads(text(keys[2]))
+            agreed = all(ok(key) for key in keys) and platform_a == session == platform_b
+            attempt["differences"] = {
+                "platform_a_vs_session": _status_differences(platform_a, session),
+                "session_vs_platform_b": _status_differences(session, platform_b),
+            }
+        except (ValueError, KeyError, TypeError, AttributeError, IndexError):
+            agreed = False
+            attempt["unparseable"] = True
+        attempt["agreed"] = agreed
+        details["attempts"].append(attempt)
+        if agreed and first_agreeing is None:
+            first_agreeing = index
+    try:
+        converged = int(text("post_agree_converged")) if ok("post_agree_converged") else None
+    except ValueError:
+        converged = None
+    details["converged_attempt"] = converged
+    passed = converged is not None and converged == first_agreeing == count
+    return passed, details
+
+
 def corectl_reboot_outcome(corectl):
     if corectl is None:
         return "not captured"
@@ -941,7 +1009,6 @@ def evaluate_reboot(evidence, events):
         pre_ok, post_ok = ok("reboot_pre_status"), ok("post_platform_status")
         checks["post_platform_api_0_2"] = post_ok and post["platform_api_version"] == "0.2"
         checks["post_status_schema_0_3"] = post_ok and post["schema_version"] == "0.3"
-        checks["post_platform_session_agree"] = post_ok and ok("post_session_status") and post == session
         checks["post_booted_deployment_unchanged"] = pre_ok and post_ok and pre["booted"] == post["booted"]
         checks["post_update_rollback_unchanged"] = pre_ok and post_ok and all(
             pre[key] == post[key] for key in ("update", "rollback", "retained_rollback"))
@@ -949,6 +1016,8 @@ def evaluate_reboot(evidence, events):
             pre_ok and pre["platform_api_version"] == "0.2" and boot_changed)
     except (ValueError, KeyError, TypeError, IndexError):
         pass
+    # Established only from a recorded converged Platform/Session1/Platform attempt.
+    checks["post_platform_session_agree"], agreement = session_agreement(evidence)
     checks["post_selinux_enforcing"] = ok("post_selinux") and text("post_selinux") == "Enforcing"
     checks["post_failed_units_zero"] = ok("post_failed_units") and not text("post_failed_units")
     details = {
@@ -957,6 +1026,7 @@ def evaluate_reboot(evidence, events):
         "nonroot_start_reboot_error_name": error_name,
         "corectl_reboot_exit_code": "not captured" if corectl is None else corectl["exit_code"],
         "corectl_reboot_outcome": corectl_reboot_outcome(corectl),
+        "session_agreement": agreement,
     }
     return checks, details
 

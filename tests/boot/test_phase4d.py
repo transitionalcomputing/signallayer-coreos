@@ -48,6 +48,30 @@ def denial(error_name="org.freedesktop.DBus.Error.AccessDenied", uid=987, result
         "result": result, "error_name": error_name, "message": "denied"})
 
 
+def agreement_records(attempts, converged=None):
+    """attempts: list of (platform_a, session, platform_b) status dicts."""
+    records = {}
+    for index, (platform_a, session, platform_b) in enumerate(attempts, 1):
+        records[f"post_agree_{index}_platform_a"] = record(json.dumps(platform_a))
+        records[f"post_agree_{index}_session"] = record(json.dumps({"type": "s", "data": [json.dumps(session)]}))
+        records[f"post_agree_{index}_platform_b"] = record(json.dumps(platform_b))
+    records["post_agree_attempts"] = record(f"{len(attempts)}\n")
+    if converged is not None:
+        records["post_agree_converged"] = record(f"{converged}\n")
+    return records
+
+
+def settling():
+    """A Platform read taken before IPv6 autoconfiguration finished."""
+    early = status(BOOT_2)
+    early["network"]["primary_connection"] = {"interface": "enp0s2", "addresses": ["10.0.2.15/24"],
+                                              "default_gateways": ["10.0.2.2"]}
+    late = copy.deepcopy(early)
+    late["network"]["primary_connection"]["addresses"].append("fec0::1/64")
+    late["network"]["primary_connection"]["default_gateways"].append("fe80::2")
+    return early, late
+
+
 def passing_evidence(corectl_exit=0):
     post = status(BOOT_2)
     evidence = {
@@ -64,6 +88,7 @@ def passing_evidence(corectl_exit=0):
         "post_session_status": record(json.dumps({"type": "s", "data": [json.dumps(post)]})),
         "post_complete": record("done"),
     }
+    evidence.update(agreement_records([(post, post, post)], converged=1))
     if corectl_exit is not None:
         evidence["reboot_corectl"] = record("", corectl_exit)
     return evidence
@@ -185,9 +210,11 @@ class RebootEvaluationTests(unittest.TestCase):
 
     def test_platform_and_session_must_agree(self):
         evidence = passing_evidence()
+        for key in [key for key in evidence if key.startswith("post_agree_")]:
+            del evidence[key]
         session = status(BOOT_2)
         session["health"]["failed_units"] = 1
-        evidence["post_session_status"] = record(json.dumps({"type": "s", "data": [json.dumps(session)]}))
+        evidence.update(agreement_records([(status(BOOT_2), session, status(BOOT_2))]))
         self.assertFalse(self.evaluate(evidence)[0]["post_platform_session_agree"])
 
     def test_api_and_schema_versions_are_enforced(self):
@@ -252,6 +279,51 @@ class SessionEvidenceTests(unittest.TestCase):
             evidence = session_evidence()
             evidence[key] = value
             self.assertFalse(boot.session_recovery_evidence_valid(evidence), key)
+
+
+class SessionAgreementTests(unittest.TestCase):
+    def test_converges_on_attempt_2_passes(self):
+        early, late = settling()
+        evidence = agreement_records([(early, late, late), (late, late, late)], converged=2)
+        passed, details = boot.session_agreement(evidence)
+        self.assertTrue(passed)
+        self.assertEqual(details["converged_attempt"], 2)
+        self.assertEqual([attempt["agreed"] for attempt in details["attempts"]], [False, True])
+        self.assertIn(".network.primary_connection.addresses",
+                      details["attempts"][0]["differences"]["platform_a_vs_session"])
+        self.assertEqual(set(details["attempts"][0]["sha256"]), {"platform_a", "session", "platform_b"})
+        full = passing_evidence()
+        for key in [key for key in full if key.startswith("post_agree_")]:
+            del full[key]
+        full.update(evidence)
+        self.assertTrue(boot.evaluate_reboot(full, ONE_RESET)[0]["post_platform_session_agree"])
+
+    def test_never_converges_fails(self):
+        early, late = settling()
+        attempts = [(early, late, late)] * boot.SESSION_AGREEMENT_MAX_ATTEMPTS
+        passed, details = boot.session_agreement(agreement_records(attempts))
+        self.assertFalse(passed)
+        self.assertEqual(len(details["attempts"]), boot.SESSION_AGREEMENT_MAX_ATTEMPTS)
+        self.assertFalse(any(attempt["agreed"] for attempt in details["attempts"]))
+
+    def test_missing_attempts_fail(self):
+        self.assertFalse(boot.session_agreement({})[0])
+        _, late = settling()
+        evidence = agreement_records([(late, late, late), (late, late, late)], converged=2)
+        del evidence["post_agree_1_session"]
+        self.assertFalse(boot.session_agreement(evidence)[0])
+        evidence = agreement_records([(late, late, late)], converged=1)
+        del evidence["post_agree_attempts"]
+        self.assertFalse(boot.session_agreement(evidence)[0])
+
+    def test_recorded_convergence_must_match_the_payloads(self):
+        early, late = settling()
+        self.assertFalse(boot.session_agreement(agreement_records([(early, late, late)], converged=1))[0])
+        # Attempt 1 already agreed, so a claim of attempt 2 is inconsistent.
+        self.assertFalse(boot.session_agreement(
+            agreement_records([(late, late, late), (late, late, late)], converged=2))[0])
+        # Agreement in the payloads without a recorded convergence does not pass.
+        self.assertFalse(boot.session_agreement(agreement_records([(late, late, late)]))[0])
 
 
 class CorectlOutcomeTests(unittest.TestCase):
