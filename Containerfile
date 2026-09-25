@@ -49,7 +49,7 @@ RUN set -eu; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
         'VERSION="0.0.1"' \
-        'PLATFORM_API_VERSION="0.1"' \
+        'PLATFORM_API_VERSION="0.2"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \
         > /usr/lib/signallayer/release
@@ -63,6 +63,7 @@ COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.serv
 COPY image/platform/sl-network-observer.service /usr/lib/systemd/system/sl-network-observer.service
 COPY image/platform/sl-update.service /usr/lib/systemd/system/sl-update.service
 COPY image/platform/sl-rollback.service /usr/lib/systemd/system/sl-rollback.service
+COPY image/platform/sl-reboot.service /usr/lib/systemd/system/sl-reboot.service
 COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
 COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf
@@ -83,6 +84,7 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(matchpathcon -n /usr/bin/bootc)" = system_u:object_r:install_exec_t:s0 && \
     test "$(matchpathcon -n /usr/lib/systemd/system/sl-update.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
     test "$(matchpathcon -n /usr/lib/systemd/system/sl-rollback.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-reboot.service)" = system_u:object_r:sl_reboot_unit_file_t:s0 && \
     test "$(matchpathcon -n -m dir /run/ostree)" = system_u:object_r:sl_bootc_runtime_t:s0 && \
     test "$(matchpathcon -n /run/ostree/staged-deployment)" = system_u:object_r:sl_bootc_state_t:s0 && \
     grep -Fqx 'd /run/ostree 0755 root root -' /usr/lib/tmpfiles.d/sl-bootc-runtime.conf && \
@@ -95,6 +97,17 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Fq '<deny send_destination="org.freedesktop.NetworkManager"/>' /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && \
     grep -Fq 'send_interface="org.freedesktop.DBus.Properties"' /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && \
     grep -Fq 'send_member="Get"/>' /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && \
+    grep -Fqx 'ExecStart=/usr/bin/systemctl --no-block reboot' /usr/lib/systemd/system/sl-reboot.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-reboot.service)" = 1 && \
+    ! grep -Eq 'ExecStart=.*(sh|bash)' /usr/lib/systemd/system/sl-reboot.service && \
+    test "$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)" = 2 && \
+    awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="StartReboot"/>' && \
+    awk '/<policy user="root">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<allow send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="StartReboot"/>' && \
+    test "$(grep -c 'send_member="StartReboot"' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)" = 2 && \
+    ! awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eq '<allow [^>]*send_member="StartReboot"' && \
+    ! (tr -s ' \n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | grep -Eo '<allow [^>]*send_destination[^>]*/>' | grep -vq 'send_member=') && \
+    test "$(grep -rl 'StartReboot' /usr/share/dbus-1/system.d /etc/dbus-1 2>/dev/null)" = /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf && \
+    ! grep -Eq 'org\.signallayer\.Platform1|StartReboot|StartUpdate|StartRollback' /usr/share/dbus-1/system.d/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && \
     test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
     test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
     test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \

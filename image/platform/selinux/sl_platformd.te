@@ -58,6 +58,12 @@ type sl_update_unit_file_t;
 systemd_unit_file(sl_update_unit_file_t)
 allow sl_platformd_t sl_update_unit_file_t:service { start status };
 
+# The fixed reboot worker has its own unit-file type, so reboot authority stays
+# separate from the deployment workers. Platformd may only start and observe it.
+type sl_reboot_unit_file_t;
+systemd_unit_file(sl_reboot_unit_file_t)
+allow sl_platformd_t sl_reboot_unit_file_t:service { start status };
+
 # Bootc creates staged state with O_TMPFILE, before a basename exists. Keep its
 # runtime directory distinct, then transition regular files created there by
 # Fedora's trusted install_t update domain. This does not expose generic /run
