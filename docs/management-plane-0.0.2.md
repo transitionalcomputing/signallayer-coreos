@@ -336,6 +336,9 @@ and KVM checks while retaining Platform API 0.1 and status schema 0.2.
 **Validated:** status schema 0.3 machine and NetworkManager observations passed
 focused unit, policy, image, offline disk, and KVM checks while Platform API
 remained at 0.1. Direct Platform, `corectl`, and Session1 results agreed.
+Evidence, provenance, and the disposition of excluded checks are recorded in
+the 0.0.2 evidence register; Session recovery after a deliberate Platform
+restart is carried forward to 4D acceptance.
 
 - Implement status schema 0.3 while Platform API remains at 0.1; do not add
   `StartReboot`.
@@ -360,6 +363,13 @@ remained at 0.1. Direct Platform, `corectl`, and Session1 results agreed.
 - Prove prompt acceptance, Busy/Conflict/failure behavior, exact unit/command,
   no arbitrary parameters, and one orderly reboot into bootc's preselected
   deployment without changing update/rollback policy.
+- Required acceptance checks include `session_platform_restored` and
+  `session_evidence_valid`, carried forward from 4C.
+- The management policy analysis must include target-only queries against the
+  loaded policy for `sl_network_observer_t:dbus`, `sl_platformd_t:dbus`, and
+  `NetworkManager_t:dbus send_msg`, run with the validation environment's
+  policy tools (the policy-tools stage provides `sesearch`). If the tools are
+  unavailable, the check fails; it is not skipped.
 
 ## Explicit non-goals and deferred work
 
