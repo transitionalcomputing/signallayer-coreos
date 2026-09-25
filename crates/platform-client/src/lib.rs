@@ -328,9 +328,14 @@ mod tests {
         );
         assert_eq!(
             PlatformApiVersion::parse("1.10"),
-            Some(PlatformApiVersion { major: 1, minor: 10 })
+            Some(PlatformApiVersion {
+                major: 1,
+                minor: 10
+            })
         );
-        for invalid in ["", "0", "0.", ".2", "0.2.1", "v0.2", " 0.2", "0.+2", "0.-1", "a.b"] {
+        for invalid in [
+            "", "0", "0.", ".2", "0.2.1", "v0.2", " 0.2", "0.+2", "0.-1", "a.b",
+        ] {
             assert_eq!(PlatformApiVersion::parse(invalid), None, "{invalid}");
         }
     }
@@ -383,7 +388,10 @@ mod tests {
     #[test]
     fn status_reads_accept_future_platform_api_versions() {
         assert_eq!(status_with_api("7.3").platform_api_version, "7.3");
-        assert_eq!(status_with_api("not-a-version").platform_api_version, "not-a-version");
+        assert_eq!(
+            status_with_api("not-a-version").platform_api_version,
+            "not-a-version"
+        );
     }
 
     #[test]

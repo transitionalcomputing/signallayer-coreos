@@ -1221,7 +1221,8 @@ mod tests {
 
     #[tokio::test]
     async fn reboot_starts_fixed_worker_after_frozen_inspection_order() {
-        let (result, calls) = run_reboot(Ok("inactive"), Ok("inactive"), Ok("inactive"), Ok(())).await;
+        let (result, calls) =
+            run_reboot(Ok("inactive"), Ok("inactive"), Ok("inactive"), Ok(())).await;
         assert!(result.is_ok());
         assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT, "start"]);
     }
@@ -1229,7 +1230,8 @@ mod tests {
     #[tokio::test]
     async fn reboot_is_busy_while_reboot_worker_is_active() {
         for state in ACTIVE_STATES {
-            let (result, calls) = run_reboot(Ok("inactive"), Ok("inactive"), Ok(state), Ok(())).await;
+            let (result, calls) =
+                run_reboot(Ok("inactive"), Ok("inactive"), Ok(state), Ok(())).await;
             assert!(matches!(result, Err(PlatformError::Busy(_))), "{state}");
             assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT], "{state}");
         }
@@ -1238,12 +1240,20 @@ mod tests {
     #[tokio::test]
     async fn reboot_conflicts_with_active_deployment_workers() {
         for state in ACTIVE_STATES {
-            let (result, calls) = run_reboot(Ok(state), Ok("inactive"), Ok("inactive"), Ok(())).await;
-            assert!(matches!(result, Err(PlatformError::Conflict(_))), "update {state}");
+            let (result, calls) =
+                run_reboot(Ok(state), Ok("inactive"), Ok("inactive"), Ok(())).await;
+            assert!(
+                matches!(result, Err(PlatformError::Conflict(_))),
+                "update {state}"
+            );
             assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT], "update {state}");
 
-            let (result, calls) = run_reboot(Ok("inactive"), Ok(state), Ok("inactive"), Ok(())).await;
-            assert!(matches!(result, Err(PlatformError::Conflict(_))), "rollback {state}");
+            let (result, calls) =
+                run_reboot(Ok("inactive"), Ok(state), Ok("inactive"), Ok(())).await;
+            assert!(
+                matches!(result, Err(PlatformError::Conflict(_))),
+                "rollback {state}"
+            );
             assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT], "rollback {state}");
         }
     }
@@ -1252,7 +1262,8 @@ mod tests {
     async fn idle_deployment_workers_do_not_conflict() {
         for update in IDLE_STATES {
             for rollback in IDLE_STATES {
-                let (result, calls) = run_reboot(Ok(update), Ok(rollback), Ok("inactive"), Ok(())).await;
+                let (result, calls) =
+                    run_reboot(Ok(update), Ok(rollback), Ok("inactive"), Ok(())).await;
                 assert!(result.is_ok(), "{update} {rollback}");
                 assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT, REBOOT_UNIT, "start"]);
             }
@@ -1263,11 +1274,17 @@ mod tests {
     async fn conflict_takes_precedence_over_busy() {
         for state in ACTIVE_STATES {
             let (result, calls) = run_reboot(Ok(state), Ok("inactive"), Ok(state), Ok(())).await;
-            assert!(matches!(result, Err(PlatformError::Conflict(_))), "update {state}");
+            assert!(
+                matches!(result, Err(PlatformError::Conflict(_))),
+                "update {state}"
+            );
             assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT]);
 
             let (result, calls) = run_reboot(Ok("inactive"), Ok(state), Ok(state), Ok(())).await;
-            assert!(matches!(result, Err(PlatformError::Conflict(_))), "rollback {state}");
+            assert!(
+                matches!(result, Err(PlatformError::Conflict(_))),
+                "rollback {state}"
+            );
             assert_eq!(calls, [UPDATE_UNIT, ROLLBACK_UNIT]);
         }
     }

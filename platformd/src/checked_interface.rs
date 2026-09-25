@@ -15,12 +15,8 @@ use zbus::{
 // remain generated.
 pub(super) struct CheckedPlatform(pub(super) Platform);
 
-const ZERO_ARGUMENT_METHODS: [&str; 4] = [
-    "GetStatus",
-    "StartUpdate",
-    "StartRollback",
-    "StartReboot",
-];
+const ZERO_ARGUMENT_METHODS: [&str; 4] =
+    ["GetStatus", "StartUpdate", "StartRollback", "StartReboot"];
 
 fn has_unexpected_arguments(member: &str, msg: &Message) -> bool {
     ZERO_ARGUMENT_METHODS.contains(&member)
@@ -139,9 +135,18 @@ mod tests {
     #[test]
     fn zero_argument_methods_accept_only_an_empty_body() {
         for member in ZERO_ARGUMENT_METHODS {
-            assert!(!has_unexpected_arguments(member, &method_call!(member, &())));
-            assert!(has_unexpected_arguments(member, &method_call!(member, &(0u32,))));
-            assert!(has_unexpected_arguments(member, &method_call!(member, &("reboot",))));
+            assert!(!has_unexpected_arguments(
+                member,
+                &method_call!(member, &())
+            ));
+            assert!(has_unexpected_arguments(
+                member,
+                &method_call!(member, &(0u32,))
+            ));
+            assert!(has_unexpected_arguments(
+                member,
+                &method_call!(member, &("reboot",))
+            ));
             assert!(has_unexpected_arguments(
                 member,
                 &method_call!(member, &("sl-reboot.service", "replace"))
@@ -151,6 +156,9 @@ mod tests {
 
     #[test]
     fn other_members_are_left_to_generated_dispatch() {
-        assert!(!has_unexpected_arguments("Introspect", &method_call!("Introspect", &(0u32,))));
+        assert!(!has_unexpected_arguments(
+            "Introspect",
+            &method_call!("Introspect", &(0u32,))
+        ));
     }
 }

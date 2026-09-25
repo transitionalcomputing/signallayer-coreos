@@ -86,12 +86,14 @@ async fn main() -> ExitCode {
         ["update"] | ["update", "--json"] => "update",
         ["rollback"] | ["rollback", "--json"] => "rollback",
         ["reboot"] | ["reboot", "--json"] => "reboot",
-        _ => return report_error(
-            json,
-            "Usage",
-            "Usage: corectl status [--json] | corectl update [--json] | \
+        _ => {
+            return report_error(
+                json,
+                "Usage",
+                "Usage: corectl status [--json] | corectl update [--json] | \
              corectl rollback [--json] | corectl reboot [--json]",
-        ),
+            )
+        }
     };
     let client = match PlatformClient::connect().await {
         Ok(client) => client,
