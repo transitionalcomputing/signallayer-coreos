@@ -113,6 +113,57 @@ Storage: the dev VM (`phase4d-b/` and `phase4d-b2/`, with `4db.log` and
 Per-file checksums: `docs/evidence/phase4d-6pj9cknl.sha256` and
 `docs/evidence/phase4d-djguo10v.sha256`.
 
+## Phase 4E
+
+Accepted run: `phase4e-acceptance-20260925-225402` (2026-09-25, KVM), PASS,
+44/44 checks.
+
+The run proved the integrated 0.0.2 lifecycle in one QEMU process:
+A → `corectl update` stages B → `corectl reboot` → B booted with A retained →
+`corectl rollback` queues A → `corectl reboot` → A booted with B retained.
+The recorded boot sequence is exactly three boots, and both reboots were
+accepted (`corectl reboot` exit 0). Status schema 0.3 and Platform API 0.2 were
+reported at every boot. Platform/Session1 agreement, read as Platform, Session1,
+then Platform again, converged on attempt 1 at all three stable checkpoints.
+
+- Product commit: `afbc043fdf707d3da80e1a8c47d62b0958cf0598`. Harness commit:
+  `924f4f62b128fa17e819fd38ec85f619d85a79c9`. They are distinct: the harness
+  commit changes only `tests/boot/`.
+- A: the 4D acceptance qcow2
+  `d005ba25943084f0f87346ac9dd5461da8ad21c4c866427162ee0acdf1b41a95`, reused
+  unchanged and verified before and after the run; image digest
+  `sha256:51ad72cdf0af18f3c7cb50ae623086888ea57942f4575d0c04a7adc2e8990ca7`.
+- B: image `68da7482f9a491787a88c3856034bc35063edab9e67a6a80002d55b1e7efed8a`,
+  built from the product commit with only `BUILD_ID=0.0.2-phase4e-candidate`.
+- Registry: the development tag `localhost:5000/signallayer-coreos:0.0.1`
+  moved from `sha256:1b91e4073e46168cfd64dff69d744972577017558402d6de25c7ba929f4471aa`
+  (3F's B, recorded in the 3F evidence) to
+  `sha256:bf4a9d1ab4b5ac2030113762db2beecffd9ecfed29edc43df2e16921a60e37c8`.
+  The pushed manifest's config was verified as B's image ID.
+- Base: registry pin
+  `quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74`;
+  local image ID
+  `fd0afe29ae8ee618a20265a81d5d9ec6b032fc8912eb91a420082a197081360b`.
+
+Preservation chronology: `run-4e.sh` stopped after the harness reported PASS.
+Python bytecode generation had written `tests/boot/__pycache__/` into the
+harness checkout, which tripped the script's post-run cleanliness check.
+`preserve-4e.sh` later preserved the already-completed run without rerunning
+anything, after verifying that the only change in the checkout was
+`tests/boot/__pycache__/`. The harness now sets `sys.dont_write_bytecode`
+before importing `boot-qcow2.py`, which prevents this.
+
+Pre-existing 3F discrepancy: the committed 3F runner's systemd unit
+`Description` ("Disposable Phase 3F lifecycle probe") differs by that one line
+from the accepted 3F run's ("Disposable Phase 3F rollback probe"). It is
+cosmetic, was not introduced by 4E, and affects no check. The harness
+regression test records it explicitly.
+
+Storage: the dev VM (`phase4e/`, with `4e.log`, `4e-preserve.log`,
+`run-4e.sh` and `preserve-4e.sh`), the maintainer workstation, and the
+hypervisor's VM backups. Per-file checksums:
+`docs/evidence/phase4e-acceptance-20260925-225402.sha256`.
+
 ## Base disks
 
 Each preserved run's `boot.qcow2` is a per-run overlay. The base disk

@@ -1,6 +1,6 @@
 # SignalLayer CoreOS 0.0.2 management-plane contract
 
-**Status:** Phase 4A contract; Phases 4B, 4C and 4D validated
+**Status:** Phase 4A contract; Phases 4B, 4C, 4D and 4E validated
 **Release:** SignalLayer CoreOS 0.0.2
 **Platform API:** 0.2
 **Status schema:** 0.3
@@ -407,6 +407,16 @@ and Session1 status agreed. See the [0.0.2 evidence register](evidence-register-
   `NetworkManager_t:dbus send_msg`, run with the validation environment's
   policy tools (the policy-tools stage provides `sesearch`). If the tools are
   unavailable, the check fails; it is not skipped.
+
+### 4E — integrated lifecycle
+
+**Validated:** the complete 0.0.2 update and rollback lifecycle passed KVM
+checks in run `phase4e-acceptance-20260925-225402` (PASS, 44/44). A staged B
+through `corectl update`, and `corectl reboot` activated it. `corectl rollback`
+then queued A, and a second `corectl reboot` returned to A: exactly three
+boots, with both reboots accepted. Every boot reported status schema 0.3 and
+Platform API 0.2, and Platform and Session1 status agreed at each stable
+checkpoint. See the [0.0.2 evidence register](evidence-register-0.0.2.md).
 
 ## Explicit non-goals and deferred work
 
