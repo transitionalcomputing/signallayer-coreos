@@ -1,4 +1,4 @@
-# CoreOS 0.0.1 development disk
+# CoreOS 0.0.2 development disk
 
 > **Developer Preview registry limitation:** the validated v0.0.1 qcow2 uses
 > `localhost/signallayer-coreos:0.0.1` as its bootc origin. Lifecycle tests
@@ -33,8 +33,8 @@ Build the OCI image from the current Containerfile into **rootful** storage:
 ```bash
 sudo podman build --platform linux/amd64 \
   --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
-  --build-arg BUILD_ID="0.0.1-$(git rev-parse --short=12 HEAD)-local" \
-  -f Containerfile -t localhost/signallayer-coreos:0.0.1 .
+  --build-arg BUILD_ID="0.0.2-$(git rev-parse --short=12 HEAD)-local" \
+  -f Containerfile -t localhost/signallayer-coreos:0.0.2 .
 sudo bash image/build/build-qcow2.sh
 ```
 
@@ -55,7 +55,7 @@ into the builder's disposable store. It never shares the host storage with
 the nested Podman instance.
 
 Each run creates an ignored directory under `image/build/output/` containing
-`signallayer-coreos-0.0.1-x86_64.qcow2`, the input OCI archive, copied blueprint,
+`signallayer-coreos-0.0.2-x86_64.qcow2`, the input OCI archive, copied blueprint,
 source image inspection and release/configuration, builder version, OSBuild
 manifest/log, checksums in `build-report.txt`, and offline inspection reports.
 For Phase 3B images, `prepare-boot-manifest.py` adds one standard OSBuild SELinux

@@ -822,7 +822,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use sl_protocol::{NetworkState, PrimaryConnection};
-    const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.1\"\nPLATFORM_API_VERSION=\"0.2\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
+    const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.2\"\nPLATFORM_API_VERSION=\"0.2\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
     fn fixture() -> Value {
         serde_json::json!({"apiVersion":"org.containers.bootc/v1", "kind":"BootcHost", "status": {
             "booted": {"ostree":{"checksum":"a".repeat(64), "deploySerial":0},
