@@ -11,6 +11,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 UNIT = b"""[Unit]\nDescription=Disposable Phase 3F lifecycle probe\nDefaultDependencies=no\nConditionPathExists=!/etc/initrd-release\nAfter=multi-user.target NetworkManager.service\n[Service]\nType=simple\nImportCredential=phase3f-probe.sh\nExecStart=/usr/bin/bash %d/phase3f-probe.sh\nStandardOutput=journal+console\nStandardError=journal+console\nTimeoutStartSec=29min\n"""
@@ -331,6 +332,9 @@ BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 
 
 def load_boot_qcow2():
+    # Never write __pycache__ into the checkout; campaign scripts require a
+    # clean tree after the run.
+    sys.dont_write_bytecode = True
     spec = importlib.util.spec_from_file_location("boot_qcow2", HERE / "boot-qcow2.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
