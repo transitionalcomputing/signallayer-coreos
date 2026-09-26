@@ -2,8 +2,8 @@
 
 **Status:** 5C-a frozen. Derived from the frozen
 [0.0.3 remote management contract](remote-management-0.0.3.md); it changes no
-contract decision. Items still marked **proposal** below were not decided in
-5C-a and remain open for review. Everything else is frozen.
+contract decision. Every parameter below is frozen; the proposals and open
+questions of step 1 were adopted and resolved in 5C-a step 2.
 
 sl-authd owns only authentication state: the operator password hash, the
 recovery-key hash, pending pairing state and attempt/backoff state. It answers
@@ -56,7 +56,11 @@ Transitions (the method names are defined below):
 **Normalization.** An EnrolledUnconfirmed state whose confirmation deadline has
 passed is normalized to Unenrolled before any operation is serviced, both at
 startup and on each later operation. The cleanup is committed durably before
-the operation proceeds.
+the operation proceeds. Normalization records, in memory, that the provisional
+enrollment expired, so that a later `ConfirmRecoveryKey` returns
+`ConfirmationExpired` rather than `NoProvisionalEnrollment`. The record is
+cleared by the next state change (a new pairing, a reset or an enrollment) and
+does not survive a further restart.
 
 Re-enrollment is two separate operations composed by Platform:
 `ResetEnrollment`, then `EnsurePendingPairing`. The boot-time reset uses
@@ -69,6 +73,25 @@ other signature, including any argument to a zero-argument method, is rejected
 with `org.freedesktop.DBus.Error.InvalidArgs` before any state is read. This is
 the zbus 5.19 zero-argument pattern already used by sl-platformd's
 `CheckedPlatform`.
+
+### Check order
+Each method applies its checks in this order and stops at the first failure:
+1. **Admission** (methods that may need Argon2id work): `Busy`.
+2. **Storage:** a corrupt or unknown state file gives `Unavailable` (except
+   for `ResetEnrollment`); an expired provisional enrollment is normalized
+   durably.
+3. **Argument bounds:** any string argument longer than its fixed bound
+   (1024 bytes for passwords, 64 bytes for pairing codes and recovery keys),
+   and any pairing code or recovery key that is not well formed, gives
+   `InvalidArgument`. Malformed values can never match, so they consume no
+   attempt and change no counter.
+4. **State:** the named state error.
+5. **Backoff:** `RateLimited`, without evaluating the credential.
+6. **Credential**, then **new-password rules**, then the durable commit.
+
+A request waiting in the admission queue performs steps 2 to 6 only when it
+runs, under the same serialization as every other operation, so no commit is
+derived from state or backoff read before an earlier operation finished.
 
 ### Errors
 Every invalid-state call has a named error; nothing is implicit.
@@ -117,6 +140,10 @@ Every invalid-state call has a named error; nothing is implicit.
 ### ConfirmRecoveryKey(s recovery_key) -> ()
 - Valid only in EnrolledUnconfirmed, before the confirmation deadline.
 - On a matching key, durably moves to Enrolled.
+- After the deadline, it first durably normalizes to Unenrolled, then returns
+  `ConfirmationExpired`.
+- A wrong key counts against the confirmation scope's backoff only; it never
+  discards the provisional enrollment.
 - sl-managementd calls it after the owner re-enters the recovery key shown at
   pairing.
 - **Errors:** `NoProvisionalEnrollment`, `ConfirmationExpired`,
@@ -163,7 +190,10 @@ Supports Platform's idempotent `EnableRemoteManagement`.
   provisional state and confirmation deadline, and any pending pairing,
   returning to Unenrolled.
 - It never touches the TLS identity, which stays outside sl-authd.
-- **Errors:** `Unavailable`.
+- It is the only method that succeeds when the state file is corrupt or of an
+  unknown version: it replaces it atomically with a clean, durable
+  Unenrolled state.
+- **Errors:** `Unavailable` (only if the clean state cannot be written).
 - **Callers:** sl-platformd only, for Re-enroll and the boot-time reset
   worker.
 
@@ -171,6 +201,8 @@ Supports Platform's idempotent `EnableRemoteManagement`.
 - Reports the unexpired pending pairing, if any.
 - When `pending` is false (Unenrolled, EnrolledUnconfirmed or Enrolled),
   `pairing_code` is empty and `expires_at` is 0.
+- `pairing_code` is the 8 canonical uppercase Crockford characters, without
+  the display hyphen; Platform and the console format it as `XXXX-XXXX`.
 - `expires_at` is Unix seconds (UTC).
 - It never creates, extends or regenerates a pairing.
 - **Errors:** `Unavailable`.
@@ -210,7 +242,7 @@ Supports Platform's idempotent `EnableRemoteManagement`.
 
 ## Caller matrix and bus policy
 
-| Method | sl-managementd | console UI | sl-platformd (root) | sl-sessiond |
+| Method | sl-managementd | sl-console | sl-platformd (root) | sl-sessiond |
 |---|---|---|---|---|
 | VerifyPassword | yes | yes | no | no |
 | ConsumePairing | yes | no | no | no |
@@ -241,9 +273,9 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
 - The password and the recovery key are both hashed with **Argon2id,
   m = 64 MiB (65536 KiB), t = 3, p = 1**. There is no second hash function.
 - Hashes are stored as PHC strings, so the parameters travel with each hash.
-- **Proposal:** a 16-byte random salt and a 32-byte output.
+- A 16-byte random salt and a 32-byte output.
 
-### Argon2id admission (frozen, with a proposed size)
+### Argon2id admission (frozen)
 - Admission is bounded: one active hash plus a small bounded queue. Requests
   beyond the queue receive `Busy`.
 - An admission failure happens before any failure counter or state
@@ -251,15 +283,17 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
 - `Busy` is listed on every method that may need Argon2id work:
   `VerifyPassword`, `ConsumePairing`, `ConfirmRecoveryKey` and
   `RecoverPassword`.
-- **Proposal:** a queue of 4, allowing at most 5 hashes admitted at once. This
+- A queue of 4, allowing at most 5 hashes admitted at once. This
   bounds peak Argon2id memory to one active 64 MiB computation, while the
   small queue absorbs a login and a console action arriving together.
 
 ### Password rules (frozen)
 - At least 12 Unicode code points and at most 1024 bytes of UTF-8.
 - No composition rules.
-- **Proposal:** reject invalid UTF-8; apply no Unicode normalization; reject a
-  password equal to the pairing code or recovery key.
+- Reject invalid UTF-8; apply no Unicode normalization; reject a password
+  equal to the pairing code or recovery key. "Equal" means the password would
+  be accepted as that code (case-insensitively, with or without the hyphen) or
+  that key (ignoring ASCII case).
 
 ### Pairing code (frozen)
 - 8 characters from Crockford base32 (40 bits), generated from the kernel
@@ -269,20 +303,25 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
   explicit local Enable.
 - The plaintext code is held in sl-authd's memory only, never on disk. An
   sl-authd restart drops a pending pairing.
-- **Proposal:** display it as `XXXX-XXXX` and accept it case-insensitively,
-  with or without the hyphen.
+- Displayed as `XXXX-XXXX` and accepted case-insensitively, with or without
+  the hyphen.
 
 ### Recovery key (frozen)
 - 128 bits from the kernel CSPRNG, hashed with Argon2id as above.
 - It stays valid through `RecoverPassword`. Rotation happens only through
   re-enrollment.
-- **Proposal:** encode it as 26 Crockford base32 characters, displayed in
-  groups.
+- **Canonical encoding:** the 128 bits, most significant bit first, as 26
+  uppercase Crockford base32 characters. The first 25 characters carry 125
+  bits; the final character carries the last 3 key bits in its high 3 bits,
+  and its low 2 bits are zero padding. Any non-canonical encoding is rejected:
+  nonzero padding bits, a character outside the uppercase Crockford alphabet,
+  or a length other than 26. Clients may display the key in groups, but they
+  submit the canonical 26-character form.
 
 ### Confirmation deadline (frozen)
 10 minutes after `ConsumePairing`.
 
-### Backoff (frozen scope, proposed schedule)
+### Backoff (frozen)
 - Counters are **memory-only** for 0.0.3. They reset when sl-authd restarts.
 - The password scope (web or console) comes from the authenticated D-Bus
   sender identity, never from a caller-supplied value: sl-managementd's
@@ -291,11 +330,20 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
 - Pairing is its own scope, because it is a separate fixed method
   (`ConsumePairing`), and it is also bounded by the five-attempt destruction
   rule.
-- **Proposal:** `RecoverPassword` has its own recovery scope and
-  `ConfirmRecoveryKey` its own confirmation scope, each keyed by the fixed
-  method.
-- **Proposal:** after 5 consecutive failures in a scope, delay 2^(n−5)
-  seconds, capped at 15 minutes. A success resets that scope.
+- `RecoverPassword` has its own recovery scope and `ConfirmRecoveryKey` its
+  own confirmation scope, each keyed by the fixed method.
+- After 5 consecutive failures in a scope, delay 2^(n−5) seconds, capped at 15
+  minutes. A success resets that scope.
+- `RateLimited` carries no machine-readable retry-after in 0.0.3. Clients show
+  a generic "try again later" message.
+- Wrong `ConfirmRecoveryKey` attempts are subject to the confirmation scope's
+  backoff only. They never discard the provisional enrollment, which ends only
+  at its deadline, on reset or on successful confirmation.
+
+### Service identities (frozen)
+The console UI's service identity is `sl-console`. It is the bus-policy user
+for the console's methods and maps to the console password scope;
+`sl-managementd` maps to the web password scope.
 
 ### Randomness (frozen)
 Use the kernel CSPRNG through `libc::getrandom`, blocking until the pool is
@@ -331,8 +379,10 @@ dependency.
 - **After a crash,** either the old or the new state is visible, never a
   mixture. Stale temporary files are removed at startup.
 - **An unreadable or unknown state file** makes sl-authd refuse every operation
-  with `Unavailable` rather than silently reset. Recovery from corruption is
-  the boot-time reset.
+  with `Unavailable` rather than silently reset, with one exception:
+  `ResetEnrollment` may replace the invalid state with a clean, durable
+  Unenrolled state, using the same atomic-write sequence. Recovery from
+  corruption is therefore the boot-time reset (or an explicit re-enrollment).
 - **A method returns success only after its commit is durable.**
 - **EnrolledUnconfirmed persists** its password hash, recovery-key hash and
   confirmation deadline, so an sl-authd restart neither silently finalizes nor
@@ -401,7 +451,9 @@ directory:
 - **Formats:** password bounds (12 code points to 1024 bytes); the recovery key
   has 128 bits from the injected source.
 - **Storage:** atomic-write behavior, where simulated failures before rename
-  leave the old state intact; an unknown or corrupt file yields `Unavailable`.
+  leave the old state intact; an unknown or corrupt file yields `Unavailable`
+  for every operation except `ResetEnrollment`, which produces a clean,
+  durable Unenrolled state.
 - **Secrecy:** no secret (password, code or key) appears in logs or error
   messages; comparisons of codes are constant-time.
 - **Signatures:** wrong signatures, including arguments to zero-argument
@@ -434,15 +486,13 @@ Not provable by unit tests, and not claimed here:
   already fetches crates under `--locked`.
 - **CSPRNG:** `libc::getrandom`, with no new crate.
 
-## Open questions
-1. **`RateLimited` retry-after:** carry it in the error message text, or as a
-   typed value, for example a separate method or a changed return type?
-2. **Boot-time reset ordering:** the contract routes the reset through a
-   Platform early-boot worker calling sl-authd's methods, so sl-authd must run
-   before that worker. Confirm the ordering and that sl-authd tolerates early
-   start.
-3. **Console UI service identity name** for the bus policy and the console
-   backoff scope.
-4. **Wrong `ConfirmRecoveryKey` attempts:** is the confirmation scope's backoff
-   enough, or should repeated wrong keys also discard the provisional
-   enrollment before its deadline?
+## Resolved questions (5C-a step 2)
+1. **`RateLimited` retry-after:** none in 0.0.3; clients show a generic
+   message.
+2. **Boot-time reset ordering:** sl-authd must be available before the reset
+   worker runs, and the reset must complete before sl-managementd or
+   sl-console expose enrollment state. The mechanics belong to 5C-b and are
+   proven in 5E.
+3. **Console UI service identity:** `sl-console`.
+4. **Wrong `ConfirmRecoveryKey` attempts:** backoff only; they never discard
+   the provisional enrollment.
