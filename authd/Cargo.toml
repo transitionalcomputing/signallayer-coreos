@@ -1,0 +1,12 @@
+[package]
+name = "sl-authd"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+argon2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zbus.workspace = true
+tokio.workspace = true
+libc.workspace = true

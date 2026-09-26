@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/protocol", "crates/platform-client", "platformd", "corectl", "sessiond", "network-observer"]
+members = ["crates/protocol", "crates/platform-client", "platformd", "corectl", "sessiond", "network-observer", "authd"]
 resolver = "2"
 
 [workspace.package]
@@ -14,3 +14,11 @@ serde_json = "1"
 zbus = { version = "5.19", default-features = false, features = ["tokio"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "time", "sync"] }
 libc = "0.2"
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
+
+# Argon2id at the frozen parameters is too slow unoptimized for the unit tests.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
