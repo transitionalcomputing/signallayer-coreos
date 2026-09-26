@@ -59,18 +59,24 @@ COPY --from=platform-build /build/target/release/sl-platformd /usr/bin/sl-platfo
 COPY --from=platform-build /build/target/release/corectl /usr/bin/corectl
 COPY --from=platform-build /build/target/release/sl-sessiond /usr/bin/sl-sessiond
 COPY --from=platform-build /build/target/release/sl-network-observer /usr/bin/sl-network-observer
+COPY --from=platform-build /build/target/release/sl-authd /usr/bin/sl-authd
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
 COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.service
 COPY image/platform/sl-network-observer.service /usr/lib/systemd/system/sl-network-observer.service
+COPY image/platform/sl-authd.service /usr/lib/systemd/system/sl-authd.service
 COPY image/platform/sl-update.service /usr/lib/systemd/system/sl-update.service
 COPY image/platform/sl-rollback.service /usr/lib/systemd/system/sl-rollback.service
 COPY image/platform/sl-reboot.service /usr/lib/systemd/system/sl-reboot.service
 COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
 COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf
+COPY image/platform/sl-authd.sysusers /usr/lib/sysusers.d/sl-authd.conf
+COPY image/platform/sl-managementd.sysusers /usr/lib/sysusers.d/sl-managementd.conf
+COPY image/platform/sl-console.sysusers /usr/lib/sysusers.d/sl-console.conf
 COPY image/platform/org.signallayer.Platform1.conf /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf
 COPY image/platform/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.Session1.conf
 COPY image/platform/org.signallayer.NetworkObserver1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf
+COPY image/platform/org.signallayer.Auth1.conf /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf
 COPY image/platform/udisks2-polkit.conf /usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf
 COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_platformd.pp
 # The pinned bootc base sets store-root=/etc/selinux. Install offline, without
@@ -82,6 +88,9 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(matchpathcon -n /usr/bin/sl-platformd)" = system_u:object_r:sl_platformd_exec_t:s0 && \
     test "$(matchpathcon -n /usr/bin/sl-sessiond)" = system_u:object_r:sl_sessiond_exec_t:s0 && \
     test "$(matchpathcon -n /usr/bin/sl-network-observer)" = system_u:object_r:sl_network_observer_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/bin/sl-authd)" = system_u:object_r:sl_authd_exec_t:s0 && \
+    test "$(matchpathcon -n -m dir /var/lib/sl-authd)" = system_u:object_r:sl_authd_var_lib_t:s0 && \
+    test "$(matchpathcon -n -m file /var/lib/sl-authd/state.json)" = system_u:object_r:sl_authd_var_lib_t:s0 && \
     test "$(matchpathcon -n /usr/bin/bootc)" = system_u:object_r:install_exec_t:s0 && \
     test "$(matchpathcon -n /usr/lib/systemd/system/sl-update.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
     test "$(matchpathcon -n /usr/lib/systemd/system/sl-rollback.service)" = system_u:object_r:sl_update_unit_file_t:s0 && \
@@ -108,7 +117,26 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     ! awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eq '<allow [^>]*send_member="StartReboot"' && \
     ! (tr -s ' \n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | grep -Eo '<allow [^>]*send_destination[^>]*/>' | grep -vq 'send_member=') && \
     test "$(grep -rl 'StartReboot' /usr/share/dbus-1/system.d /etc/dbus-1 2>/dev/null)" = /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf && \
-    ! grep -Eq 'org\.signallayer\.Platform1|StartReboot|StartUpdate|StartRollback' /usr/share/dbus-1/system.d/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && \
+    grep -Fqx 'ExecStart=/usr/bin/sl-authd' /usr/lib/systemd/system/sl-authd.service && \
+    grep -Fqx 'User=sl-authd' /usr/lib/systemd/system/sl-authd.service && \
+    grep -Fqx 'StateDirectory=sl-authd' /usr/lib/systemd/system/sl-authd.service && \
+    grep -Fqx 'StateDirectoryMode=0700' /usr/lib/systemd/system/sl-authd.service && \
+    grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-authd.service && \
+    grep -Fqx 'RestrictAddressFamilies=AF_UNIX' /usr/lib/systemd/system/sl-authd.service && \
+    grep -Fqx 'u sl-authd - "SignalLayerIT authentication service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-authd.conf && \
+    grep -Fqx 'u sl-managementd - "SignalLayerIT remote management service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-managementd.conf && \
+    grep -Fqx 'u sl-console - "SignalLayerIT local console" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-console.conf && \
+    test "$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf)" = 6 && \
+    test "$(awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \n' ' ')" = ' <policy context="default"> <deny own="org.signallayer.Auth1"/> <deny send_destination="org.signallayer.Auth1"/> </policy> ' && \
+    test "$(awk '/<policy user="sl-authd">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \n' ' ')" = ' <policy user="sl-authd"> <allow own="org.signallayer.Auth1"/> </policy> ' && \
+    test "$(awk '/<policy user="sl-managementd">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="ConfirmRecoveryKey" send_member="ConsumePairing" send_member="VerifyPassword" ' && \
+    test "$(awk '/<policy user="sl-console">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="RecoverPassword" send_member="VerifyPassword" ' && \
+    test "$(awk '/<policy user="root">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="CancelPendingPairing" send_member="EnsurePendingPairing" send_member="GetEnrollmentState" send_member="GetPendingPairing" send_member="ResetEnrollment" ' && \
+    test "$(awk '/<policy user="sl-sessiond">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="GetEnrollmentState" ' && \
+    test "$(tr -s ' \n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -Eo '<allow [^>]*send_destination[^>]*/>' | grep -c '^<allow send_destination="org.signallayer.Auth1" send_path="/org/signallayer/Auth1" send_interface="org.signallayer.Auth1" send_member="[A-Za-z]*"/>$')" = 11 && \
+    test "$(tr -s ' \n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -Eo '<allow [^>]*/>' | wc -l)" = 12 && \
+    test "$(grep -rl 'org\.signallayer\.Auth1' /usr/share/dbus-1/system.d /etc/dbus-1 2>/dev/null)" = /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf && \
+    ! grep -Eq 'org\.signallayer\.Platform1|StartReboot|StartUpdate|StartRollback' /usr/share/dbus-1/system.d/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf && \
     test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
     test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
     test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \
@@ -122,4 +150,5 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
 RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
     ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && \
     ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && \
-    ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service
+    ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \
+    ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service
