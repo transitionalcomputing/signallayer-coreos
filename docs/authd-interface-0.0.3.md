@@ -341,6 +341,7 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
   treated as expired and normalized.
 - `GetPendingPairing` reports `expires_at` as the wall-clock time at creation
   plus 10 minutes; the expiry itself is decided on `CLOCK_BOOTTIME`.
+- If `CLOCK_BOOTTIME` cannot be read, the operation returns `Unavailable`. The clock is read before the backoff check, so the credential is normally never evaluated. Only if the read fails after a wrong credential was evaluated is that attempt recorded: the scope's failure count is incremented, its last-failure time is left unchanged, and the reply is `Unavailable`, not `InvalidCredential`.
 - Behavior of these clocks on the real VM and runtime is verified in 5E.
 
 ### Backoff (frozen)
