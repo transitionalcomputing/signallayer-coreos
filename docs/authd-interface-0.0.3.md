@@ -36,7 +36,7 @@ Transitions (the method names are defined below):
 |---|---|---|---|
 | Unenrolled | `EnsurePendingPairing` | PendingPairing | Creates a new code, a 10-minute expiry and a zero attempt count. |
 | PendingPairing | `EnsurePendingPairing` | PendingPairing | No change while unexpired; the code is not rotated. |
-| PendingPairing | pairing expiry reached | Unenrolled | Evaluated against the clock on each operation; no timer. |
+| PendingPairing | pairing expiry reached | Unenrolled | Evaluated against `CLOCK_BOOTTIME` on each operation; no timer. |
 | PendingPairing | fifth wrong `ConsumePairing` code | Unenrolled | The pending pairing is destroyed. A new code requires explicit local Enable. |
 | PendingPairing | sl-authd restart | Unenrolled | The pending pairing exists only in memory. |
 | PendingPairing | `CancelPendingPairing` | Unenrolled | Used by Platform's Disable. |
@@ -72,7 +72,13 @@ All methods are fixed. Their argument signatures are exact: a call with any
 other signature, including any argument to a zero-argument method, is rejected
 with `org.freedesktop.DBus.Error.InvalidArgs` before any state is read. This is
 the zbus 5.19 zero-argument pattern already used by sl-platformd's
-`CheckedPlatform`.
+`CheckedPlatform`, extended to check every method's signature.
+
+**Implementation-layer limitation:** zvariant represents a message body with
+several arguments as a structure, so the check sees two string arguments and a
+single `(ss)` structure argument as the same signature and accepts both. Both
+deliver the same two strings. How the real bus and zbus handle a `(ss)` body at
+runtime is a 5E claim.
 
 ### Check order
 Each method applies its checks in this order and stops at the first failure:
@@ -189,6 +195,9 @@ Supports Platform's idempotent `EnableRemoteManagement`.
 - From any state, clears the password hash, the recovery-key hash, any
   provisional state and confirmation deadline, and any pending pairing,
   returning to Unenrolled.
+- After the durable reset succeeds, it clears every in-memory backoff counter
+  (both password scopes, recovery and confirmation), and the pending pairing
+  with its attempt count. A failed reset clears nothing.
 - It never touches the TLS identity, which stays outside sl-authd.
 - It is the only method that succeeds when the state file is corrupt or of an
   unknown version: it replaces it atomically with a clean, durable
@@ -321,6 +330,19 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
 ### Confirmation deadline (frozen)
 10 minutes after `ConsumePairing`.
 
+### Clock sources (frozen)
+- **In-memory timers** (pairing expiry and backoff windows) use
+  `CLOCK_BOOTTIME` through the injected clock: monotonic, and including time
+  spent in system suspend. They never use wall-clock time, so wall-clock
+  steps neither extend nor shorten them.
+- **The persisted confirmation deadline** is wall-clock Unix seconds, because
+  it must survive a restart. A stored deadline more than 10 minutes after the
+  current wall time cannot have been set by a fresh enrollment, so it is
+  treated as expired and normalized.
+- `GetPendingPairing` reports `expires_at` as the wall-clock time at creation
+  plus 10 minutes; the expiry itself is decided on `CLOCK_BOOTTIME`.
+- Behavior of these clocks on the real VM and runtime is verified in 5E.
+
 ### Backoff (frozen)
 - Counters are **memory-only** for 0.0.3. They reset when sl-authd restarts.
 - The password scope (web or console) comes from the authenticated D-Bus
@@ -443,7 +465,10 @@ directory:
   - the scope is derived from the sender identity, and a caller-supplied value
     has no effect;
   - the scopes are independent;
-  - counters are absent from `state.json` and reset on a simulated restart.
+  - counters are absent from `state.json` and reset on a simulated restart;
+  - `ResetEnrollment` leaves every scope clean;
+  - wall-clock steps backward and forward change no in-memory window, and a
+    far-future persisted deadline normalizes as expired.
 - **Admission:** beyond one active hash plus the queue, calls return `Busy`
   without changing any counter or state.
 - **Hashing:** both hashes are Argon2id with m = 65536, t = 3, p = 1, as
@@ -475,6 +500,8 @@ Not provable by unit tests, and not claimed here:
 ## Deferred to the hardening release
 - Recovery-key rotation on use.
 - Restart-resistant (persistent) throttling.
+- Zeroizing secrets (passwords, pairing code, recovery key) in memory after
+  use.
 - SELinux-level restriction of the Platform-only methods to sl-platformd,
   since UID-based bus policy admits any root process.
 

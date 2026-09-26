@@ -35,18 +35,34 @@ pub enum Failure {
 }
 
 pub trait Clock: Send {
-    /// Unix seconds (UTC).
-    fn now(&self) -> u64;
+    /// Wall-clock Unix seconds (UTC). Used only for the persisted
+    /// confirmation deadline and the reported pairing expiry.
+    fn wall(&self) -> u64;
+    /// CLOCK_BOOTTIME seconds: monotonic and including suspend. Every
+    /// in-memory timer (pairing expiry, backoff) uses this clock.
+    fn boot(&self) -> Option<u64>;
 }
 
 pub struct SystemClock;
 
 impl Clock for SystemClock {
-    fn now(&self) -> u64 {
+    fn wall(&self) -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_secs())
             .unwrap_or(0)
+    }
+
+    fn boot(&self) -> Option<u64> {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: the pointer refers to a live, writable timespec.
+        let result = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut time) };
+        (result == 0)
+            .then(|| u64::try_from(time.tv_sec).ok())
+            .flatten()
     }
 }
 
@@ -59,14 +75,18 @@ pub enum Scope {
     Confirmation,
 }
 
+/// `last_failure` is CLOCK_BOOTTIME seconds.
 #[derive(Default)]
 struct Counter {
     failures: u32,
     last_failure: u64,
 }
 
+/// `expires_boot` (CLOCK_BOOTTIME) decides expiry; `expires_at` (wall clock)
+/// is only reported through GetPendingPairing.
 struct Pairing {
     code: [u8; PAIRING_CODE_BYTES],
+    expires_boot: u64,
     expires_at: u64,
     wrong_attempts: u8,
 }
@@ -93,6 +113,13 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
             .zip(right)
             .fold(0u8, |difference, (a, b)| difference | (a ^ b))
             == 0
+}
+
+/// The persisted deadline is wall-clock time. A deadline further in the future
+/// than a fresh enrollment could set (the wall clock moved backward, or the
+/// file is inconsistent) is treated as expired.
+fn deadline_expired(deadline: u64, wall: u64) -> bool {
+    wall >= deadline || deadline > wall.saturating_add(CONFIRMATION_WINDOW)
 }
 
 fn backoff_delay(failures: u32) -> u64 {
@@ -153,14 +180,14 @@ impl Core {
     /// Refuses on invalid state, drops an expired pairing and durably
     /// normalizes an expired provisional enrollment.
     fn prepare(&mut self) -> Result<(), Failure> {
-        let now = self.clock.now();
         let Some(persisted) = &self.persisted else {
             return Err(Failure::Unavailable);
         };
+        let boot = self.boot_now()?;
         if self
             .pairing
             .as_ref()
-            .is_some_and(|pairing| now >= pairing.expires_at)
+            .is_some_and(|pairing| boot >= pairing.expires_boot)
         {
             self.pairing = None;
         }
@@ -169,7 +196,7 @@ impl Core {
             ..
         } = persisted
         {
-            if now >= *confirmation_deadline {
+            if deadline_expired(*confirmation_deadline, self.clock.wall()) {
                 self.commit(Persisted::Unenrolled)?;
                 self.expired_provisional = true;
             }
@@ -177,22 +204,31 @@ impl Core {
         Ok(())
     }
 
-    fn check_backoff(&self, scope: Scope) -> Result<(), Failure> {
-        match self.backoff.get(&scope) {
-            Some(counter)
-                if self.clock.now() < counter.last_failure + backoff_delay(counter.failures) =>
-            {
-                Err(Failure::RateLimited)
-            }
-            _ => Ok(()),
-        }
+    fn boot_now(&self) -> Result<u64, Failure> {
+        self.clock.boot().ok_or(Failure::Unavailable)
     }
 
-    fn record_failure(&mut self, scope: Scope) {
-        let now = self.clock.now();
+    fn check_backoff(&self, scope: Scope) -> Result<(), Failure> {
+        let Some(counter) = self.backoff.get(&scope) else {
+            return Ok(());
+        };
+        let until = counter
+            .last_failure
+            .saturating_add(backoff_delay(counter.failures));
+        if self.boot_now()? < until {
+            return Err(Failure::RateLimited);
+        }
+        Ok(())
+    }
+
+    /// The failure is counted even if the clock cannot be read; the caller
+    /// then reports Unavailable instead of the credential error.
+    fn record_failure(&mut self, scope: Scope) -> Result<(), Failure> {
+        let boot = self.clock.boot();
         let counter = self.backoff.entry(scope).or_default();
         counter.failures = counter.failures.saturating_add(1);
-        counter.last_failure = now;
+        counter.last_failure = boot.ok_or(Failure::Unavailable)?;
+        Ok(())
     }
 
     fn record_success(&mut self, scope: Scope) {
@@ -261,7 +297,7 @@ impl Core {
             self.record_success(scope);
             Ok(())
         } else {
-            self.record_failure(scope);
+            self.record_failure(scope)?;
             Err(Failure::InvalidCredential)
         }
     }
@@ -306,7 +342,7 @@ impl Core {
         let password_hash = self.hash(new_password.as_bytes())?;
         let recovery_key_hash = self.hash(encoded_key.as_bytes())?;
         // The deadline starts when the enrollment commits, after the hashing.
-        let confirmation_deadline = self.clock.now() + CONFIRMATION_WINDOW;
+        let confirmation_deadline = self.clock.wall() + CONFIRMATION_WINDOW;
         self.commit(Persisted::EnrolledUnconfirmed {
             password_hash,
             recovery_key_hash,
@@ -340,7 +376,7 @@ impl Core {
             return Err(Failure::ConfirmationExpired);
         }
         if !matches {
-            self.record_failure(Scope::Confirmation);
+            self.record_failure(Scope::Confirmation)?;
             return Err(Failure::InvalidCredential);
         }
         self.commit(Persisted::Enrolled {
@@ -370,7 +406,7 @@ impl Core {
         };
         self.check_backoff(Scope::Recovery)?;
         if !self.verify(recovery_key.as_bytes(), &recovery_key_hash)? {
-            self.record_failure(Scope::Recovery);
+            self.record_failure(Scope::Recovery)?;
             return Err(Failure::InvalidCredential);
         }
         self.record_success(Scope::Recovery);
@@ -390,10 +426,12 @@ impl Core {
         if self.persisted != Some(Persisted::Unenrolled) || self.pairing.is_some() {
             return Ok(());
         }
+        let expires_boot = self.boot_now()? + PAIRING_LIFETIME;
         let code: [u8; PAIRING_CODE_BYTES] = self.random_bytes()?;
         self.pairing = Some(Pairing {
             code,
-            expires_at: self.clock.now() + PAIRING_LIFETIME,
+            expires_boot,
+            expires_at: self.clock.wall() + PAIRING_LIFETIME,
             wrong_attempts: 0,
         });
         self.expired_provisional = false;
@@ -407,11 +445,14 @@ impl Core {
     }
 
     /// Succeeds from any state, including an invalid state file, which it
-    /// replaces with a clean, durable Unenrolled state.
+    /// replaces with a clean, durable Unenrolled state. Only after that commit
+    /// does it clear the pending pairing (with its attempt count) and every
+    /// in-memory backoff counter.
     pub fn reset_enrollment(&mut self) -> Result<(), Failure> {
         self.commit(Persisted::Unenrolled)?;
         self.pairing = None;
         self.expired_provisional = false;
+        self.backoff.clear();
         Ok(())
     }
 

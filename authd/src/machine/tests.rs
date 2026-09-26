@@ -15,6 +15,8 @@ use std::{
 };
 
 pub const START: u64 = 1_800_000_000;
+/// CLOCK_BOOTTIME at the start of each test: unrelated to the wall clock.
+pub const BOOT_START: u64 = 5_000;
 pub const PASSWORD: &str = "correct horse battery";
 pub const OTHER_PASSWORD: &str = "another long passphrase";
 
@@ -26,6 +28,7 @@ type Hook = Box<dyn FnMut() + Send>;
 pub struct Harness {
     pub directory: Arc<TempDir>,
     pub clock: Arc<AtomicU64>,
+    pub boot: Arc<AtomicU64>,
     pub scripted: Arc<Mutex<VecDeque<u8>>>,
     pub counter: Arc<AtomicU64>,
     pub random_fails: Arc<AtomicBool>,
@@ -35,11 +38,19 @@ pub struct Harness {
     pub fault: Arc<Mutex<Option<Step>>>,
 }
 
-struct TestClock(Arc<AtomicU64>);
+/// Wall and boot clocks move independently, so tests can jump either one.
+struct TestClock {
+    wall: Arc<AtomicU64>,
+    boot: Arc<AtomicU64>,
+}
 
 impl Clock for TestClock {
-    fn now(&self) -> u64 {
-        self.0.load(Ordering::SeqCst)
+    fn wall(&self) -> u64 {
+        self.wall.load(Ordering::SeqCst)
+    }
+
+    fn boot(&self) -> Option<u64> {
+        Some(self.boot.load(Ordering::SeqCst))
     }
 }
 
@@ -85,6 +96,7 @@ impl Harness {
         Self {
             directory: Arc::new(TempDir::new()),
             clock: Arc::new(AtomicU64::new(START)),
+            boot: Arc::new(AtomicU64::new(BOOT_START)),
             scripted: Arc::default(),
             counter: Arc::default(),
             random_fails: Arc::default(),
@@ -106,14 +118,24 @@ impl Harness {
                     Ok(())
                 }
             }),
-            Box::new(TestClock(Arc::clone(&self.clock))),
+            Box::new(TestClock {
+                wall: Arc::clone(&self.clock),
+                boot: Arc::clone(&self.boot),
+            }),
             Box::new(TestRandom(self.clone())),
             Box::new(TestHasher(self.clone(), Argon2id::with_cost(8, 1, 1))),
         )
     }
 
+    /// Real elapsed time: both clocks advance together.
     pub fn advance(&self, seconds: u64) {
         self.clock.fetch_add(seconds, Ordering::SeqCst);
+        self.boot.fetch_add(seconds, Ordering::SeqCst);
+    }
+
+    /// A wall-clock step (NTP, RTC or manual change) with no elapsed time.
+    pub fn set_wall(&self, wall: u64) {
+        self.clock.store(wall, Ordering::SeqCst);
     }
 
     pub fn script(&self, bytes: &[u8]) {
@@ -820,7 +842,16 @@ fn password_backoff_is_per_sender_uid_and_skips_evaluation() {
 fn recovery_and_confirmation_scopes_are_independent_of_passwords() {
     let harness = Harness::new();
     let mut core = harness.open();
-    let key = enroll(&mut core);
+    let key = enroll_unconfirmed(&mut core);
+    for _ in 0..5 {
+        assert_eq!(
+            core.confirm_recovery_key(&wrong_key(&key)),
+            Err(Failure::InvalidCredential)
+        );
+    }
+    assert_eq!(core.confirm_recovery_key(&key), Err(Failure::RateLimited));
+    harness.advance(1);
+    core.confirm_recovery_key(&key).unwrap();
     for _ in 0..5 {
         assert_eq!(
             core.recover_password(&wrong_key(&key), OTHER_PASSWORD),
@@ -832,17 +863,6 @@ fn recovery_and_confirmation_scopes_are_independent_of_passwords() {
         Err(Failure::RateLimited)
     );
     assert_eq!(core.verify_password(990, PASSWORD), Ok(()));
-    core.reset_enrollment().unwrap();
-    assert_eq!(
-        core.verify_password(990, PASSWORD),
-        Err(Failure::NotEnrolled)
-    );
-    let key = enroll_unconfirmed(&mut core);
-    core.confirm_recovery_key(&key).unwrap();
-    assert_eq!(
-        core.recover_password(&key, OTHER_PASSWORD),
-        Err(Failure::RateLimited)
-    );
     harness.advance(1);
     core.recover_password(&key, OTHER_PASSWORD).unwrap();
 }
@@ -1052,4 +1072,175 @@ fn a_stale_temporary_file_is_removed_at_startup() {
     let mut core = harness.open();
     assert!(!harness.directory.0.join("state.json.tmp").exists());
     assert_eq!(core.get_enrollment_state(), Ok((true, false)));
+}
+
+// Clock sources.
+
+#[test]
+fn wall_clock_jumps_do_not_move_pairing_expiry() {
+    for jump in [START - 86_400, START + 86_400] {
+        let harness = Harness::new();
+        let mut core = harness.open();
+        core.ensure_pending_pairing().unwrap();
+        harness.set_wall(jump);
+        assert_eq!(core.get_enrollment_state(), Ok((false, true)), "{jump}");
+        assert_eq!(
+            core.get_pending_pairing().unwrap().2,
+            START + PAIRING_LIFETIME
+        );
+        harness
+            .boot
+            .fetch_add(PAIRING_LIFETIME - 1, Ordering::SeqCst);
+        assert_eq!(core.get_enrollment_state(), Ok((false, true)), "{jump}");
+        harness.boot.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(core.get_enrollment_state(), Ok((false, false)), "{jump}");
+    }
+}
+
+#[test]
+fn wall_clock_jumps_do_not_move_backoff_windows() {
+    for jump in [START - 86_400, START + 86_400] {
+        let harness = Harness::new();
+        let mut core = harness.open();
+        enroll(&mut core);
+        for _ in 0..6 {
+            harness.advance(2);
+            assert_eq!(
+                core.verify_password(990, "wrong password!"),
+                Err(Failure::InvalidCredential)
+            );
+        }
+        // Six failures: a 2-second window on CLOCK_BOOTTIME.
+        harness.set_wall(jump);
+        assert_eq!(
+            core.verify_password(990, PASSWORD),
+            Err(Failure::RateLimited),
+            "{jump}"
+        );
+        harness.boot.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(
+            core.verify_password(990, PASSWORD),
+            Err(Failure::RateLimited),
+            "{jump}"
+        );
+        harness.boot.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(core.verify_password(990, PASSWORD), Ok(()), "{jump}");
+    }
+}
+
+#[test]
+fn a_far_future_persisted_deadline_normalizes_as_expired() {
+    let harness = Harness::new();
+    let mut core = harness.open();
+    let key = enroll_unconfirmed(&mut core);
+    drop(core);
+    // The wall clock steps back by more than the confirmation window.
+    harness.set_wall(START - CONFIRMATION_WINDOW - 1);
+    let mut core = harness.open();
+    assert_eq!(
+        harness.state_json(),
+        serde_json::json!({"version": 1, "state": "unenrolled"})
+    );
+    assert_eq!(
+        core.confirm_recovery_key(&key),
+        Err(Failure::ConfirmationExpired)
+    );
+}
+
+#[test]
+fn a_deadline_exactly_one_window_ahead_is_still_valid() {
+    let harness = Harness::new();
+    let mut core = harness.open();
+    let key = enroll_unconfirmed(&mut core);
+    harness.set_wall(START);
+    assert_eq!(core.get_enrollment_state(), Ok((false, false)));
+    assert_eq!(harness.persisted_state(), "enrolled_unconfirmed");
+    harness.set_wall(START - 1);
+    assert_eq!(
+        core.confirm_recovery_key(&key),
+        Err(Failure::ConfirmationExpired)
+    );
+}
+
+#[test]
+fn deadline_check_boundaries() {
+    let wall = START;
+    assert!(!deadline_expired(wall + 1, wall));
+    assert!(!deadline_expired(wall + CONFIRMATION_WINDOW, wall));
+    assert!(deadline_expired(wall + CONFIRMATION_WINDOW + 1, wall));
+    assert!(deadline_expired(wall, wall));
+    assert!(deadline_expired(wall - 1, wall));
+    assert!(deadline_expired(u64::MAX, wall));
+    assert!(!deadline_expired(u64::MAX, u64::MAX - 1));
+}
+
+// ResetEnrollment and backoff.
+
+#[test]
+fn reset_clears_every_backoff_scope_and_the_pairing_attempts() {
+    let harness = Harness::new();
+    let mut core = harness.open();
+    let key = enroll(&mut core);
+    for uid in [990, 991] {
+        for _ in 0..8 {
+            let _ = core.verify_password(uid, "wrong password!");
+        }
+        assert_eq!(
+            core.verify_password(uid, PASSWORD),
+            Err(Failure::RateLimited)
+        );
+    }
+    for _ in 0..8 {
+        let _ = core.recover_password(&wrong_key(&key), OTHER_PASSWORD);
+    }
+    assert_eq!(
+        core.recover_password(&key, OTHER_PASSWORD),
+        Err(Failure::RateLimited)
+    );
+    core.reset_enrollment().unwrap();
+    let key = enroll_unconfirmed(&mut core);
+    for _ in 0..8 {
+        let _ = core.confirm_recovery_key(&wrong_key(&key));
+    }
+    assert_eq!(core.confirm_recovery_key(&key), Err(Failure::RateLimited));
+    core.reset_enrollment().unwrap();
+    // A fresh pairing with 4 wrong attempts; reset discards it and its count.
+    core.ensure_pending_pairing().unwrap();
+    let code = pairing_code(&mut core);
+    for _ in 0..4 {
+        let _ = core.consume_pairing(&wrong_code(&code), PASSWORD);
+    }
+    core.reset_enrollment().unwrap();
+    assert_eq!(core.get_enrollment_state(), Ok((false, false)));
+    core.ensure_pending_pairing().unwrap();
+    let code = pairing_code(&mut core);
+    for _ in 0..4 {
+        assert_eq!(
+            core.consume_pairing(&wrong_code(&code), PASSWORD),
+            Err(Failure::InvalidPairingCode)
+        );
+    }
+    // No time has passed: every scope is clean only because of the resets.
+    let key = core.consume_pairing(&code, PASSWORD).unwrap();
+    core.confirm_recovery_key(&key).unwrap();
+    assert_eq!(core.verify_password(990, PASSWORD), Ok(()));
+    assert_eq!(core.verify_password(991, PASSWORD), Ok(()));
+    core.recover_password(&key, OTHER_PASSWORD).unwrap();
+}
+
+#[test]
+fn a_failed_reset_keeps_the_backoff() {
+    let harness = Harness::new();
+    let mut core = harness.open();
+    enroll(&mut core);
+    for _ in 0..5 {
+        let _ = core.verify_password(990, "wrong password!");
+    }
+    harness.fail_at(Some(Step::Rename));
+    assert_eq!(core.reset_enrollment(), Err(Failure::Unavailable));
+    harness.fail_at(None);
+    assert_eq!(
+        core.verify_password(990, PASSWORD),
+        Err(Failure::RateLimited)
+    );
 }
