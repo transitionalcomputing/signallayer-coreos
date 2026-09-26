@@ -41,6 +41,34 @@ dev_read_urand(sl_network_observer_t)
 dbus_system_bus_client(sl_network_observer_t)
 allow sl_network_observer_t self:dbus acquire_svc;
 
+# The authentication service is a separate unprivileged domain with one
+# private persistent state directory. It exchanges messages only with its
+# existing callers (Platform and the session service); the remote-management
+# and console domains are added with those services in 5C-b.
+type sl_authd_t;
+type sl_authd_exec_t;
+init_daemon_domain(sl_authd_t, sl_authd_exec_t)
+domtrans_pattern(init_t, sl_authd_exec_t, sl_authd_t)
+allow init_t sl_authd_t:process2 nnp_transition;
+
+libs_use_ld_so(sl_authd_t)
+libs_use_shared_libs(sl_authd_t)
+files_read_usr_files(sl_authd_t)
+miscfiles_read_localization(sl_authd_t)
+dev_read_urand(sl_authd_t)
+# Rust available_parallelism reads cgroup CPU quota information at startup.
+fs_read_cgroup_files(sl_authd_t)
+dbus_system_bus_client(sl_authd_t)
+allow sl_authd_t self:dbus acquire_svc;
+
+# Only sl_authd_t writes its state. PID 1 creates and chowns the directory for
+# StateDirectory=sl-authd; it receives no file access inside it.
+type sl_authd_var_lib_t;
+files_type(sl_authd_var_lib_t)
+files_search_var_lib(sl_authd_t)
+manage_files_pattern(sl_authd_t, sl_authd_var_lib_t, sl_authd_var_lib_t)
+allow init_t sl_authd_var_lib_t:dir { create_dir_perms setattr relabelto };
+
 # PID 1 transitions on the image-owned entry point. No permissive/unconfined
 # attribute is assigned to this domain or its inherited bootc children.
 type sl_platformd_t;
@@ -119,6 +147,10 @@ allow sl_platformd_t self:dbus acquire_svc;
 init_dbus_chat(sl_platformd_t)
 allow sl_sessiond_t sl_platformd_t:dbus send_msg;
 allow sl_platformd_t sl_sessiond_t:dbus send_msg;
+allow sl_platformd_t sl_authd_t:dbus send_msg;
+allow sl_authd_t sl_platformd_t:dbus send_msg;
+allow sl_sessiond_t sl_authd_t:dbus send_msg;
+allow sl_authd_t sl_sessiond_t:dbus send_msg;
 # Platform talks only to the network observer; it has no direct NetworkManager
 # message permission. The observer's system-bus policy further restricts its
 # unprivileged identity to the Properties.Get member.
