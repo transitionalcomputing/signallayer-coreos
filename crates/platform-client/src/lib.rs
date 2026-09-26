@@ -208,7 +208,7 @@ mod tests {
         serde_json::json!({
             "schema_version": schema_version,
             "product": "SignalLayerIT CoreOS",
-            "version": "0.0.1",
+            "version": "0.0.2",
             "platform_api_version": "0.2",
             "source_revision": null,
             "build_id": null,

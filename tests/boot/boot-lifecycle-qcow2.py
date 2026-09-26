@@ -328,6 +328,10 @@ AGREEMENT_START = "    # Platform/Session1 agreement: status reads are not atomi
 AGREEMENT_END = '        collect post_agree_converged echo "$post_converged"\n    fi\n'
 AGREEMENT_SUFFIXES = ("seed", "candidate", "after_rollback")
 STATUS_SUFFIXES = ("seed", "candidate", "queued", "after_rollback")
+RELEASE_VERSION = "0.0.2"
+RELEASE_IMAGE_REFERENCE = "localhost/signallayer-coreos:0.0.2"
+DEFAULT_REGISTRY_TARGET = "docker://localhost:5000/signallayer-coreos:0.0.1"
+RELEASE_REGISTRY_TARGET = "docker://localhost:5000/signallayer-coreos:0.0.2"
 BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -409,9 +413,15 @@ def evaluate_release_0_0_2(evidence):
             and candidate["update"]["state"] == "idle"
             and candidate["rollback"]["state"] == "idle"
         )
+        checks["release_0_0_2_identity_all_boots"] = all(
+            status["version"] == RELEASE_VERSION
+            and status["booted"]["image_reference"] == RELEASE_IMAGE_REFERENCE
+            for status in statuses.values()
+        )
     except (KeyError, TypeError, ValueError):
         checks["release_0_0_2_status_all_boots"] = False
         checks["candidate_schema_0_3_idle_states"] = False
+        checks["release_0_0_2_identity_all_boots"] = False
     checks["one_activation_and_one_rollback_reboot"] = (
         text("activation_reboot_requested")
         == text("rollback_reboot_requested")
@@ -528,7 +538,7 @@ def main():
                 "skopeo",
                 "inspect",
                 "--tls-verify=false",
-                "docker://localhost:5000/signallayer-coreos:0.0.1",
+                RELEASE_REGISTRY_TARGET if args.release_0_0_2 else DEFAULT_REGISTRY_TARGET,
             ],
             stdout=target,
             check=True,

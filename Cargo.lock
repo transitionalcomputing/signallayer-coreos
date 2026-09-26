@@ -68,7 +68,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "corectl"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde_json",
  "sl-platform-client",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "sl-network-observer"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde_json",
  "sl-protocol",
@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "sl-platform-client"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde_json",
  "sl-protocol",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "sl-platformd"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "libc",
  "serde_json",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "sl-protocol"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde",
  "zbus",
@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "sl-sessiond"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "serde_json",
  "sl-platform-client",

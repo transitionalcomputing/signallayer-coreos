@@ -29,7 +29,8 @@ BOOT_IDS = {
 NEW_CHECKS = {
     "release_0_0_2_status_all_boots", "candidate_schema_0_3_idle_states",
     "boot_sequence_exactly_three_boots", "activation_reboot_outcome_acceptable",
-    "rollback_reboot_outcome_acceptable", "seed_platform_session_agree",
+    "rollback_reboot_outcome_acceptable", "release_0_0_2_identity_all_boots",
+    "seed_platform_session_agree",
     "candidate_platform_session_agree", "after_rollback_platform_session_agree",
 }
 
@@ -103,12 +104,14 @@ class DefaultReproduces3FTests(unittest.TestCase):
         self.assertFalse(lifecycle.evaluate(evidence)["no_unexpected_relevant_avcs"])
 
 
-def release_evidence(corectl_exits=(0, 0), sequence=None, agreement=None, schema="0.3", api="0.2"):
+def release_evidence(corectl_exits=(0, 0), sequence=None, agreement=None, schema="0.3", api="0.2",
+                     version="0.0.2", reference="localhost/signallayer-coreos:0.0.2"):
     """The accepted 3F evidence, adjusted to what a passing 0.0.2 run records."""
     evidence = copy.deepcopy(fixture("phase3f-acceptance-evidence.json"))
     for suffix in lifecycle.STATUS_SUFFIXES:
         status = json.loads(evidence[f"{suffix}_corectl"]["output"])
         status["schema_version"], status["platform_api_version"] = schema, api
+        status["version"], status["booted"]["image_reference"] = version, reference
         evidence[f"{suffix}_corectl"]["output"] = json.dumps(status)
     evidence["activation_reboot_requested"] = record("corectl reboot")
     evidence["rollback_reboot_requested"] = record("corectl reboot")
@@ -159,6 +162,19 @@ class Release002ModeTests(unittest.TestCase):
             self.assertFalse(checks["release_0_0_2_status_all_boots"], (schema, api))
         checks, _ = self.evaluate(schema="0.2")
         self.assertFalse(checks["candidate_schema_0_3_idle_states"])
+
+    def test_product_identity_is_0_0_2_at_every_boot(self):
+        self.assertTrue(self.evaluate()[0]["release_0_0_2_identity_all_boots"])
+        for kwargs in ({"version": "0.0.1"},
+                       {"reference": "localhost/signallayer-coreos:0.0.1"}):
+            checks, _ = self.evaluate(**kwargs)
+            self.assertFalse(checks["release_0_0_2_identity_all_boots"], kwargs)
+
+    def test_registry_targets(self):
+        self.assertEqual(lifecycle.DEFAULT_REGISTRY_TARGET,
+                         "docker://localhost:5000/signallayer-coreos:0.0.1")
+        self.assertEqual(lifecycle.RELEASE_REGISTRY_TARGET,
+                         "docker://localhost:5000/signallayer-coreos:0.0.2")
 
     def test_reboot_outcomes_follow_4d_semantics(self):
         for exits, labels in (((3, None), ("indeterminate (exit 3)", "not captured")),

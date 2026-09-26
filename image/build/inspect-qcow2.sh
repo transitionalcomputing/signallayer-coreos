@@ -70,7 +70,7 @@ origin=$(find "${mounts[@]}" -type f -path '*/ostree/deploy/*/deploy/*.origin' -
 release=$(find "${mounts[@]}" -type f -path '*/ostree/deploy/*/deploy/*/usr/lib/signallayer/release' -print -quit)
 [[ -n $repo && -n $origin && -n $release ]]
 cat "$origin" | tee "$report_dir/deployment-origin.txt"
-grep -q 'container-image-reference=.*localhost/signallayer-coreos:0.0.1' "$origin"
+grep -q 'container-image-reference=.*localhost/signallayer-coreos:0.0.2' "$origin"
 cmp "$report_dir/source-release" "$release"
 if [[ -f $report_dir/source-ostree-context ]]; then
     # The host kernel presents image-only contexts as unlabeled_t to callers

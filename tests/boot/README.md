@@ -250,10 +250,11 @@ remain in the ignored `image/build/output/phase3f-acceptance-*` directory.
 
 For Phase 4E (release 0.0.2), run the same runner with `--release-0-0-2`
 against the accepted 4D acceptance qcow2 as deployment A, with B built from the
-same product commit with only a different build ID and published at the same
-development registry reference. The default mode is unchanged and reproduces
-3F. In 0.0.2 mode, every boot must report status schema 0.3 and Platform API
-0.2. Both reboots use `corectl reboot` (StartReboot) instead of
+same product commit with only a different build ID and published at
+`localhost:5000/signallayer-coreos:0.0.2`. The default mode is unchanged and
+reproduces 3F. In 0.0.2 mode, every boot must report product version 0.0.2,
+the image reference `localhost/signallayer-coreos:0.0.2`, status schema 0.3 and
+Platform API 0.2. Both reboots use `corectl reboot` (StartReboot) instead of
 `systemctl reboot`, and each exit status is recorded with 4D's semantics: exit
 0 or 3, or not captured, is accepted only if the recorded boot sequence shows
 exactly one reboot per transition. At boots 1, 2 and 3, Platform, Session1 and
