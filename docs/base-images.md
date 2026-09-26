@@ -7,6 +7,11 @@ Quay by 2026-09-25. Bases are therefore mirrored to the canonical SignalLayer
 repository, `ghcr.io/transitionalcomputing/signallayer-base`, and every base
 is recorded here.
 
+`signallayer-base` is public. Anonymous access was verified on 2026-09-26:
+without credentials, the raw index of `signallayer-base:fedora-44-20260926`
+hashed to `sha256:6718b0634e138d1909e752dc0f7d8a203ede6ece33bc637f72282bde3d44887b`,
+equal to upstream.
+
 ## Refresh procedure
 
 1. **Resolve** the upstream tag to digests. Record the index digest and the
