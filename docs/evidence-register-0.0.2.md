@@ -164,6 +164,57 @@ Storage: the dev VM (`phase4e/`, with `4e.log`, `4e-preserve.log`,
 hypervisor's VM backups. Per-file checksums:
 `docs/evidence/phase4e-acceptance-20260925-225402.sha256`.
 
+## Release 0.0.2
+
+Release tag: `v0.0.2` = `b3f586bc215125e6b18e60d4c823f2fa7436e3a1` (tree
+`1a50e553198ebabfef060e9fe906d7a17dc8f3ee`), on branch `release/0.0.2`.
+
+The release differs from the validated 4E main (`c1594a4`) in product identity
+only: no feature, API, policy or behavior change.
+- **Changed to 0.0.2:** the Containerfile release `VERSION` and OCI version
+  label; the Cargo workspace version, with the six workspace packages'
+  `Cargo.lock` entries; `build-qcow2.sh` (the default source, builder tag and
+  bootc ref, so the disk's bootc origin is `localhost/signallayer-coreos:0.0.2`,
+  plus the output names and the source version check); `inspect-qcow2.sh`'s
+  expected origin; the build README; and the Rust test fixtures that mirror
+  the release file.
+- **Left unchanged as historical record:** the 0.0.1 release notes and
+  evaluation docs, the evidence and this register, accepted-run fixtures, and
+  the defaults of earlier harnesses.
+- **Lifecycle runner:** `--release-0-0-2` mode now also requires version 0.0.2
+  and the `:0.0.2` image reference at every boot. Its 3F default is unchanged.
+
+Validation run: `phase4e-acceptance-20260926-041123` (2026-09-26, KVM), PASS,
+45/45 checks. The 0.0.2 lifecycle A → `corectl update` → `corectl reboot` →
+B → `corectl rollback` → `corectl reboot` → A completed in exactly three boots,
+with both reboots accepted (exit 0). Every boot reported version 0.0.2, the
+`:0.0.2` image reference, status schema 0.3 and Platform API 0.2.
+Platform/Session1 agreement converged on attempts 1, 1 and 2 at the three
+stable checkpoints.
+
+- A (the release image): image ID
+  `c16811fefced1c339c5bbc5d0bf7571eeadca5596edfd1abbceea4dcfd1dfc42`, digest
+  `sha256:e78950e36d7d15d090f44c0aca77d57bce77a9b2e69ec5780800b3fa590eb60b`,
+  `BUILD_ID=0.0.2`.
+- Release qcow2: `signallayer-coreos-0.0.2-x86_64.qcow2`, sha256
+  `b44d655fd115bf6698a0a254b0b1a565dcd1f62a5db70209c7903a7535e312bf`. It is
+  self-contained and was verified unchanged after the run.
+- B (test update target, not a release artifact): image ID
+  `d1af8b5803664a8574f3740b051f5cb331c380b83d02bd42a01c6897873b981a`,
+  `BUILD_ID=0.0.2-rc-b`.
+- Registry: `localhost:5000/signallayer-coreos:0.0.2` went from absent to
+  `sha256:f9a3e16a3f20e375096ae33c49eb140a364a30172d1910667b234293e81fb5c1`.
+  The pushed manifest's config was verified as B's image ID. The `:0.0.1` tag
+  was unchanged (`sha256:bf4a9d1ab4b5ac2030113762db2beecffd9ecfed29edc43df2e16921a60e37c8`).
+- Base: registry pin
+  `quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74`;
+  local image ID
+  `fd0afe29ae8ee618a20265a81d5d9ec6b032fc8912eb91a420082a197081360b`.
+
+Storage: the dev VM (`release-0.0.2/`, with `rc.log` and `run-rc.sh`), the
+maintainer workstation, and the hypervisor's VM backups. Per-file checksums:
+`docs/evidence/release-0.0.2.sha256`.
+
 ## Base disks
 
 Each preserved run's `boot.qcow2` is a per-run overlay. The base disk
