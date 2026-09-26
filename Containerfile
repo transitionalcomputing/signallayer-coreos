@@ -1,5 +1,5 @@
 # Native Rust tooling is confined to build stages, using the same pinned Fedora base.
-FROM quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74 AS platform-tools
+FROM ghcr.io/transitionalcomputing/fedora-bootc@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS platform-tools
 RUN dnf -y install --setopt=install_weak_deps=False cargo gcc rustfmt && dnf clean all
 WORKDIR /build
 ENV CARGO_HOME=/build/target/cargo-home
@@ -14,7 +14,7 @@ COPY network-observer ./network-observer
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 
 # Policy authoring/analysis tools never enter the final runtime image.
-FROM quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74 AS policy-tools
+FROM ghcr.io/transitionalcomputing/fedora-bootc@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS policy-tools
 RUN dnf -y install --setopt=install_weak_deps=False selinux-policy-devel setools-console make && dnf clean all
 
 FROM policy-tools AS policy-build
@@ -23,7 +23,7 @@ WORKDIR /policy
 RUN make -f /usr/share/selinux/devel/Makefile sl_platformd.pp
 
 # Official Fedora 44 bootc base, pinned to its linux/amd64 manifest.
-FROM quay.io/fedora/fedora-bootc@sha256:38ef702a1366d4ae6645dbe77192fe50f91dce487e6c6fffc046f9ad7e9ffa74
+FROM ghcr.io/transitionalcomputing/fedora-bootc@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c
 
 ARG SOURCE_REVISION=unknown
 ARG BUILD_ID=unknown
