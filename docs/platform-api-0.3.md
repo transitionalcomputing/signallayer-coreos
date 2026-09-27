@@ -1,13 +1,34 @@
 # Platform API 0.3: remote-management lifecycle (0.0.3)
 
-**Status:** 5C-b step 1 draft, for review. Derived from the frozen
-[0.0.3 remote management contract](remote-management-0.0.3.md) and the frozen
-[sl-authd interface](authd-interface-0.0.3.md). It changes no frozen decision.
+**Status:** 5C-b frozen. Derived from the frozen
+[0.0.3 remote management contract](remote-management-0.0.3.md), including its
+5C-b amendment, and the frozen [sl-authd interface](authd-interface-0.0.3.md).
 
-Labels used below:
-- **Proposal:** a value or mechanism chosen here, open for review.
-- **Interpretation (review):** a place where the contract had to be read to
-  reach a design. Each one is also listed at the end.
+- Three items are deliberately left to 5C-b step 2 and are marked **Step 2
+  check**: the openssl path, `-not_after` support and the random serial
+  number. If a check fails, the affected item returns to review.
+- Places where the contract had to be interpreted are marked **Accepted
+  interpretation**, and are listed again at the end.
+
+## Phase boundaries
+
+- **5C-b implements the Platform side:**
+  - the four Platform1 methods and `run_worker`;
+  - the `sl-remote-worker` binary and its four worker units;
+  - the Platform1 bus-policy changes;
+  - the SELinux rules for sl_platformd_t, the worker domain and the
+    remote-management file types;
+  - Session1's schema 0.4 aggregation.
+- **5C-b designs against, but does not build:**
+  - sl-remoted, built in 5C-c;
+  - sl-console, built in 5C-d.
+
+  Their units, their SELinux domains (`sl_remoted_t`, `sl_console_t`), the
+  `sl_remoted_unit_file_t` type and every rule that names them are added in
+  those phases, not in 5C-b.
+- **Consequence for 5C-b:** the Platform sequences that start or stop
+  sl-remoted are verified with an injected systemd backend. At runtime,
+  Enable cannot complete its last step until sl-remoted exists (5C-c).
 
 ## Scope and principles
 
@@ -24,7 +45,8 @@ Labels used below:
 - No method creates or regenerates a credential except as the contract states:
   - Enable creates a pairing only when no operator is enrolled, and a TLS
     identity only when none exists;
-  - Reenroll rotates the TLS identity and creates a fresh pairing.
+  - Reenroll rotates the TLS identity, and creates a fresh pairing only on an
+    enabled machine (contract amendment).
 
 ## Existing machinery this builds on
 
@@ -48,16 +70,20 @@ Labels used below:
 - **SELinux:** sl_platformd_t may `start` and `status` only its own
   unit-file types (`sl_update_unit_file_t`, `sl_reboot_unit_file_t`).
 
-## Components added in 5C-b (names are proposals)
+## Components
 
-| Unit or file | Purpose |
-|---|---|
-| `sl-managementd.service` | The HTTPS server. Unprivileged, no capabilities. Static `WantedBy=multi-user.target` with `ConditionPathExists=` on the enabled marker and on `tls/current` (see below). |
-| `sl-rm-enable.service` | Oneshot worker: ensure a TLS identity exists (generate only if absent), then durably create the enabled marker. |
-| `sl-rm-disable.service` | Oneshot worker: durably remove the enabled marker. |
-| `sl-rm-rotate.service` | Oneshot worker: generate a new TLS identity and atomically replace the current one. |
-| `sl-rm-boot-reset.service` | Oneshot early-boot worker: the boot-time reset. |
-| `/usr/libexec/signallayer/sl-remote-worker` | One Rust binary for the four worker units. Each unit's `ExecStart=` is a fixed argv selecting one fixed mode (`enable`, `disable`, `rotate-tls`, `boot-reset`). It takes no other input, runs no shell, and runs `/usr/bin/openssl` only with the fixed argv lists below. |
+| Unit or file | Built in | Purpose |
+|---|---|---|
+| `sl-rm-enable.service` | 5C-b | Oneshot worker: ensure a TLS identity exists (generate only if absent), then durably create the enabled marker. |
+| `sl-rm-disable.service` | 5C-b | Oneshot worker: durably remove the enabled marker. |
+| `sl-rm-rotate.service` | 5C-b | Oneshot worker: generate a new TLS identity and atomically replace the current one. |
+| `sl-rm-boot-reset.service` | 5C-b | Oneshot early-boot worker: the boot-time reset. |
+| `/usr/libexec/signallayer/sl-remote-worker` | 5C-b | One Rust binary for the four worker units. Each unit's `ExecStart=` is a fixed argv selecting one fixed mode (`enable`, `disable`, `rotate-tls`, `boot-reset`). It takes no other input, runs no shell, and runs openssl only with the fixed argv lists below. |
+| `sl-remoted.service` | 5C-c | The HTTPS server. Unprivileged, no capabilities. Static `WantedBy=multi-user.target`, with `ConditionPathExists=` on the enabled marker and on `tls/current`. |
+| sl-console | 5C-d | The local console UI. |
+
+Every worker run that writes under `tls/` also removes any generation
+directory that `current` does not reference.
 
 Platform needs one new helper beside `start_worker`: `run_worker`.
 - It starts a oneshot worker the same way, then waits, within a bounded
@@ -65,8 +91,8 @@ Platform needs one new helper beside `start_worker`: `run_worker`.
 - It succeeds only if the unit returns to `inactive` with
   `Result=success`.
 - Any other outcome is `RemoteManagementUnavailable`.
-- **Proposal:** a worker timeout of 30 seconds, and 10 seconds for starting
-  or stopping sl-managementd.
+- **Timeouts:** 30 seconds for a worker, and 10 seconds for starting or
+  stopping sl-remoted.
 
 ## Methods
 
@@ -77,7 +103,7 @@ or state is read.
 ### New errors
 | Error | Meaning |
 |---|---|
-| `RemoteManagementUnavailable` | A fixed worker, sl-managementd, or remote-management state could not be controlled or read. |
+| `RemoteManagementUnavailable` | A fixed worker, sl-remoted, or remote-management state could not be controlled or read. |
 | `AuthUnavailable` | An sl-authd call failed. The sl-authd error name is not passed through, and the message is fixed. |
 
 `Busy` and `NetworkUnavailable` are reused with their existing meaning.
@@ -93,7 +119,7 @@ or state is read.
 3. Call `Auth1.EnsurePendingPairing`. This creates a pairing only when no
    operator is enrolled and no unexpired pairing exists, and never rotates a
    code.
-4. `StartUnit(sl-managementd.service, "fail")` if it is not active, and wait
+4. `StartUnit(sl-remoted.service, "fail")` if it is not active, and wait
    until it is active.
 
 **Errors:** `Busy`, `RemoteManagementUnavailable`, `AuthUnavailable`.
@@ -106,9 +132,9 @@ as the contract requires. The TLS identity is never rotated.
 **Steps:**
 1. Take the permit, or return `Busy`.
 2. `run_worker(sl-rm-disable.service)`: durably remove the enabled marker.
-   **This is the commit point for `enabled`.** From here on, sl-managementd
+   **This is the commit point for `enabled`.** From here on, sl-remoted
    cannot be started at boot, because its condition fails.
-3. `StopUnit(sl-managementd.service, "replace")`, and wait until it is
+3. `StopUnit(sl-remoted.service, "replace")`, and wait until it is
    inactive. All web sessions end with the process.
 4. Call `Auth1.CancelPendingPairing`.
 
@@ -118,14 +144,13 @@ Enrollment and the TLS identity are preserved.
 
 **Idempotency:** on a disabled machine every step is a no-op.
 
-**Interpretation (review):** web sessions are held only in sl-managementd's
-memory, so stopping it invalidates them all. The contract says
-sl-managementd owns sessions, but not where they are stored.
+**Accepted interpretation:** web sessions are held only in sl-remoted's
+memory, so stopping it invalidates them all.
 
 ### ReenrollRemoteManagement() -> ()
 **Steps:**
 1. Take the permit, or return `Busy`.
-2. `StopUnit(sl-managementd.service)`, and wait until it is inactive. This
+2. `StopUnit(sl-remoted.service)`, and wait until it is inactive. This
    ends all sessions and closes the login and pairing path before the
    credential changes.
 3. Call `Auth1.ResetEnrollment`. **This is the commit point for invalidating
@@ -133,22 +158,22 @@ sl-managementd owns sessions, but not where they are stored.
    counters.
 4. `run_worker(sl-rm-rotate.service)`: a new identity is atomically swapped
    in. **This is the commit point for the TLS rotation.**
-5. Call `Auth1.EnsurePendingPairing`, which creates a fresh pairing.
-6. If the enabled marker exists, `StartUnit(sl-managementd.service)`.
+5. If the enabled marker exists (Platform reads it under the permit), call
+   `Auth1.EnsurePendingPairing`, which creates a fresh pairing.
+6. If the enabled marker exists, `StartUnit(sl-remoted.service)`.
+
+**On an administratively disabled machine** (contract amendment), Reenroll
+ends after step 4: enrollment is reset and the TLS identity rotated, and no
+pairing is created. The next explicit Enable creates the pairing and starts
+sl-remoted.
 
 **Errors:** `Busy`, `RemoteManagementUnavailable`, `AuthUnavailable`.
 
 **Order rationale:** the credential is reset before the TLS identity is rotated.
 A failure between the two therefore leaves the old credential invalid, not the
-old credential valid behind a new fingerprint. sl-managementd is started only
+old credential valid behind a new fingerprint. sl-remoted is started only
 after every earlier step succeeded, so it never serves an unenrolled machine
 with a stale identity as the result of this call.
-
-**Interpretation (review):** Reenroll does not change `enabled`. On a disabled
-machine it still resets, rotates and creates a pairing, as the contract lists,
-but does not start sl-managementd. The pairing then expires unused unless the
-owner enables remote management within 10 minutes. The alternative is to have
-Reenroll require, or imply, Enable.
 
 ### GetRemoteManagementEnrollment() -> (s url, s fingerprint, s pairing_code, t expires_at)
 **Steps:**
@@ -172,9 +197,9 @@ and it never reads the private key.
 **Formatting:** the console displays the code as `XXXX-XXXX`; Platform returns
 it unformatted, as sl-authd does.
 
-**Interpretation (review):** the contract lists `pairing_code` and
-`expires_at` as "present only while a pairing is pending". This is expressed
-with a fixed `(ssst)` signature and empty/zero values, not optional types.
+**Accepted interpretation:** the contract's `pairing_code` and `expires_at`,
+"present only while a pairing is pending", are expressed with a fixed `(ssst)`
+signature and empty/zero values, not optional types.
 
 ## Postcondition and failure matrices
 
@@ -187,25 +212,26 @@ Columns give the state after the failure. "Unchanged" means as before the call.
 | 2.1 identity generation | unchanged | unchanged | unchanged | unchanged (nothing is swapped in on failure) | unchanged | Retry Enable. |
 | 2.2 marker write | unchanged | unchanged | unchanged | present (possibly just generated; never rotated later by Enable) | unchanged | Retry Enable; 2.1 is then a no-op. |
 | 3 sl-authd | **true** | unchanged | unchanged | present | unchanged | Retry Enable; 2 is a no-op. |
-| 4 start sl-managementd | true | false | unchanged | present | pending if unenrolled | Retry Enable: the pairing is not rotated while unexpired. At the next boot the service also starts, because the marker and identity exist. |
+| 4 start sl-remoted | true | false | unchanged | present | pending if unenrolled | Retry Enable: the pairing is not rotated while unexpired. At the next boot the service also starts, because the marker and identity exist. |
 
 ### Disable
 | Failure point | enabled | listening | enrolled | TLS identity | pending pairing | Retry |
 |---|---|---|---|---|---|---|
 | Permit busy | unchanged | unchanged | unchanged | unchanged | unchanged | Retry. |
 | 2 marker removal | unchanged | unchanged | unchanged | unchanged | unchanged | Retry Disable. |
-| 3 stop sl-managementd | **false** | possibly true | unchanged | unchanged | unchanged | Retry Disable. Status shows the inconsistency (`enabled` false, `listening` true) rather than hiding it. A reboot also ends it, because the service's condition now fails. |
+| 3 stop sl-remoted | **false** | possibly true | unchanged | unchanged | unchanged | Retry Disable. Status shows the inconsistency (`enabled` false, `listening` true) rather than hiding it. A reboot also ends it, because the service's condition now fails. |
 | 4 cancel pairing | false | false | unchanged | unchanged | may remain pending until it expires (at most 10 minutes); unreachable because nothing listens | Retry Disable. |
 
 ### Reenroll
 | Failure point | enabled | listening | enrolled | TLS identity | pending pairing | Retry |
 |---|---|---|---|---|---|---|
 | Permit busy | unchanged | unchanged | unchanged | unchanged | unchanged | Retry. |
-| 2 stop sl-managementd | unchanged | unknown; status shows it | unchanged | unchanged | unchanged | Retry Reenroll. |
+| 2 stop sl-remoted | unchanged | unknown; status shows it | unchanged | unchanged | unchanged | Retry Reenroll. |
 | 3 sl-authd reset | unchanged | false | unchanged | unchanged | unchanged | Retry Reenroll. Until then, or at the next boot, the machine is as before the call. |
-| 4 rotation | unchanged | false | **false** | old identity (no partial identity) | none | Retry Reenroll (the reset repeats harmlessly). A reboot before the retry starts sl-managementd with the old identity, unenrolled and with no pairing: nobody can pair until a local Enable or Reenroll. |
-| 5 pairing | unchanged | false | false | **new** | none | Retry Reenroll (rotates again; nothing is enrolled), or Enable (creates a pairing without rotating, and starts the service). |
-| 6 start sl-managementd | true | false | false | new | pending | Retry Enable, or Reenroll. |
+| 4 rotation | unchanged | false | **false** | old identity (no partial identity) | none | Retry Reenroll (the reset repeats harmlessly). A reboot before the retry starts sl-remoted (if enabled) with the old identity, unenrolled and with no pairing: nobody can pair until a local Enable or Reenroll. |
+| 5 pairing (enabled only) | true | false | false | **new** | none | Retry Reenroll (rotates again; nothing is enrolled), or Enable (creates a pairing without rotating, and starts the service). |
+| 6 start sl-remoted (enabled only) | true | false | false | new | pending | Retry Enable, or Reenroll. |
+| None, on a disabled machine (success) | false | false | false | new | **none** | Not a failure: the next explicit Enable creates the pairing and starts sl-remoted. |
 
 **General rules:**
 - Every step is individually durable or memory-only, and idempotent. A crash
@@ -215,7 +241,7 @@ Columns give the state after the failure. "Unchanged" means as before the call.
 
 ## Administrative state
 
-- **Authoritative source (Proposal):** the presence of
+- **Authoritative source:** the presence of
   `/var/lib/sl-remote-management/enabled`, an empty file (root:root, 0644,
   type `sl_rm_state_t`). If it is absent, remote management is disabled, which
   is the default.
@@ -224,7 +250,7 @@ Columns give the state after the failure. "Unchanged" means as before the call.
   part of the image.
   - A rollback to an image without remote management (0.0.2) ignores the
     marker, and a later image honors it again.
-  - **Interpretation (review):** a deployment change does not alter the
+  - **Accepted interpretation:** a deployment change does not alter the
     administrative state.
 - **Commit point:**
   - Enable: write a temporary file (`O_CREAT|O_EXCL`), `fsync` it, `rename`
@@ -235,57 +261,59 @@ Columns give the state after the failure. "Unchanged" means as before the call.
 - **Recovery after a failed worker:** the on-disk marker is the truth, and a
   retry of the same method converges.
 - **`enabled` is not "service active":**
-  - sl-managementd is statically enabled in the image, with
+  - sl-remoted is statically enabled in the image, with
     `ConditionPathExists=` on the marker and on `tls/current`, so it starts at
     boot only when enabled and an identity exists.
   - The condition is evaluated only at start; Disable therefore also stops the
     service explicitly.
   - `listening` is a separate runtime fact (see "Status schema 0.4").
-- **Considered, not chosen:** `systemctl enable` of sl-managementd.
+- **Considered, not chosen:** `systemctl enable` of sl-remoted.
   Enablement symlinks live in `/etc`, which is merged across deployments and
   editable by local administration, and it conflates the administrative
   decision with unit management.
 
 ## Concurrency
 
-- **Proposal:** a new one-permit semaphore, `remote_management`, taken with
+- **The permit:** a new one-permit semaphore, `remote_management`, taken with
   `try_acquire` (`Busy` if held) by all four methods and held for the whole
   sequence, including worker waits. It is not shared with `mutation_starts`.
 - **Rationale:**
   - These methods change no deployment or boot state, and
     update/rollback/reboot touch no remote-management state (`/var/lib/sl-remote-management`,
-    sl-authd, sl-managementd).
+    sl-authd, sl-remoted).
   - Sharing the permit would make console actions `Busy` for the whole start
     evaluation of an update, and the reverse, for no safety gain.
 - **Interaction:**
   - A reboot (`StartReboot`, or anything else) during a remote-management
     sequence is equivalent to a crash at the current step; the matrices define
     the result.
+  - This crash-equivalence is sufficient: `StartReboot` does not refuse,
+    wait for or conflict with remote-management sequences.
   - An update or rollback staged during a sequence does not affect it.
-  - `StartReboot` does not wait for, or conflict with, remote-management
-    workers (see Open questions).
 - **Status reads:** `GetStatus` keeps its own `requests` permit and is not
   blocked by these methods.
 
 ## Authorization
 
-**`org.signallayer.Platform1.conf` changes:**
+**`org.signallayer.Platform1.conf` changes (5C-b):**
 - **Default context:** add explicit `<deny>` rules for all four new members,
   including `GetRemoteManagementEnrollment`, which returns the pairing code.
   `GetStatus` stays allowed as today.
 - **`<policy user="root">`:** add four exact allows (destination, path,
   interface, member).
 - **New `<policy user="sl-console">`:** exactly the same four allows and
-  nothing else. There is no update, rollback or reboot, per the contract.
-- **sl-managementd** gets no Platform1 allow at all. It reads status only
+  nothing else. There is no update, rollback or reboot, per the contract. The
+  sl-console account is already reserved by sysusers.
+- **sl-remoted** gets no Platform1 allow at all. It reads status only
   through Session1.
 
 **SELinux:**
-- `sl_console_t` and `sl_platformd_t` exchange `send_msg`, added with the
-  console in 5C-b.
-- sl_platformd_t gains `start` and `status` on a new
-  `sl_rm_worker_unit_file_t`, and `start stop status` on a new
-  `sl_managementd_unit_file_t`.
+- **5C-b:** sl_platformd_t gains `start` and `status` on a new
+  `sl_rm_worker_unit_file_t`.
+- **5C-c (with sl-remoted):** `start stop status` on a new
+  `sl_remoted_unit_file_t`.
+- **5C-d (with sl-console):** `sl_console_t` and `sl_platformd_t` exchange
+  `send_msg`.
 
 **Limits, as already recorded in the contract:**
 - UID-based policy admits any root process.
@@ -294,21 +322,21 @@ Columns give the state after the failure. "Unchanged" means as before the call.
 
 ## TLS identity
 
-### Storage (Proposal)
+### Storage
 | Path | Owner, mode | SELinux type | Readers |
 |---|---|---|---|
 | `/var/lib/sl-remote-management/` | root:root 0755 | `sl_rm_state_t` | — |
-| `…/tls/` | root:sl-managementd 0750 | `sl_rm_tls_t` | sl-managementd, sl-platformd |
-| `…/tls/current` | symlink to `gen-<16 hex>` | `sl_rm_tls_t` | sl-managementd, sl-platformd |
-| `…/tls/gen-<16 hex>/` | root:sl-managementd 0750 | `sl_rm_tls_t` | sl-managementd, sl-platformd |
-| `…/gen-*/key.pem` | root:sl-managementd 0640 | `sl_rm_tls_key_t` | sl-managementd only |
-| `…/gen-*/cert.pem` | root:sl-managementd 0644 | `sl_rm_tls_t` | sl-managementd, sl-platformd |
+| `…/tls/` | root:sl-remoted 0750 | `sl_rm_tls_t` | sl-remoted, sl-platformd |
+| `…/tls/current` | symlink to `gen-<16 hex>` | `sl_rm_tls_t` | sl-remoted, sl-platformd |
+| `…/tls/gen-<16 hex>/` | root:sl-remoted 0750 | `sl_rm_tls_t` | sl-remoted, sl-platformd |
+| `…/gen-*/key.pem` | root:sl-remoted 0640 | `sl_rm_tls_key_t` | sl-remoted only |
+| `…/gen-*/cert.pem` | root:sl-remoted 0644 | `sl_rm_tls_t` | sl-remoted, sl-platformd |
 | `…/gen-*/fingerprint` | root:root 0644 | `sl_rm_tls_t` | sl-platformd |
 
 - **Writers:** only the worker domain writes any of these.
-- **sl-console:** never readable. It is not in the sl-managementd group, and
-  sl_console_t gets no rule for these types.
-- **The private key:** SELinux allows only sl_managementd_t (read) and the
+- **sl-console:** never readable. It is not in the sl-remoted group, and
+  sl_console_t (5C-d) gets no rule for these types.
+- **The private key:** SELinux allows only sl_remoted_t (read, 5C-c) and the
   worker domain (create and unlink). sl_platformd_t never reads it.
 - **Rotation:**
   1. Write a new `gen-*` directory completely and `fsync` it.
@@ -319,19 +347,17 @@ Columns give the state after the failure. "Unchanged" means as before the call.
   fingerprint from the same generation, so they never see a key from one
   identity with a certificate from another.
 
-### Key type (Proposal)
+### Key type
 ECDSA P-256 (prime256v1). Every current browser accepts it for TLS server
-certificates, and it is fast to generate.
-- **Alternative:** RSA-3072.
-- **Not suitable:** Ed25519, because browsers do not support it for TLS server
-  certificates.
+certificates, and it is fast to generate. Ed25519 is not used, because browsers
+do not support it for TLS server certificates.
 
-### Generation (Proposal)
-The worker runs, by `execve` with no shell, where `<gen>` is a directory path
-the worker creates itself:
+### Generation
+The worker runs, by `execve` with no shell, where `<openssl>` is a fixed
+absolute path and `<gen>` is a directory path the worker creates itself:
 
 ```text
-/usr/bin/openssl req -x509 -new -newkey ec
+<openssl> req -x509 -new -newkey ec
   -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve
   -noenc -keyout <gen>/key.pem -out <gen>/cert.pem
   -subj "/CN=SignalLayer CoreOS remote management"
@@ -342,7 +368,7 @@ the worker creates itself:
 ```
 
 ```text
-/usr/bin/openssl x509 -in <gen>/cert.pem -noout -fingerprint -sha256
+<openssl> x509 -in <gen>/cert.pem -noout -fingerprint -sha256
 ```
 
 - The subject is a single argv element; no quoting is involved because no
@@ -351,10 +377,15 @@ the worker creates itself:
   writes `fingerprint` only if the line has exactly the expected form.
 - OpenSSL 3.5.8 is present in the pinned base, and therefore in the image.
   The workspace has no TLS, X.509 or SHA-2 crate, and none is added.
-- **To verify in 5C-b step 2:** that `-not_after` is accepted by `openssl req`
-  in 3.5.8, and that `openssl req -x509` sets a random serial number.
+- **Step 2 checks:**
+  1. **Path:** resolve the openssl binary's actual absolute path in the
+     pinned base, and fix that path in the worker. Step 0 found
+     `/usr/sbin/openssl` via `command -v`; this document freezes no path.
+  2. **`-not_after`:** confirm that `openssl req` in 3.5.8 accepts it.
+  3. **Serial:** confirm that `openssl req -x509` sets a random serial
+     number.
 
-### Fingerprint (Proposal)
+### Fingerprint
 - **Algorithm:** SHA-256 over the DER encoding of the leaf certificate.
 - **Canonical text:** the 32 bytes as uppercase hexadecimal pairs separated
   by `:`, 95 characters, for example `AB:CD:…:EF`. This is the form browser
@@ -363,11 +394,12 @@ the worker creates itself:
   stores it in the generation directory. Platform reads and validates it and
   needs no hashing code of its own.
 
-### Certificate contents (Proposal)
+### Certificate contents
 - Self-signed. The issuer and subject are both
   `CN=SignalLayer CoreOS remote management`.
-- A random serial number, and validity from generation to 9999-12-31
-  (RFC 5280's "no well-defined expiration").
+- A random serial number (Step 2 check), and validity from generation to
+  9999-12-31 (RFC 5280's "no well-defined expiration"; `-not_after` is a
+  Step 2 check).
 - `basicConstraints CA:FALSE`, `keyUsage digitalSignature`,
   `extendedKeyUsage serverAuth`.
 - **No subjectAltName**: no IP address, hostname or machine ID.
@@ -386,9 +418,9 @@ the worker creates itself:
 
 ## Network endpoint
 
-- **Port (Proposal): 8443.** sl-managementd is unprivileged with no
-  capabilities, so it cannot bind a port below 1024. Alternatives that were
-  considered and rejected:
+- **Port: 8443.** sl-remoted is unprivileged with no capabilities, so it
+  cannot bind a port below 1024. Alternatives that were considered and
+  rejected:
   - `CAP_NET_BIND_SERVICE` would be a new capability;
   - lowering `net.ipv4.ip_unprivileged_port_start` is a system-wide change;
   - systemd socket activation on 443 cannot follow the contract's
@@ -400,7 +432,8 @@ the worker creates itself:
     form (Rust's `Ipv6Addr` display form, which the network observer's
     validated addresses already use).
   - Always with the trailing `/`.
-- **Address selection (Proposal), from the primary connection's addresses:**
+- **Address selection:** exactly one `url`, chosen from the primary
+  connection's addresses:
   - Exclude loopback, unspecified, multicast, IPv4 link-local
     (169.254.0.0/16) and IPv6 link-local (fe80::/10). Link-local IPv6 would
     need a zone identifier, which browsers do not accept in URLs.
@@ -420,6 +453,15 @@ owns none of them:
 | `pairing_code`, `expires_at` | `Auth1.GetPendingPairing`. |
 
 ## Boot-time reset
+
+### Pre-OS boundary
+Pre-OS console access is equivalent to machine-owner access in 0.0.3. Normal
+enrolled SignalLayer console operations require the operator password, but
+bootloader, firmware, hypervisor-console or equivalent pre-OS access is outside
+that authentication boundary.
+
+The contract records the same boundary in its Trust model, and lists locking
+it down under its deferred hardening items.
 
 ### Trigger evidence (Step 0)
 - **Bootloader:** GRUB 2.12 (`grub2-efi-x64-2.12-64.fc44`), UEFI, installed
@@ -446,62 +488,87 @@ owns none of them:
 - **Kernel command line:** the booted command line is
   `root=UUID=… rw console=tty0 console=ttyS0 console=ttyS0,115200n8 ostree=…`.
 
-**What exists today:** editing the selected entry (`e`) or using the GRUB
-command line (`c`) during the menu window. Edits apply to that boot only and
-are never saved. No reset menu entry exists, and none can be added from the
-image alone: `/boot` is not image content, and bootc manages the BLS
+**What exists today:** per the menu's own hint, editing the selected entry or
+using the GRUB command line during the menu window. Edits apply to that boot
+only and are never saved. No reset menu entry exists, and none can be added
+from the image alone: `/boot` is not image content, and bootc manages the BLS
 entries.
 
 **Trust-boundary note:** the same edit path already allows `init=` and
 `rd.break`, which give a root shell. A reset argument therefore does not widen
-what a party at the boot console can do. The contract already assigns boot
-protection (for example a GRUB password) to the operator.
+what a party at the boot console can do (see "Pre-OS boundary").
 
-### Proposed trigger (Proposal)
-At the GRUB menu, the operator presses a key within the 1-second window, then
-`e`, appends `signallayer.remote-management-reset` to the `linux` line, and
-boots with Ctrl-X or F10. It applies to one boot only.
+### Trigger (0.0.3)
+- The kernel argument is `signallayer.remote-management-reset`, added by a
+  one-boot GRUB edit.
+- During startup, the operator interrupts the GRUB menu within its 1-second
+  window, edits the selected entry, appends the argument to the kernel command
+  line, and boots the edited entry.
+- Which keys interrupt the countdown, open the editor and boot the edited
+  entry on this GRUB configuration is verified in 5E. This document does not
+  name them as fact.
+- The 1-second window is accepted for 0.0.3. Replacing this trigger is a
+  hardening item in the contract.
 
-**Alternatives:**
+**Alternatives considered:**
 | Alternative | Assessment |
 |---|---|
 | A dedicated menu entry through `${prefix}/custom.cfg` | Needs a writer to `/boot`, which does not exist. It would also be a permanent entry, which risks being selected by accident. |
 | A persistent kernel argument (`/usr/lib/bootc/kargs.d`, `bootc` kargs) | Rejected: it is not one-boot, and would reset at every boot. |
 | `systemd.unit=` to a reset target | The same edit mechanism, but it changes the whole boot target. |
-| A longer menu window (image-provided `custom.cfg` or grubenv `menu_show_once_timeout`) | Also needs a writer, and would be a separate change. See Open questions. |
+| A longer menu window (image-provided `custom.cfg` or grubenv `menu_show_once_timeout`) | Also needs a writer. Not in 0.0.3. |
 
-### Worker and ordering (Proposal)
+### Worker and ordering
 `sl-rm-boot-reset.service`:
 - `Type=oneshot`, with
   `ConditionKernelCommandLine=signallayer.remote-management-reset`.
 - `Requires=` and `After=sl-authd.service`.
-- `Before=sl-managementd.service sl-console.service sl-sessiond.service sl-platformd.service`.
+- `Before=sl-remoted.service sl-console.service sl-sessiond.service sl-platformd.service`.
+  Ordering against units that do not exist yet (sl-remoted and sl-console,
+  before 5C-c and 5C-d) is inert.
 - `WantedBy=multi-user.target`.
 - `ExecStart=/usr/libexec/signallayer/sl-remote-worker boot-reset`.
 
-The worker:
-1. Calls `Auth1.ResetEnrollment` (as root, which the frozen matrix allows).
-   This clears the credential, recovery key, any pairing and all backoff.
-2. Durably removes `tls/current` and every generation.
+**Steps (fail closed across boots):**
+1. **Durably remove `tls/current`:** `unlink` the symlink, then `fsync`
+   `tls/`. From this commit on, sl-remoted's `ConditionPathExists=…/tls/current`
+   fails on every later boot, until an explicit Enable or Reenroll creates a
+   new identity.
+2. **Call `Auth1.ResetEnrollment`** (as root, which the frozen matrix
+   allows). This clears the credential, recovery key, any pairing and all
+   backoff.
+3. **Remove every old generation directory**, then `fsync` `tls/`.
 
 It does not touch the enabled marker, the OS or anything else.
 
-**Fail closed (Proposal):** `sl-managementd.service` has `Requires=` and
+**Within the same boot:** `sl-remoted.service` (5C-c) has `Requires=` and
 `After=` on the reset unit.
 - When the kernel argument is absent, the condition skips the unit, which
   does not fail its dependents.
-- When the reset fails, sl-managementd does not start.
-- sl-console is only ordered after the reset, so the owner can still see the
-  failure. How the console presents it is an Open question.
+- When the reset fails, sl-remoted does not start in that boot.
+- sl-console is only ordered after the reset, and must visibly report that a
+  requested boot reset failed. The mechanism is defined in 5C-d.
+
+### Boot-reset failure matrix
+| Failure point | enabled | listening | enrolled | TLS identity | pending pairing | Later boots |
+|---|---|---|---|---|---|---|
+| 1 remove `tls/current` | unchanged | false (sl-remoted is held back this boot) | unchanged | unchanged | none (sl-authd started without one) | The reset did not take effect; nothing was removed. sl-console reports the failure. A later boot without the argument is the machine exactly as before the reset request. The owner repeats the reset. |
+| 2 `ResetEnrollment` | unchanged | false | **unchanged (old credential still valid)** | `current` removed; the old generation is unreferenced | none | sl-remoted's condition fails on every later boot, so the old endpoint never returns. The owner repeats the reset (step 1 is then a no-op). A local Enable before that would create a new identity while the old credential stays valid, which is why sl-console must report the failure. |
+| 3 remove old generations | unchanged | false | false | `current` absent; unreferenced old files remain until removed | none | sl-remoted's condition fails; the next worker run that writes `tls/` (the repeated reset, Enable or Reenroll) removes the leftovers. |
+| Worker crash or power loss | as for the step reached | | | | | The same as a failure at that step. |
+
+**Invariant:** once step 1 has committed, no failure and no later boot lets
+sl-remoted serve the old TLS identity. The old credential can remain valid only
+behind no endpoint (step 2 failure), until the reset is repeated.
 
 ### State after a successful reset
 | Fact | Value | Why |
 |---|---|---|
 | enabled | **unchanged** | The contract lists what the reset wipes: the operator credential, the recovery key and the TLS identity. The administrative decision is not among them. |
-| listening | false | No TLS identity exists, so sl-managementd's `ConditionPathExists=…/tls/current` fails. There is no usable state to listen with. |
+| listening | false | No TLS identity exists, so sl-remoted's `ConditionPathExists=…/tls/current` fails. There is no usable state to listen with. |
 | enrolled | false | `ResetEnrollment`. |
 | TLS identity | absent | Removed. The next Enable generates a new one; the fingerprint necessarily changes. |
-| pending pairing | none | The reset creates no pairing. A new pairing requires the owner's explicit local Enable, which also generates the identity and starts sl-managementd. |
+| pending pairing | none | The reset creates no pairing. A new pairing requires the owner's explicit local Enable, which also generates the identity and starts sl-remoted. |
 
 ## Status schema 0.4
 
@@ -510,23 +577,26 @@ It does not touch the enabled marker, the OS or anything else.
 - Session1's `GetPlatformStatus` returns schema 0.4: Platform's 0.3 status
   plus `remote_management`, which Session1 aggregates without owning. That is
   the only change in Session1.
-- **Interpretation (review):** the contract says the existing Platform
+- **Accepted interpretation:** the contract says the existing Platform
   methods are unchanged and that Session1 aggregates, so the 0.4 schema is
   produced by Session1, not by Platform.
 
 | Field | Owner | How Session1 reads it |
 |---|---|---|
-| `enabled` | Platform's administrative state | Presence of the enabled marker. sl_sessiond_t gets `getattr` on `sl_rm_state_t`, and no other access. **Interpretation (review):** the alternative is a fifth Platform method, which the contract's list of four does not include. |
-| `listening` | sl-managementd | **Proposal:** sl-managementd creates `/run/sl-managementd/listening` only while it accepts eligible connections, and removes it when it stops accepting. The directory is the unit's `RuntimeDirectory=`, which systemd removes when the service stops for any reason, including a crash. Absent means false. |
+| `enabled` | Platform's administrative state | Presence of the enabled marker. sl_sessiond_t gets `getattr` on `sl_rm_state_t`, and no other access. **Accepted interpretation:** this is used instead of a fifth Platform method, which the contract's list of four does not include. |
+| `listening` | sl-remoted (5C-c) | sl-remoted creates `/run/sl-remoted/listening` only while it accepts eligible connections, and removes it when it stops accepting. The directory is the unit's `RuntimeDirectory=`, which systemd removes when the service stops for any reason, including a crash. Absent means false. |
 | `enrolled` | sl-authd | `Auth1.GetEnrollmentState().enrolled`. sl-sessiond is already in the frozen caller matrix for this method. |
 
-- **Before sl-managementd exists** (and on an image without it), `listening`
-  is false because its runtime file cannot exist.
+- **Before sl-remoted exists** (before 5C-c, and on an image without it),
+  `listening` is false because its runtime file cannot exist.
 - `enabled` is false until an Enable, and `enrolled` comes from sl-authd as
   usual.
-- **Failures (Proposal):** if sl-authd cannot be read, Session1 returns a
-  distinct error, never a guessed `false`. The status carries no pairing
-  code, key material, counters or session counts, per the contract.
+- **Failures:** if sl-authd cannot be read, Session1 fails
+  `GetPlatformStatus` with a distinct error, and never guesses `enrolled`.
+  This coupling (no status at all while sl-authd is down) is a known 0.0.3
+  limitation, listed for review in the contract's deferred hardening items.
+- The status carries no pairing code, key material, counters or session
+  counts, per the contract.
 
 ## Properties provable by unit tests
 
@@ -534,10 +604,12 @@ These assume injected systemd, sl-authd and filesystem backends, and a
 temporary directory.
 - **Signatures:** each new method is zero-argument, and an argument is
   rejected with `InvalidArgs` before any permit is taken.
-- **Sequences:** the exact steps of Enable, Disable and Reenroll, and that each
-  failure point in the matrices produces the listed error and stops there.
-  Reenroll never starts sl-managementd after a failed reset, rotation or
-  pairing.
+- **Sequences:**
+  - the exact steps of Enable, Disable and Reenroll, and that each failure
+    point in the matrices produces the listed error and stops there;
+  - Reenroll never starts sl-remoted after a failed reset, rotation or
+    pairing;
+  - on a disabled machine, Reenroll creates no pairing and starts nothing.
 - **Idempotency:** repeated calls on a converged state perform only no-ops.
 - **Permit:** a second remote-management call is `Busy`, and remote management
   and `mutation_starts` do not block each other.
@@ -553,67 +625,69 @@ temporary directory.
   - the fixed argv lists;
   - strict parsing of the fingerprint line;
   - atomic marker create and remove;
-  - generation-directory swap with simulated failures leaving the previous
+  - generation-directory swap, with simulated failures leaving the previous
     state;
-  - removal of a stale temporary file;
-  - boot-reset step order.
-- **Status 0.4 composition:** field sources, absence handling, and an error
-  (not `false`) when sl-authd fails.
+  - removal of stale temporary files and unreferenced generations;
+  - the boot-reset step order, with a failure at each step leaving the
+    matrix's state.
+- **Status 0.4 composition:** field sources, absence handling, and a distinct
+  error (not a guessed value) when sl-authd fails.
 - **Static assertions (image build):** the Platform1 bus policy for root and
   sl-console, the unit files, file contexts and ownership. Static only.
 
 ## Deferred to 5E (runtime; not claimed here)
 - **Bus policy:** the installed policy admits exactly root and sl-console to
-  the four methods under the real bus, and sl-managementd to none.
-- **systemd:** worker, stop, start and condition behavior under the real
-  manager, including `Requires=` fail-closed on a failed boot reset.
-- **SELinux:** confinement of the worker, sl-managementd and sl-console
-  domains, and the key readable only by sl-managementd.
+  the four methods under the real bus, and sl-remoted to none.
+- **systemd:**
+  - worker, stop, start and condition behavior under the real manager;
+  - `Requires=` fail-closed when the boot reset fails.
+- **SELinux:**
+  - confinement of the worker, sl-remoted and sl-console domains;
+  - the key readable only by sl-remoted.
 - **TLS on the real system:**
-  - `openssl` generation with the fixed argv in the real image, including
-    `-not_after`;
-  - the certificate contents and random serial;
+  - `openssl` generation with the fixed argv and path in the real image;
+  - the certificate contents;
   - the fingerprint matches what browsers display;
   - browser acceptance behavior.
 - **Persistence:** the enabled marker and identity survive reboot and a
   deployment change.
 - **Boot reset:**
-  - the GRUB edit path on the real console (serial and VGA);
-  - the reset runs once and before sl-managementd, sl-console, sl-sessiond and
+  - the GRUB interrupt, edit and boot keys on the real console (serial and
+    VGA);
+  - the reset runs once and before sl-remoted, sl-console, sl-sessiond and
     sl-platformd;
-  - the resulting state table above.
+  - the resulting state and failure tables above.
 - **`listening` accuracy:** the runtime file matches actual acceptance of
   connections.
-- **Consistency:** status agrees between corectl (0.3) and Session1 (0.4).
+- **Status consistency:** the fields common to schema 0.3 agree between
+  Platform/corectl and Session1's schema 0.4. The complete statuses are not
+  identical, because 0.4 adds `remote_management`.
 
-## Interpretations flagged for review
-1. Web sessions exist only in sl-managementd's memory, so stopping it
+## Accepted interpretations
+1. Web sessions exist only in sl-remoted's memory, so stopping it
    invalidates them.
-2. Reenroll does not change `enabled`, and on a disabled machine creates a
-   pairing without starting sl-managementd.
-3. The optional pairing fields are expressed as `""` and `0` in a fixed
+2. The optional pairing fields are expressed as `""` and `0` in a fixed
    `(ssst)` return.
-4. A bootc deployment change does not alter the administrative state.
-5. Schema 0.4 is produced by Session1; Platform's `GetStatus` stays 0.3.
-6. Session1 reads `enabled` from the marker file, rather than through a fifth
+3. A bootc deployment change does not alter the administrative state.
+4. Schema 0.4 is produced by Session1; Platform's `GetStatus` stays 0.3.
+5. Session1 reads `enabled` from the marker file, rather than through a fifth
    Platform method.
 
-## Open questions
-1. **Menu window:** is a 1-second GRUB menu window acceptable for the reset
-   trigger (the operator must press a key within it, which hypervisor consoles
-   can miss)? Or should the image lengthen it? Doing so needs a writer to
-   `/boot` or grubenv, which is new.
-2. **Kernel argument name:** `signallayer.remote-management-reset`.
-3. **Console after a failed reset:** how sl-console should present a requested
-   but failed boot reset, given sl-managementd is held back.
-4. **Reboot during a sequence:** should `StartReboot` be refused
-   (`Conflict`) while a remote-management worker or sequence is running, or is
-   crash-equivalence enough?
-5. **sl-authd unavailable in status:** should Session1 fail the whole status,
-   as proposed, or report status without `remote_management`? The latter would
-   change the schema's shape.
-6. **Several eligible addresses:** should `url` expose only one (as proposed),
-   or should the contract's single `url` field stay while the console also
-   lists alternatives?
-7. **Timeouts:** 30 seconds for workers and 10 seconds for starting or
-   stopping sl-managementd.
+Reenroll on a disabled machine, previously an interpretation, is now a
+contract amendment (see [remote-management-0.0.3.md](remote-management-0.0.3.md)).
+
+## Resolved questions
+1. **Menu window:** 1 second is accepted for 0.0.3. The operator must
+   interrupt the menu during startup; the keys are verified in 5E. Replacing
+   the trigger is a hardening item.
+2. **Kernel argument:** `signallayer.remote-management-reset`.
+3. **Failed reset:** sl-console must visibly report that a requested boot
+   reset failed. The mechanism is defined in 5C-d.
+4. **Reboot during a sequence:** crash-equivalence is sufficient, and
+   `StartReboot` does not refuse.
+5. **sl-authd unavailable:** Session1 fails `GetPlatformStatus` with a
+   distinct error rather than guessing `enrolled`. This is a known 0.0.3
+   limitation, listed in the contract's hardening items.
+6. **Addresses:** one `url`, as selected above.
+7. **Timeouts:** 30 seconds for workers, 10 seconds for starting or stopping
+   sl-remoted.
