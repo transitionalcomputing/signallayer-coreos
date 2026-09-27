@@ -551,6 +551,7 @@ dependencies = [
  "libc",
  "serde_json",
  "sl-protocol",
+ "sl-remote-state",
  "tokio",
  "zbus",
 ]
