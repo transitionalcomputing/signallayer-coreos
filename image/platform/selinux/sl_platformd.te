@@ -69,6 +69,70 @@ files_search_var_lib(sl_authd_t)
 manage_files_pattern(sl_authd_t, sl_authd_var_lib_t, sl_authd_var_lib_t)
 allow init_t sl_authd_var_lib_t:dir { create_dir_perms setattr relabelto };
 
+# Remote-management state (5C-b). sl_remote_worker_t, running the fixed
+# sl-remote-worker modes, is the only writer. Platform and Session1 get
+# read-only access below, and never the private key. sl-remoted (5C-c) and
+# sl-console (5C-d) domains, and their rules, are added in those phases.
+type sl_rm_state_t;
+files_type(sl_rm_state_t)
+type sl_rm_tls_t;
+files_type(sl_rm_tls_t)
+type sl_rm_tls_key_t;
+files_type(sl_rm_tls_key_t)
+# PID 1 creates /var/lib/sl-remote-management for StateDirectory=.
+allow init_t sl_rm_state_t:dir { create_dir_perms setattr relabelto };
+
+type sl_remote_worker_t;
+type sl_remote_worker_exec_t;
+init_daemon_domain(sl_remote_worker_t, sl_remote_worker_exec_t)
+domtrans_pattern(init_t, sl_remote_worker_exec_t, sl_remote_worker_t)
+allow init_t sl_remote_worker_t:process2 nnp_transition;
+
+libs_use_ld_so(sl_remote_worker_t)
+libs_use_shared_libs(sl_remote_worker_t)
+files_read_usr_files(sl_remote_worker_t)
+miscfiles_read_localization(sl_remote_worker_t)
+dev_read_urand(sl_remote_worker_t)
+# The sl-remoted group lookup for TLS file ownership.
+auth_read_passwd_file(sl_remote_worker_t)
+# TLS files are chowned to root:sl-remoted.
+allow sl_remote_worker_t self:capability chown;
+
+# The fixed /usr/bin/openssl, run without a domain transition, reading only
+# the public config copy (OPENSSL_CONF) and the system crypto policy.
+corecmd_exec_bin(sl_remote_worker_t)
+allow sl_remote_worker_t self:process { fork sigchld };
+allow sl_remote_worker_t self:fifo_file rw_fifo_file_perms;
+files_read_etc_files(sl_remote_worker_t)
+kernel_read_crypto_sysctls(sl_remote_worker_t)
+allow sl_remote_worker_t sl_platformd_release_t:dir list_dir_perms;
+allow sl_remote_worker_t sl_platformd_release_t:file read_file_perms;
+
+files_search_var_lib(sl_remote_worker_t)
+manage_dirs_pattern(sl_remote_worker_t, sl_rm_state_t, sl_rm_state_t)
+manage_files_pattern(sl_remote_worker_t, sl_rm_state_t, sl_rm_state_t)
+manage_dirs_pattern(sl_remote_worker_t, sl_rm_state_t, sl_rm_tls_t)
+manage_dirs_pattern(sl_remote_worker_t, sl_rm_tls_t, sl_rm_tls_t)
+manage_files_pattern(sl_remote_worker_t, sl_rm_tls_t, sl_rm_tls_t)
+manage_lnk_files_pattern(sl_remote_worker_t, sl_rm_tls_t, sl_rm_tls_t)
+manage_files_pattern(sl_remote_worker_t, sl_rm_tls_t, sl_rm_tls_key_t)
+# Created objects get their frozen types by name.
+type_transition sl_remote_worker_t sl_rm_state_t:dir sl_rm_tls_t "tls";
+type_transition sl_remote_worker_t sl_rm_tls_t:file sl_rm_tls_key_t "key.pem";
+
+# The boot reset calls sl-authd's ResetEnrollment over the system bus.
+dbus_system_bus_client(sl_remote_worker_t)
+allow sl_remote_worker_t sl_authd_t:dbus send_msg;
+allow sl_authd_t sl_remote_worker_t:dbus send_msg;
+
+# Worker unit files. Platform may start and observe the four lifecycle
+# workers. The boot-reset unit has its own type with no Platform permission,
+# so Platform cannot trigger a destructive reset.
+type sl_rm_worker_unit_file_t;
+systemd_unit_file(sl_rm_worker_unit_file_t)
+type sl_rm_boot_reset_unit_file_t;
+systemd_unit_file(sl_rm_boot_reset_unit_file_t)
+
 # PID 1 transitions on the image-owned entry point. No permissive/unconfined
 # attribute is assigned to this domain or its inherited bootc children.
 type sl_platformd_t;
@@ -151,6 +215,23 @@ allow sl_platformd_t sl_authd_t:dbus send_msg;
 allow sl_authd_t sl_platformd_t:dbus send_msg;
 allow sl_sessiond_t sl_authd_t:dbus send_msg;
 allow sl_authd_t sl_sessiond_t:dbus send_msg;
+# Remote management: Platform starts and observes the lifecycle workers,
+# checks the markers, and reads the current identity's fingerprint, never
+# the key. Starting and stopping sl-remoted is added with its unit (5C-c).
+allow sl_platformd_t sl_rm_worker_unit_file_t:service { start status };
+files_search_var_lib(sl_platformd_t)
+allow sl_platformd_t sl_rm_state_t:dir search_dir_perms;
+allow sl_platformd_t sl_rm_state_t:file getattr;
+allow sl_platformd_t sl_rm_tls_t:dir search_dir_perms;
+allow sl_platformd_t sl_rm_tls_t:lnk_file read_lnk_file_perms;
+allow sl_platformd_t sl_rm_tls_t:file read_file_perms;
+# Session1 checks only the presence of the enabled marker. The lookup of
+# /run/sl-remoted/listening needs /run search; the file's own type and
+# getattr come with sl-remoted's runtime directory (5C-c).
+files_search_var_lib(sl_sessiond_t)
+allow sl_sessiond_t sl_rm_state_t:dir search_dir_perms;
+allow sl_sessiond_t sl_rm_state_t:file getattr;
+files_search_pids(sl_sessiond_t)
 # Platform talks only to the network observer; it has no direct NetworkManager
 # message permission. The observer's system-bus policy further restricts its
 # unprivileged identity to the Properties.Get member.

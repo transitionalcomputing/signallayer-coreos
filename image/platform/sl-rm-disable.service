@@ -1,0 +1,30 @@
+[Unit]
+Description=SignalLayerIT remote-management disable worker
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/signallayer/sl-remote-worker disable
+User=root
+StateDirectory=sl-remote-management
+StateDirectoryMode=0755
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0077
