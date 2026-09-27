@@ -14,19 +14,28 @@ const AUTH_PATH: &str = "/org/signallayer/Auth1";
 const AUTH_INTERFACE: &str = "org.signallayer.Auth1";
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTED_GROUP: &str = "sl-remoted";
+/// The public copy of Fedora's configuration that sl-platformd also uses, so
+/// openssl never reads the cert_t-labeled /etc/pki/tls/openssl.cnf.
+const OPENSSL_CONF: &str = "/usr/lib/signallayer/openssl.cnf";
+
+/// Fixed program, fixed arguments, and an environment of exactly OPENSSL_CONF.
+fn openssl_command(arguments: &[OsString]) -> Command {
+    let mut command = Command::new(OPENSSL);
+    command
+        .args(arguments)
+        .env_clear()
+        .env("OPENSSL_CONF", OPENSSL_CONF)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    command
+}
 
 struct SystemTools;
 
 impl Tools for SystemTools {
     fn openssl(&mut self, arguments: &[OsString]) -> Result<Vec<u8>, ()> {
-        let output = Command::new(OPENSSL)
-            .args(arguments)
-            .env_clear()
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .map_err(|_| ())?;
+        let output = openssl_command(arguments).output().map_err(|_| ())?;
         if output.status.success() {
             Ok(output.stdout)
         } else {
@@ -172,6 +181,22 @@ mod tests {
         for mode in [Mode::Disable, Mode::BootReset, Mode::ClearResetPending] {
             assert!(!mode.writes_identity());
         }
+    }
+
+    #[test]
+    fn openssl_runs_with_only_the_fixed_configuration() {
+        let arguments = [OsString::from("x509"), OsString::from("-noout")];
+        let command = openssl_command(&arguments);
+        assert_eq!(command.get_program(), "/usr/bin/openssl");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["x509", "-noout"]);
+        let environment: Vec<_> = command.get_envs().collect();
+        assert_eq!(
+            environment,
+            [(
+                std::ffi::OsStr::new("OPENSSL_CONF"),
+                Some(std::ffi::OsStr::new("/usr/lib/signallayer/openssl.cnf"))
+            )]
+        );
     }
 
     #[test]
