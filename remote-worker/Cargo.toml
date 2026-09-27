@@ -1,0 +1,10 @@
+[package]
+name = "sl-remote-worker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sl-remote-state.workspace = true
+libc.workspace = true
+zbus.workspace = true
+tokio.workspace = true

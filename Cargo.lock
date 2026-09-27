@@ -564,6 +564,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-remote-state"
+version = "0.0.2"
+
+[[package]]
+name = "sl-remote-worker"
+version = "0.0.2"
+dependencies = [
+ "libc",
+ "sl-remote-state",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "sl-sessiond"
 version = "0.0.2"
 dependencies = [
