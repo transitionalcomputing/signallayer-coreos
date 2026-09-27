@@ -1,0 +1,406 @@
+use super::*;
+use std::{
+    path::Path,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Mutex,
+    },
+};
+use tokio::{sync::mpsc, time::advance};
+
+fn status(addresses: &[&str]) -> String {
+    serde_json::json!({"schema_version": "0.4", "network": {"state": "connected_global",
+        "primary_connection": {"interface": "enp0s2", "addresses": addresses, "default_gateways": []}}})
+    .to_string()
+}
+
+struct FakeStatus {
+    current: Mutex<Result<String, ()>>,
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl StatusSource for FakeStatus {
+    async fn status(&self) -> Result<String, ()> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.current.lock().unwrap().clone()
+    }
+}
+
+#[derive(Clone, Default)]
+struct Log(Arc<Mutex<Vec<String>>>);
+
+impl Log {
+    fn push(&self, entry: String) {
+        self.0.lock().unwrap().push(entry);
+    }
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut self.0.lock().unwrap())
+    }
+}
+
+struct FakeListeners {
+    log: Log,
+    failing: Arc<Mutex<Vec<IpAddr>>>,
+}
+
+impl Listeners for FakeListeners {
+    fn bind(&mut self, addresses: &[IpAddr]) -> Vec<SocketAddr> {
+        let failing = self.failing.lock().unwrap().clone();
+        addresses
+            .iter()
+            .filter(|address| {
+                let ok = !failing.contains(address);
+                self.log.push(format!(
+                    "bind {address} {}",
+                    if ok { "ok" } else { "failed" }
+                ));
+                ok
+            })
+            .map(|address| SocketAddr::new(*address, 8443))
+            .collect()
+    }
+
+    fn serve(&mut self, generation: u64) {
+        self.log.push(format!("serve {generation}"));
+    }
+
+    fn close(&mut self) {
+        self.log.push("close".into());
+    }
+}
+
+struct FakeEvents(mpsc::UnboundedReceiver<io::Result<()>>);
+
+#[async_trait]
+impl Events for FakeEvents {
+    async fn changed(&mut self) -> io::Result<()> {
+        match self.0.recv().await {
+            Some(result) => result,
+            None => std::future::pending().await,
+        }
+    }
+}
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "sl-remoted-controller-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+struct Harness {
+    status: Arc<FakeStatus>,
+    log: Log,
+    failing: Arc<Mutex<Vec<IpAddr>>>,
+    shared: Arc<Shared>,
+    marker: PathBuf,
+    events: mpsc::UnboundedSender<io::Result<()>>,
+    task: tokio::task::JoinHandle<io::Error>,
+    _directory: TempDir,
+}
+
+impl Harness {
+    async fn start(initial: Result<String, ()>) -> Self {
+        Self::start_with_marker(initial, None).await
+    }
+
+    async fn start_with_marker(initial: Result<String, ()>, marker: Option<PathBuf>) -> Self {
+        let directory = TempDir::new();
+        let marker = marker.unwrap_or_else(|| directory.0.join("listening"));
+        let status = Arc::new(FakeStatus {
+            current: Mutex::new(initial),
+            calls: AtomicUsize::new(0),
+        });
+        let log = Log::default();
+        let failing = Arc::new(Mutex::new(Vec::new()));
+        let shared = Shared::new();
+        let (events, receiver) = mpsc::unbounded_channel();
+        let controller = Controller::new(
+            status.clone(),
+            FakeListeners {
+                log: log.clone(),
+                failing: failing.clone(),
+            },
+            Marker {
+                path: marker.clone(),
+            },
+            shared.clone(),
+        );
+        let task = tokio::spawn(controller.run(FakeEvents(receiver)));
+        let harness = Self {
+            status,
+            log,
+            failing,
+            shared,
+            marker,
+            events,
+            task,
+            _directory: directory,
+        };
+        harness.settle().await;
+        harness
+    }
+
+    async fn settle(&self) {
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    async fn advance(&self, duration: Duration) {
+        advance(duration).await;
+        self.settle().await;
+    }
+
+    fn set_status(&self, value: Result<String, ()>) {
+        *self.status.current.lock().unwrap() = value;
+    }
+
+    fn calls(&self) -> usize {
+        self.status.calls.load(Ordering::SeqCst)
+    }
+
+    fn generation(&self) -> u64 {
+        *self.shared.subscribe().borrow()
+    }
+
+    fn admits(&self, source: &str) -> bool {
+        self.shared
+            .admits(self.generation(), source.parse().unwrap())
+    }
+
+    fn listening(&self) -> bool {
+        Path::new(&self.marker).exists()
+    }
+
+    async fn event(&self) {
+        self.events.send(Ok(())).unwrap();
+        self.settle().await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn startup_publishes_a_view_then_the_marker() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    let generation = harness.generation();
+    assert_eq!(
+        harness.log.take(),
+        [
+            "close",
+            "bind 192.0.2.10 ok",
+            &format!("serve {generation}")
+        ]
+    );
+    assert!(harness.listening());
+    assert!(harness.admits("192.0.2.77"));
+    assert!(!harness.admits("198.51.100.7"));
+    // An earlier generation is never admitted.
+    assert!(!harness
+        .shared
+        .admits(generation - 1, "192.0.2.77".parse().unwrap()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stale_marker_from_an_earlier_run_is_removed_first() {
+    let directory = TempDir::new();
+    let marker = directory.0.join("listening");
+    std::fs::write(&marker, b"").unwrap();
+    let harness = Harness::start_with_marker(Err(()), Some(marker)).await;
+    assert!(!harness.listening());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_change_event_withdraws_immediately_and_bursts_coalesce() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    let calls = harness.calls();
+    harness.set_status(Ok(status(&["198.51.100.20/24"])));
+    harness.event().await;
+    // Withdrawn before any refresh.
+    assert!(!harness.listening());
+    assert!(!harness.admits("192.0.2.77"));
+    assert_eq!(harness.log.take(), ["close"]);
+    assert_eq!(harness.calls(), calls);
+    // More events inside the debounce window extend it.
+    harness.advance(Duration::from_millis(300)).await;
+    harness.event().await;
+    harness.advance(Duration::from_millis(300)).await;
+    harness.event().await;
+    harness.advance(Duration::from_millis(400)).await;
+    assert_eq!(harness.calls(), calls, "still debouncing");
+    assert!(!harness.listening());
+    harness.advance(Duration::from_millis(200)).await;
+    assert_eq!(harness.calls(), calls + 1, "one refresh for the burst");
+    let generation = harness.generation();
+    assert_eq!(
+        harness.log.take(),
+        [
+            "close",
+            "bind 198.51.100.20 ok",
+            &format!("serve {generation}")
+        ]
+    );
+    assert!(harness.listening());
+    assert!(harness.admits("198.51.100.99"));
+    assert!(!harness.admits("192.0.2.77"), "the old prefix is gone");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_refresh_after_an_event_stays_withdrawn_until_success() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.set_status(Err(()));
+    harness.event().await;
+    harness.advance(DEBOUNCE).await;
+    assert!(!harness.listening());
+    assert!(!harness.admits("192.0.2.77"));
+    harness.set_status(Ok(status(&["192.0.2.10/24"])));
+    harness.advance(RETRY).await;
+    assert!(harness.listening());
+    assert!(harness.admits("192.0.2.77"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn periodic_reconcile_leaves_an_unchanged_view_undisturbed() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    let generation = harness.generation();
+    let calls = harness.calls();
+    harness.advance(RECONCILE).await;
+    assert_eq!(harness.calls(), calls + 1);
+    assert!(harness.log.take().is_empty(), "no close, no rebind");
+    assert_eq!(harness.generation(), generation);
+    assert!(harness.listening());
+}
+
+#[tokio::test(start_paused = true)]
+async fn periodic_reconcile_withdraws_before_publishing_a_changed_view() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    harness.set_status(Ok(status(&["192.0.2.10/25"])));
+    harness.advance(RECONCILE).await;
+    let generation = harness.generation();
+    assert_eq!(
+        harness.log.take(),
+        [
+            "close",
+            "bind 192.0.2.10 ok",
+            &format!("serve {generation}")
+        ]
+    );
+    assert!(harness.admits("192.0.2.100"));
+    assert!(!harness.admits("192.0.2.200"), "outside the new /25");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_view_becomes_stale_after_120_seconds_without_confirmation() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.set_status(Err(()));
+    harness.advance(RECONCILE).await;
+    assert!(harness.listening(), "one failed refresh is not yet stale");
+    assert!(harness.admits("192.0.2.77"));
+    for _ in 0..11 {
+        harness.advance(RETRY).await;
+        assert!(harness.listening(), "still within 120 s");
+    }
+    harness.advance(RETRY).await;
+    assert!(!harness.listening(), "stale at 120 s");
+    assert!(!harness.admits("192.0.2.77"));
+    harness.set_status(Ok(status(&["192.0.2.10/24"])));
+    harness.advance(RETRY).await;
+    assert!(harness.listening());
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_or_ambiguous_state_never_listens() {
+    let no_primary = serde_json::json!({"schema_version": "0.4",
+        "network": {"state": "disconnected", "primary_connection": null}})
+    .to_string();
+    for initial in [
+        Ok(no_primary),
+        Ok(status(&["192.0.2.10/0"])),
+        Ok(status(&["192.0.2.10/24"]).replace("\"0.4\"", "\"0.3\"")),
+        Ok(status(&["169.254.1.1/16", "fe80::1/64"])),
+        Err(()),
+    ] {
+        let harness = Harness::start(initial.clone()).await;
+        assert!(!harness.listening(), "{initial:?}");
+        assert!(!harness.admits("192.0.2.77"), "{initial:?}");
+        assert!(!harness.admits("169.254.1.2"), "{initial:?}");
+        assert!(!harness
+            .log
+            .take()
+            .iter()
+            .any(|entry| entry.starts_with("serve")));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_marker_tracks_bound_listeners() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness
+        .failing
+        .lock()
+        .unwrap()
+        .push("192.0.2.10".parse().unwrap());
+    harness.event().await;
+    harness.advance(DEBOUNCE).await;
+    assert!(!harness.listening(), "no listener could be bound");
+    assert!(!harness.admits("192.0.2.77"));
+    // One of two addresses bound: listening, and retried at the next reconcile.
+    harness.set_status(Ok(status(&["192.0.2.10/24", "198.51.100.20/24"])));
+    harness.event().await;
+    harness.advance(DEBOUNCE).await;
+    assert!(harness.listening());
+    harness.log.take();
+    harness.failing.lock().unwrap().clear();
+    harness.advance(RECONCILE).await;
+    let generation = harness.generation();
+    assert_eq!(
+        harness.log.take(),
+        [
+            "close",
+            "bind 192.0.2.10 ok",
+            "bind 198.51.100.20 ok",
+            &format!("serve {generation}")
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_marker_that_cannot_be_written_withdraws_everything() {
+    let directory = TempDir::new();
+    let unwritable = directory.0.join("missing-directory").join("listening");
+    let harness =
+        Harness::start_with_marker(Ok(status(&["192.0.2.10/24"])), Some(unwritable)).await;
+    assert!(!harness.admits("192.0.2.77"));
+    assert_eq!(harness.log.take().last().map(String::as_str), Some("close"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_event_source_withdraws_and_ends_the_controller() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    assert!(harness.listening());
+    harness
+        .events
+        .send(Err(io::Error::other("netlink failed")))
+        .unwrap();
+    harness.settle().await;
+    assert!(harness.task.is_finished());
+    assert!(!harness.listening());
+    assert!(!harness.admits("192.0.2.77"));
+}

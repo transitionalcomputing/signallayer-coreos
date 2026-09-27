@@ -1,0 +1,253 @@
+//! Listener and eligibility lifecycle (docs/remote-api-0.0.3.md, "Network
+//! exposure"). Session1 is the only network truth; change notifications only
+//! invalidate. Every withdrawal happens before any new state is exposed.
+use crate::{
+    network::{on_link, view_from_status, View},
+    peers::StatusSource,
+};
+use std::{
+    fs::OpenOptions,
+    io,
+    net::{IpAddr, SocketAddr},
+    os::unix::fs::OpenOptionsExt,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tokio::{
+    sync::watch,
+    time::{sleep, sleep_until, Instant},
+};
+use zbus::export::async_trait::async_trait;
+
+pub const DEBOUNCE: Duration = Duration::from_millis(500);
+pub const RECONCILE: Duration = Duration::from_secs(60);
+pub const STALE_AFTER: Duration = Duration::from_secs(120);
+pub const RETRY: Duration = Duration::from_secs(5);
+
+struct Published {
+    generation: u64,
+    view: View,
+}
+
+/// What every accept and every open connection is checked against.
+pub struct Shared {
+    current: RwLock<Option<Published>>,
+    generation: watch::Sender<u64>,
+}
+
+impl Shared {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            current: RwLock::new(None),
+            generation: watch::channel(0).0,
+        })
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.generation.subscribe()
+    }
+
+    /// No source is eligible afterwards, and every listener and connection of
+    /// an earlier generation ends.
+    pub(crate) fn withdraw(&self) {
+        if let Ok(mut current) = self.current.write() {
+            *current = None;
+        }
+        self.generation.send_modify(|generation| *generation += 1);
+    }
+
+    pub(crate) fn publish(&self, view: View) -> u64 {
+        let generation = *self.generation.borrow();
+        if let Ok(mut current) = self.current.write() {
+            *current = Some(Published { generation, view });
+        }
+        generation
+    }
+
+    /// A connection is admitted only under the current published generation,
+    /// and only from an on-link source.
+    pub fn admits(&self, generation: u64, source: IpAddr) -> bool {
+        self.current.read().is_ok_and(|current| {
+            current.as_ref().is_some_and(|published| {
+                published.generation == generation && on_link(&published.view, source)
+            })
+        })
+    }
+
+    pub fn is_current(&self, generation: u64) -> bool {
+        *self.generation.borrow() == generation
+    }
+}
+
+/// Binding and serving, injected so the lifecycle is testable.
+pub trait Listeners: Send {
+    /// Binds one listener per address; returns the endpoints that were bound.
+    /// Nothing is accepted until `serve`.
+    fn bind(&mut self, addresses: &[IpAddr]) -> Vec<SocketAddr>;
+    fn serve(&mut self, generation: u64);
+    /// Stops accepting and closes every listener.
+    fn close(&mut self);
+}
+
+#[async_trait]
+pub trait Events: Send {
+    async fn changed(&mut self) -> io::Result<()>;
+}
+
+#[async_trait]
+impl Events for crate::netlink::Netlink {
+    async fn changed(&mut self) -> io::Result<()> {
+        crate::netlink::Netlink::changed(self).await
+    }
+}
+
+/// `/run/sl-remoted/listening`: present only while listening.
+pub struct Marker {
+    pub path: PathBuf,
+}
+
+impl Marker {
+    fn create(&self) -> io::Result<()> {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o644)
+            .open(&self.path)
+            .map(drop)
+    }
+
+    fn remove(&self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+pub struct Controller<L> {
+    status: Arc<dyn StatusSource>,
+    listeners: L,
+    marker: Marker,
+    shared: Arc<Shared>,
+    /// The published view, and whether every listen address was bound.
+    published: Option<(View, bool)>,
+    confirmed_at: Option<Instant>,
+}
+
+impl<L: Listeners> Controller<L> {
+    pub fn new(
+        status: Arc<dyn StatusSource>,
+        listeners: L,
+        marker: Marker,
+        shared: Arc<Shared>,
+    ) -> Self {
+        // A marker left by an earlier run is never trusted.
+        marker.remove();
+        Self {
+            status,
+            listeners,
+            marker,
+            shared,
+            published: None,
+            confirmed_at: None,
+        }
+    }
+
+    /// Immediate and synchronous: marker, eligibility, then listeners.
+    fn withdraw(&mut self) {
+        self.marker.remove();
+        self.shared.withdraw();
+        self.listeners.close();
+        self.published = None;
+        self.confirmed_at = None;
+    }
+
+    /// Precondition: withdrawn.
+    fn establish(&mut self, view: View, now: Instant) {
+        let bound = self.listeners.bind(&view.listen);
+        let complete = bound.len() == view.listen.len();
+        self.confirmed_at = Some(now);
+        if bound.is_empty() {
+            self.listeners.close();
+            self.published = Some((view, complete));
+            return;
+        }
+        let generation = self.shared.publish(view.clone());
+        self.listeners.serve(generation);
+        if self.marker.create().is_err() {
+            // Without the marker the service must not claim to listen.
+            self.withdraw();
+            return;
+        }
+        self.published = Some((view, complete));
+    }
+
+    async fn reconcile(&mut self, now: Instant) -> Result<(), ()> {
+        let view = self
+            .status
+            .status()
+            .await
+            .and_then(|status| view_from_status(&status));
+        match view {
+            Ok(view) => {
+                let unchanged = self
+                    .published
+                    .as_ref()
+                    .is_some_and(|(published, complete)| *complete && *published == view);
+                if unchanged {
+                    self.confirmed_at = Some(now);
+                } else {
+                    self.withdraw();
+                    self.establish(view, now);
+                }
+                Ok(())
+            }
+            Err(()) => {
+                let stale = self
+                    .confirmed_at
+                    .is_none_or(|confirmed| now.duration_since(confirmed) >= STALE_AFTER);
+                if stale {
+                    self.withdraw();
+                }
+                Err(())
+            }
+        }
+    }
+
+    /// Runs until the change-event source fails; everything is withdrawn
+    /// before returning.
+    pub async fn run(mut self, mut events: impl Events) -> io::Error {
+        let mut next = Instant::now();
+        loop {
+            tokio::select! {
+                changed = events.changed() => {
+                    self.withdraw();
+                    if let Err(error) = changed {
+                        return error;
+                    }
+                    // Coalesce a burst into one refresh.
+                    loop {
+                        tokio::select! {
+                            changed = events.changed() => {
+                                if let Err(error) = changed {
+                                    return error;
+                                }
+                            }
+                            _ = sleep(DEBOUNCE) => break,
+                        }
+                    }
+                    next = Instant::now();
+                }
+                _ = sleep_until(next) => {
+                    let now = Instant::now();
+                    next = match self.reconcile(now).await {
+                        Ok(()) => now + RECONCILE,
+                        Err(()) => now + RETRY,
+                    };
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
