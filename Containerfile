@@ -71,7 +71,7 @@ COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.c
 COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf
 COPY image/platform/sl-authd.sysusers /usr/lib/sysusers.d/sl-authd.conf
-COPY image/platform/sl-managementd.sysusers /usr/lib/sysusers.d/sl-managementd.conf
+COPY image/platform/sl-remoted.sysusers /usr/lib/sysusers.d/sl-remoted.conf
 COPY image/platform/sl-console.sysusers /usr/lib/sysusers.d/sl-console.conf
 COPY image/platform/org.signallayer.Platform1.conf /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf
 COPY image/platform/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.Session1.conf
@@ -124,12 +124,12 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-authd.service && \
     grep -Fqx 'RestrictAddressFamilies=AF_UNIX' /usr/lib/systemd/system/sl-authd.service && \
     grep -Fqx 'u sl-authd - "SignalLayerIT authentication service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-authd.conf && \
-    grep -Fqx 'u sl-managementd - "SignalLayerIT remote management service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-managementd.conf && \
+    grep -Fqx 'u sl-remoted - "SignalLayerIT remote management service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-remoted.conf && \
     grep -Fqx 'u sl-console - "SignalLayerIT local console" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-console.conf && \
     test "$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf)" = 6 && \
     test "$(awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \n' ' ')" = ' <policy context="default"> <deny own="org.signallayer.Auth1"/> <deny send_destination="org.signallayer.Auth1"/> </policy> ' && \
     test "$(awk '/<policy user="sl-authd">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \n' ' ')" = ' <policy user="sl-authd"> <allow own="org.signallayer.Auth1"/> </policy> ' && \
-    test "$(awk '/<policy user="sl-managementd">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="ConfirmRecoveryKey" send_member="ConsumePairing" send_member="VerifyPassword" ' && \
+    test "$(awk '/<policy user="sl-remoted">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="ConfirmRecoveryKey" send_member="ConsumePairing" send_member="VerifyPassword" ' && \
     test "$(awk '/<policy user="sl-console">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="RecoverPassword" send_member="VerifyPassword" ' && \
     test "$(awk '/<policy user="root">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="CancelPendingPairing" send_member="EnsurePendingPairing" send_member="GetEnrollmentState" send_member="GetPendingPairing" send_member="ResetEnrollment" ' && \
     test "$(awk '/<policy user="sl-sessiond">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="GetEnrollmentState" ' && \
