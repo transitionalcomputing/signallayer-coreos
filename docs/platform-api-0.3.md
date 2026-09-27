@@ -212,8 +212,9 @@ earlier. A failed start is an ordinary enabled-but-not-listening failure
 (row 7 below): a new identity, no old credential, and a retry through Enable or
 Reenroll.
 
-**Permit:** the remote-management permit is held from step 1 through the
-marker clear (step 6) and the sl-remoted start attempt (step 7), and released
+**Permit:** the remote-management permit is held from Reenroll step 1 through
+the marker clear (Reenroll step 6) and the sl-remoted start attempt (Reenroll
+step 7), and released
 only when Reenroll returns. No other remote-management method can observe or
 act on the state between the clear and the start.
 
