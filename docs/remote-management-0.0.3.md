@@ -26,7 +26,7 @@ firmware/systemd-credential provisioning (later automation path).
   enrollment reset, and attempt/backoff accounting. It has no
   machine-mutation or authorization-to-act role. Its methods are callable
   only by the components that need them, by bus policy.
-- **sl-managementd:** unprivileged, no capabilities. Serves HTTPS and the
+- **sl-remoted:** unprivileged, no capabilities. Serves HTTPS and the
   bundled web console. Reads machine state through Session1. Verifies
   credentials through sl-authd and owns web sessions. It owns no
   authoritative machine state and has no mutation authority.
@@ -39,7 +39,7 @@ firmware/systemd-credential provisioning (later automation path).
   sl-authd. Its service identity may call exactly
   EnableRemoteManagement, DisableRemoteManagement,
   ReenrollRemoteManagement and GetRemoteManagementEnrollment, and nothing
-  else (no update, rollback or reboot). sl-managementd receives none of
+  else (no update, rollback or reboot). sl-remoted receives none of
   these.
 
 ## Trust model
@@ -70,12 +70,12 @@ firmware/systemd-credential provisioning (later automation path).
   mutation beyond it). Accepted for 0.0.3; see Deferred hardening.
 
 ## Platform API 0.3 (local, fixed, zero-argument)
-- `EnableRemoteManagement() -> ()`: idempotent. Starts sl-managementd
+- `EnableRemoteManagement() -> ()`: idempotent. Starts sl-remoted
   through a fixed worker if it isn't running; generates the TLS identity
   if absent. When no operator is enrolled, it ensures an unexpired pending
   pairing exists: if the previous pairing expired, invoking it again
   creates a new pairing without rotating the TLS identity.
-- `DisableRemoteManagement() -> ()`: stops sl-managementd; invalidates all
+- `DisableRemoteManagement() -> ()`: stops sl-remoted; invalidates all
   sessions and any pending pairing; preserves enrollment and TLS
   identity.
 - `ReenrollRemoteManagement() -> ()`: resets enrollment in sl-authd,
@@ -111,7 +111,7 @@ There is no permanent default password.
 Schema 0.3 plus a `remote_management` object with exactly `enabled`,
 `listening` and `enrolled` (booleans):
 - `enabled`: remote management is administratively enabled.
-- `listening`: sl-managementd is currently accepting eligible HTTPS
+- `listening`: sl-remoted is currently accepting eligible HTTPS
   connections.
 - `enrolled`: sl-authd holds an enrolled operator credential.
 Session1 aggregates these facts without owning them. No pairing codes, key
@@ -120,7 +120,7 @@ web sessions receive the status object exactly as reported through
 Session1.
 
 ## Network exposure
-sl-managementd is reachable only on the current primary interface's
+sl-remoted is reachable only on the current primary interface's
 addresses, and only from sources within that interface's directly
 connected prefixes. It never binds to all addresses. If the primary
 interface or its prefixes cannot be determined or are stale, it stops
@@ -140,7 +140,7 @@ reset replace it.
 HTTPS + JSON, read-only endpoints only. Unauthenticated clients reach
 only the login/pairing page and its assets. Sessions use a Secure,
 HttpOnly, SameSite=Strict cookie with idle and absolute timeouts, owned by
-sl-managementd. Login, pairing and logout require a matching Origin.
+sl-remoted. Login, pairing and logout require a matching Origin.
 Credential attempts are rate-limited in sl-authd. Authentication events
 are logged to the journal. The console assets are bundled in the image;
 no external CDN.
@@ -150,7 +150,7 @@ Explicitly out of 0.0.3 scope; recorded so it isn't lost:
 - Platform-verified authd proofs for console actions (closing the stated
   console-UI limitation).
 - Adversarial review of D-Bus authorization and deputy boundaries,
-  sl-authd/sl-managementd confinement and SELinux policy.
+  sl-authd/sl-remoted confinement and SELinux policy.
 - Console escape paths; auth, recovery and boot-time-reset abuse cases.
 - Argon2id/rate-limit denial-of-service behavior.
 - Session fixation, theft and CSRF testing; malformed-input fuzzing.
@@ -172,4 +172,4 @@ password; recovery-key reset works and changes only authentication
 state; re-enrollment rotates the fingerprint and invalidates the old
 credential; enrollment retrieval never creates a credential; schema 0.4
 exposes no authentication internals; remote status agrees with corectl
-and Session1; sl-authd and sl-managementd are unprivileged and confined.
+and Session1; sl-authd and sl-remoted are unprivileged and confined.

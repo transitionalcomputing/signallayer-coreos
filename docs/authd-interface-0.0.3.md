@@ -126,7 +126,7 @@ Every invalid-state call has a named error; nothing is implicit.
 - A failure increments the sender's password counter; a success resets it.
 - While backoff is active, the call is refused with `RateLimited` without
   evaluating the password.
-- **Callers:** sl-managementd (web login), console UI (enrolled-console
+- **Callers:** sl-remoted (web login), console UI (enrolled-console
   actions).
 
 ### ConsumePairing(s pairing_code, s new_password) -> (s recovery_key)
@@ -141,7 +141,7 @@ Every invalid-state call has a named error; nothing is implicit.
 - **Errors:** `NoPendingPairing`, `AlreadyEnrolled`, `EnrollmentUnconfirmed`,
   `InvalidPairingCode`, `PairingAttemptsExhausted`, `PasswordRejected`, `Busy`,
   `InvalidArgument`, `Unavailable`.
-- **Callers:** sl-managementd only. Pairing happens over HTTPS.
+- **Callers:** sl-remoted only. Pairing happens over HTTPS.
 
 ### ConfirmRecoveryKey(s recovery_key) -> ()
 - Valid only in EnrolledUnconfirmed, before the confirmation deadline.
@@ -150,12 +150,12 @@ Every invalid-state call has a named error; nothing is implicit.
   `ConfirmationExpired`.
 - A wrong key counts against the confirmation scope's backoff only; it never
   discards the provisional enrollment.
-- sl-managementd calls it after the owner re-enters the recovery key shown at
+- sl-remoted calls it after the owner re-enters the recovery key shown at
   pairing.
 - **Errors:** `NoProvisionalEnrollment`, `ConfirmationExpired`,
   `InvalidCredential`, `RateLimited`, `Busy`, `InvalidArgument`,
   `Unavailable`.
-- **Callers:** sl-managementd only.
+- **Callers:** sl-remoted only.
 
 ### RecoverPassword(s recovery_key, s new_password) -> ()
 - Valid only in Enrolled.
@@ -251,7 +251,7 @@ Supports Platform's idempotent `EnableRemoteManagement`.
 
 ## Caller matrix and bus policy
 
-| Method | sl-managementd | sl-console | sl-platformd (root) | sl-sessiond |
+| Method | sl-remoted | sl-console | sl-platformd (root) | sl-sessiond |
 |---|---|---|---|---|
 | VerifyPassword | yes | yes | no | no |
 | ConsumePairing | yes | no | no | no |
@@ -347,7 +347,7 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
 ### Backoff (frozen)
 - Counters are **memory-only** for 0.0.3. They reset when sl-authd restarts.
 - The password scope (web or console) comes from the authenticated D-Bus
-  sender identity, never from a caller-supplied value: sl-managementd's
+  sender identity, never from a caller-supplied value: sl-remoted's
   identity maps to the web scope and the console UI's identity to the console
   scope.
 - Pairing is its own scope, because it is a separate fixed method
@@ -366,7 +366,7 @@ methods to sl-platformd itself is deferred to the hardening release; see below.
 ### Service identities (frozen)
 The console UI's service identity is `sl-console`. It is the bus-policy user
 for the console's methods and maps to the console password scope;
-`sl-managementd` maps to the web password scope.
+`sl-remoted` maps to the web password scope.
 
 ### Randomness (frozen)
 Use the kernel CSPRNG through `libc::getrandom`, blocking until the pool is
@@ -416,11 +416,11 @@ dependency.
 
 ### Enrollment commit point and recovery-key delivery (decided)
 `ConsumePairing` durably commits **EnrolledUnconfirmed** before it returns the
-recovery key. The key's delivery path is the D-Bus reply to sl-managementd,
+recovery key. The key's delivery path is the D-Bus reply to sl-remoted,
 then the HTTPS response to the browser. Enrollment becomes final only when
 `ConfirmRecoveryKey` proves the owner holds the key.
 
-If delivery fails, because sl-managementd crashes, the connection drops or the
+If delivery fails, because sl-remoted crashes, the connection drops or the
 page is closed, the provisional enrollment is discarded at its deadline. The
 owner then invokes Enable again locally, which creates a fresh pairing. No
 enrollment ever exists without proof that the owner holds the recovery key. The
@@ -518,7 +518,7 @@ Not provable by unit tests, and not claimed here:
 1. **`RateLimited` retry-after:** none in 0.0.3; clients show a generic
    message.
 2. **Boot-time reset ordering:** sl-authd must be available before the reset
-   worker runs, and the reset must complete before sl-managementd or
+   worker runs, and the reset must complete before sl-remoted or
    sl-console expose enrollment state. The mechanics belong to 5C-b and are
    proven in 5E.
 3. **Console UI service identity:** `sl-console`.
