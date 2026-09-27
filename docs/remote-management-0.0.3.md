@@ -1,6 +1,6 @@
 # SignalLayer CoreOS 0.0.3 remote management contract
 
-**Status:** 5B frozen.
+**Status:** 5B frozen, with one 5C-b amendment (see Amendments).
 
 ## Charter
 0.0.3 = durable build inputs + a trusted local appliance console +
@@ -68,6 +68,11 @@ firmware/systemd-credential provisioning (later automation path).
   compromised console UI could therefore invoke its four methods without
   a password, which is bounded to remote-management lifecycle (no machine
   mutation beyond it). Accepted for 0.0.3; see Deferred hardening.
+- **Pre-OS boundary:** Pre-OS console access is equivalent to
+  machine-owner access in 0.0.3. Normal enrolled SignalLayer console
+  operations require the operator password, but bootloader, firmware,
+  hypervisor-console or equivalent pre-OS access is outside that
+  authentication boundary.
 
 ## Platform API 0.3 (local, fixed, zero-argument)
 - `EnableRemoteManagement() -> ()`: idempotent. Starts sl-remoted
@@ -80,7 +85,8 @@ firmware/systemd-credential provisioning (later automation path).
   identity.
 - `ReenrollRemoteManagement() -> ()`: resets enrollment in sl-authd,
   invalidates sessions and pairing, rotates the TLS identity, and creates
-  a fresh pending pairing.
+  a fresh pending pairing. (Amended in 5C-b for a disabled machine; see
+  Amendments.)
 - `GetRemoteManagementEnrollment() -> (url, fingerprint, pairing_code,
   expires_at)`: typed return; the pairing code and expiry are present
   only while a pairing is pending. It never creates or regenerates a
@@ -157,7 +163,26 @@ Explicitly out of 0.0.3 scope; recorded so it isn't lost:
 - TLS key storage and rotation review; on-link enforcement testing.
 - Update/rollback privilege boundaries; auditability; supply-chain
   provenance.
+- Lock GRUB boot-entry editing and command-line access.
+- Prevent `rd.break`, `init=` and equivalent pre-OS root-shell bypasses.
+- Define how SignalLayer provisions and manages bootloader authentication
+  without exposing a general shell.
+- Replace the GRUB-edit reset trigger with a recovery mechanism that still
+  works once bootloader editing is locked.
+- Review Secure Boot, firmware-password and hypervisor-console ACL
+  interactions.
+- Preserve a deliberate owner recovery/reset path without reopening
+  general privileged access.
+- Review the coupling where Session1 status is unavailable while sl-authd
+  is down.
 That release may change architecture if hardening evidence justifies it.
+
+## Amendments
+- **5C-b, Reenroll on a disabled machine (approved):**
+  ReenrollRemoteManagement on an administratively disabled machine resets
+  enrollment and rotates the TLS identity but does not create a pending
+  pairing. The next explicit EnableRemoteManagement creates the pairing.
+  On an enabled machine, Reenroll creates the fresh pairing as before.
 
 ## Implementation investigations (not open product decisions)
 - The second network enforcement layer (nftables fib first).
