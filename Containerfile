@@ -12,6 +12,7 @@ COPY corectl ./corectl
 COPY sessiond ./sessiond
 COPY network-observer ./network-observer
 COPY authd ./authd
+COPY remote-worker ./remote-worker
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 
 # Policy authoring/analysis tools never enter the final runtime image.
