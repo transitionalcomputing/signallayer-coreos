@@ -584,6 +584,8 @@ version = "0.0.2"
 dependencies = [
  "serde_json",
  "sl-platform-client",
+ "sl-protocol",
+ "sl-remote-state",
  "tokio",
  "zbus",
 ]
