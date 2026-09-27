@@ -6,11 +6,11 @@
 
 - Three items are deliberately left to 5C-b step 2 and are marked **Step 2
   check**: the openssl path, `-not_after` support and the random serial
-  number. If a check fails, the affected item returns to review.
+  number. If a check fails, step 2 stops and reports it before implementing
+  the affected item.
 - Places where the contract had to be interpreted are marked **Accepted
   interpretation**, and are listed again at the end.
-- The reset-pending amendment adds one item marked **For review**, where two
-  of its requirements could not both hold literally (see Reenroll).
+- No review items remain.
 
 ## Safety property: destructive reset
 
@@ -200,20 +200,22 @@ explicit Enable creates the pairing and starts sl-remoted.
 performs every destructive step of the reset itself (authentication reset, TLS
 replacement), and only then clears the marker.
 
-**For review: order of the marker clear and the sl-remoted start.** The
-amendment asks for `reset-pending` to be cleared only after any required
-sl-remoted start succeeded. It also gives sl-remoted's unit
-`ConditionPathExists=!…/reset-pending`, so sl-remoted cannot start while the
-marker exists. Both cannot hold, so this document orders the clear (step 6)
-before the start (step 7):
-- The clear is still the final **durable** step. The start is runtime state
-  only.
-- The clear happens only after every destructive part of the reset has been
-  redone and has succeeded, so the safety property holds: at that point the
-  reset has been superseded by Reenroll.
-- If the start then fails, the state is the ordinary "sl-remoted did not
-  start" state of the frozen semantics (row 7 below): a new identity, no
-  old credential, and a retry through Enable or Reenroll.
+**Order of the marker clear and the sl-remoted start (decided):**
+1. All durable security state converges: the authentication reset, the new
+   TLS identity, and the pairing behavior for the enabled or disabled state.
+2. `reset-pending` is durably cleared.
+3. sl-remoted is started.
+
+The start is runtime convergence, not part of the reset-pending safety commit.
+sl-remoted's `!reset-pending` condition would prevent it from starting any
+earlier. A failed start is an ordinary enabled-but-not-listening failure
+(row 7 below): a new identity, no old credential, and a retry through Enable or
+Reenroll.
+
+**Permit:** the remote-management permit is held from step 1 through the
+marker clear (step 6) and the sl-remoted start attempt (step 7), and released
+only when Reenroll returns. No other remote-management method can observe or
+act on the state between the clear and the start.
 
 **Errors:** `Busy`, `RemoteManagementUnavailable`, `AuthUnavailable`. Reenroll
 never returns `ResetIncomplete`.
@@ -284,7 +286,7 @@ reset. Without one, the marker does not exist and stays absent.
 | 4 rotation | unchanged | false | **false** | old identity, or none after a partial boot reset (no partial identity) | none | unchanged | Retry Reenroll (the reset repeats harmlessly). Without a pending reset, a reboot before the retry starts sl-remoted (if enabled) with the old identity, unenrolled and with no pairing: nobody can pair until a local Enable or Reenroll. With one, sl-remoted stays blocked and Enable returns `ResetIncomplete`. |
 | 5 pairing (enabled only) | true | false | false | **new** | none | unchanged | Retry Reenroll (rotates again; nothing is enrolled). Enable also completes it when no reset is pending; while one is pending, only Reenroll does. |
 | 6 clear `reset-pending` | unchanged | false | false | new | pending if enabled | **still present** | Retry Reenroll. sl-remoted stays blocked and Enable returns `ResetIncomplete` until it succeeds. |
-| 7 start sl-remoted (enabled only) | true | false | false | new | pending | **absent** | Retry Enable, or Reenroll. |
+| 7 start sl-remoted (enabled only) | true | false | false | new | pending | **absent** | An ordinary enabled-but-not-listening failure, outside the reset-pending safety commit. Retry Enable, or Reenroll. |
 | None, on a disabled machine (success) | false | false | false | new | **none** | absent | Not a failure: the next explicit Enable creates the pairing and starts sl-remoted. |
 
 **General rules:**
@@ -330,9 +332,14 @@ reset. Without one, the marker does not exist and stays absent.
   - It is removed only by the boot-reset worker after every reset step
     succeeded, or by Reenroll's final durable step.
   - It survives crashes and reboots like the enabled marker.
-  - While it exists:
-    - Enable fails with `ResetIncomplete`, with no side effects;
-    - sl-remoted cannot start, because of its unit condition.
+  - **Two enforcement layers**, both required:
+    - **The Enable path:** `EnableRemoteManagement`'s `ResetIncomplete`
+      pre-check is authoritative. While the marker exists, Enable fails
+      with no side effects.
+    - **Boot-time and direct starts:** the sl-remoted unit's
+      `ConditionPathExists=!/var/lib/sl-remote-management/reset-pending` is
+      authoritative. Nothing calls Enable at boot, so only the condition
+      stops sl-remoted there, and it also stops any direct `systemctl start`.
   - It is not exposed through Session1 or schema 0.4. sl-console learns of it
     only through the `ResetIncomplete` error, and renders it along the lines
     of "A previous remote-management reset did not complete. Re-enroll to
@@ -684,7 +691,7 @@ Enable never pairs a new identity with the old credential.
 - **Failures:** if sl-authd cannot be read, Session1 fails
   `GetPlatformStatus` with a distinct error, and never guesses `enrolled`.
   This coupling (no status at all while sl-authd is down) is a known 0.0.3
-  limitation, listed for review in the contract's deferred hardening items.
+  limitation, listed in the contract's deferred hardening items.
 - The status carries no pairing code, key material, counters or session
   counts, per the contract. It also does not expose `reset-pending`.
 
@@ -707,6 +714,10 @@ temporary directory.
   - Reenroll clears the marker only as its final durable step, after the
     reset, rotation and pairing behavior succeeded, and before starting
     sl-remoted;
+  - Reenroll holds the remote-management permit through the marker clear and
+    the sl-remoted start attempt: a concurrent call during either is `Busy`,
+    and the permit is released only when Reenroll returns, including when the
+    start fails;
   - a failure at any earlier Reenroll step leaves the marker present;
   - neither Session1 nor `GetRemoteManagementEnrollment` exposes it.
 - **Idempotency:** repeated calls on a converged state perform only no-ops.
@@ -758,8 +769,11 @@ temporary directory.
   - the reset runs once and before sl-remoted, sl-console, sl-sessiond and
     sl-platformd;
   - the resulting state and failure tables above;
-  - sl-remoted's `!reset-pending` condition keeps it stopped across reboots
-    until repair.
+  - both reset-pending enforcement layers, as required checks:
+    - Enable returns `ResetIncomplete`, with no side effects, on the real
+      system;
+    - sl-remoted's `!reset-pending` condition keeps it stopped at boot and on
+      a direct start, across reboots, until repair.
 - **`listening` accuracy:** the runtime file matches actual acceptance of
   connections.
 - **Status consistency:** the fields common to schema 0.3 agree between
