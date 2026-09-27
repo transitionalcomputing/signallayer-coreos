@@ -13,7 +13,15 @@ COPY sessiond ./sessiond
 COPY network-observer ./network-observer
 COPY authd ./authd
 COPY remote-worker ./remote-worker
+COPY remoted ./remoted
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
+# sl-remoted has no Platform1 dependency of any kind: no Platform crate in its
+# dependency tree (the positive control proves the tree was produced), in its
+# manifest, or referenced in its sources and bundled pages.
+RUN cargo tree --locked --offline -p sl-remoted -e normal,build --prefix none | grep -q '^sl-remote-state ' && \
+    ! cargo tree --locked --offline -p sl-remoted -e normal,build --prefix none | grep -Eq '^sl-(protocol|platform-client|platformd) ' && \
+    ! grep -Eq '^sl-(protocol|platform-client|platformd)' remoted/Cargo.toml && \
+    ! grep -rEq 'Platform1|PlatformProxy|sl_protocol|sl_platform_client' remoted/src remoted/static
 
 # Policy authoring/analysis tools never enter the final runtime image.
 FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS policy-tools
@@ -62,6 +70,7 @@ COPY --from=platform-build /build/target/release/sl-sessiond /usr/bin/sl-session
 COPY --from=platform-build /build/target/release/sl-network-observer /usr/bin/sl-network-observer
 COPY --from=platform-build /build/target/release/sl-authd /usr/bin/sl-authd
 COPY --from=platform-build /build/target/release/sl-remote-worker /usr/libexec/signallayer/sl-remote-worker
+COPY --from=platform-build /build/target/release/sl-remoted /usr/bin/sl-remoted
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
 COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.service
 COPY image/platform/sl-network-observer.service /usr/lib/systemd/system/sl-network-observer.service
@@ -74,6 +83,7 @@ COPY image/platform/sl-rm-disable.service /usr/lib/systemd/system/sl-rm-disable.
 COPY image/platform/sl-rm-rotate.service /usr/lib/systemd/system/sl-rm-rotate.service
 COPY image/platform/sl-rm-clear-reset.service /usr/lib/systemd/system/sl-rm-clear-reset.service
 COPY image/platform/sl-rm-boot-reset.service /usr/lib/systemd/system/sl-rm-boot-reset.service
+COPY image/platform/sl-remoted.service /usr/lib/systemd/system/sl-remoted.service
 COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
 COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf
@@ -207,6 +217,27 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="ReenrollRemoteManagement"/>' && \
     awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="GetRemoteManagementEnrollment"/>' && \
     ! grep -q 'user="sl-remoted"' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf && \
+    test -x /usr/bin/sl-remoted && \
+    test "$(matchpathcon -n /usr/bin/sl-remoted)" = system_u:object_r:sl_remoted_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-remoted.service)" = system_u:object_r:sl_remoted_unit_file_t:s0 && \
+    test "$(matchpathcon -n -m dir /run/sl-remoted)" = system_u:object_r:sl_remoted_runtime_t:s0 && \
+    test "$(matchpathcon -n -m file /run/sl-remoted/listening)" = system_u:object_r:sl_remoted_runtime_t:s0 && \
+    grep -Fqx 'ExecStart=/usr/bin/sl-remoted' /usr/lib/systemd/system/sl-remoted.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-remoted.service)" = 1 && \
+    grep -Fqx 'User=sl-remoted' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'Group=sl-remoted' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'AmbientCapabilities=' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'RuntimeDirectory=sl-remoted' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'ConditionPathExists=/var/lib/sl-remote-management/enabled' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'ConditionPathExists=/var/lib/sl-remote-management/tls/current' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'ConditionPathExists=!/var/lib/sl-remote-management/reset-pending' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'Requires=sl-rm-boot-reset.service' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Eqx 'After=sl-rm-boot-reset\.service( .*)?' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'WantedBy=multi-user.target' /usr/lib/systemd/system/sl-remoted.service && \
+    grep -Fqx 'RemainAfterExit=yes' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
     test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
     test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
     test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \
@@ -222,4 +253,5 @@ RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
     ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && \
     ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \
     ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service && \
-    ln -s ../sl-rm-boot-reset.service /usr/lib/systemd/system/multi-user.target.wants/sl-rm-boot-reset.service
+    ln -s ../sl-rm-boot-reset.service /usr/lib/systemd/system/multi-user.target.wants/sl-rm-boot-reset.service && \
+    ln -s ../sl-remoted.service /usr/lib/systemd/system/multi-user.target.wants/sl-remoted.service

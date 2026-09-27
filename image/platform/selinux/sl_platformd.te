@@ -133,6 +133,62 @@ systemd_unit_file(sl_rm_worker_unit_file_t)
 type sl_rm_boot_reset_unit_file_t;
 systemd_unit_file(sl_rm_boot_reset_unit_file_t)
 
+# sl-remoted (5C-c): the unprivileged, read-only HTTPS service. Its only bus
+# peers are sl-authd and sl-sessiond.
+type sl_remoted_t;
+type sl_remoted_exec_t;
+init_daemon_domain(sl_remoted_t, sl_remoted_exec_t)
+domtrans_pattern(init_t, sl_remoted_exec_t, sl_remoted_t)
+allow init_t sl_remoted_t:process2 nnp_transition;
+
+libs_use_ld_so(sl_remoted_t)
+libs_use_shared_libs(sl_remoted_t)
+files_read_usr_files(sl_remoted_t)
+miscfiles_read_localization(sl_remoted_t)
+dev_read_urand(sl_remoted_t)
+# Rust available_parallelism reads cgroup CPU quota information at startup.
+fs_read_cgroup_files(sl_remoted_t)
+dbus_system_bus_client(sl_remoted_t)
+allow sl_remoted_t sl_authd_t:dbus send_msg;
+allow sl_authd_t sl_remoted_t:dbus send_msg;
+allow sl_remoted_t sl_sessiond_t:dbus send_msg;
+allow sl_sessiond_t sl_remoted_t:dbus send_msg;
+
+# The current TLS identity, including its key. Read only.
+files_search_var_lib(sl_remoted_t)
+allow sl_remoted_t sl_rm_state_t:dir search_dir_perms;
+allow sl_remoted_t sl_rm_tls_t:dir search_dir_perms;
+allow sl_remoted_t sl_rm_tls_t:lnk_file read_lnk_file_perms;
+allow sl_remoted_t sl_rm_tls_t:file read_file_perms;
+allow sl_remoted_t sl_rm_tls_key_t:file read_file_perms;
+
+# HTTPS on 8443 (http_port_t), bound to specific addresses.
+allow sl_remoted_t self:tcp_socket create_stream_socket_perms;
+corenet_tcp_bind_generic_node(sl_remoted_t)
+corenet_tcp_bind_http_port(sl_remoted_t)
+corenet_tcp_sendrecv_generic_if(sl_remoted_t)
+corenet_tcp_sendrecv_generic_node(sl_remoted_t)
+corenet_tcp_sendrecv_http_port(sl_remoted_t)
+# rtnetlink change notifications: its own socket, bound to multicast groups,
+# received only. No netlink request is ever sent (no nlmsg_read/nlmsg_write).
+allow sl_remoted_t self:netlink_route_socket { create bind read };
+
+# /run/sl-remoted (RuntimeDirectory=) and its listening marker. PID 1 creates
+# and removes the directory; Session1 checks only the marker's presence.
+type sl_remoted_runtime_t;
+files_pid_file(sl_remoted_runtime_t)
+files_search_pids(sl_remoted_t)
+allow init_t sl_remoted_runtime_t:dir { manage_dir_perms relabelto };
+allow init_t sl_remoted_runtime_t:file delete_file_perms;
+manage_files_pattern(sl_remoted_t, sl_remoted_runtime_t, sl_remoted_runtime_t)
+allow sl_sessiond_t sl_remoted_runtime_t:dir search_dir_perms;
+allow sl_sessiond_t sl_remoted_runtime_t:file getattr;
+
+# Platform starts, stops and observes sl-remoted (Enable, Disable, Reenroll).
+type sl_remoted_unit_file_t;
+systemd_unit_file(sl_remoted_unit_file_t)
+allow sl_platformd_t sl_remoted_unit_file_t:service { start stop status };
+
 # PID 1 transitions on the image-owned entry point. No permissive/unconfined
 # attribute is assigned to this domain or its inherited bootc children.
 type sl_platformd_t;
@@ -217,7 +273,7 @@ allow sl_sessiond_t sl_authd_t:dbus send_msg;
 allow sl_authd_t sl_sessiond_t:dbus send_msg;
 # Remote management: Platform starts and observes the lifecycle workers,
 # checks the markers, and reads the current identity's fingerprint, never
-# the key. Starting and stopping sl-remoted is added with its unit (5C-c).
+# the key. Its sl-remoted unit permissions are with sl-remoted above.
 allow sl_platformd_t sl_rm_worker_unit_file_t:service { start status };
 files_search_var_lib(sl_platformd_t)
 allow sl_platformd_t sl_rm_state_t:dir search_dir_perms;
@@ -226,8 +282,8 @@ allow sl_platformd_t sl_rm_tls_t:dir search_dir_perms;
 allow sl_platformd_t sl_rm_tls_t:lnk_file read_lnk_file_perms;
 allow sl_platformd_t sl_rm_tls_t:file read_file_perms;
 # Session1 checks only the presence of the enabled marker. The lookup of
-# /run/sl-remoted/listening needs /run search; the file's own type and
-# getattr come with sl-remoted's runtime directory (5C-c).
+# /run/sl-remoted/listening needs /run search; the marker's own rules are
+# with sl-remoted above.
 files_search_var_lib(sl_sessiond_t)
 allow sl_sessiond_t sl_rm_state_t:dir search_dir_perms;
 allow sl_sessiond_t sl_rm_state_t:file getattr;
