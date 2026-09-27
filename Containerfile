@@ -50,7 +50,7 @@ RUN set -eu; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
         'VERSION="0.0.2"' \
-        'PLATFORM_API_VERSION="0.2"' \
+        'PLATFORM_API_VERSION="0.3"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \
         > /usr/lib/signallayer/release

@@ -146,6 +146,9 @@ pub enum PlatformError {
     RebootUnavailable(String),
     Conflict(String),
     Busy(String),
+    RemoteManagementUnavailable(String),
+    AuthUnavailable(String),
+    ResetIncomplete(String),
     #[zbus(error)]
     ZBus(zbus::Error),
 }
@@ -160,4 +163,10 @@ pub trait Platform {
     fn start_update(&self) -> zbus::Result<()>;
     fn start_rollback(&self) -> zbus::Result<()>;
     fn start_reboot(&self) -> zbus::Result<()>;
+    fn enable_remote_management(&self) -> zbus::Result<()>;
+    fn disable_remote_management(&self) -> zbus::Result<()>;
+    fn reenroll_remote_management(&self) -> zbus::Result<()>;
+    /// (url, fingerprint, pairing_code, expires_at); the pairing fields are
+    /// "" and 0 when no pairing is pending.
+    fn get_remote_management_enrollment(&self) -> zbus::Result<(String, String, String, u64)>;
 }
