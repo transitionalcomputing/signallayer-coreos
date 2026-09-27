@@ -11,12 +11,20 @@ use zbus::{
 
 // zbus 5.19's generated zero-input dispatch does not deserialize the body.
 // Reject unexpected arguments before the generated handler acquires its permit
-// or starts bootc or the reboot worker. All normal dispatch and introspection
+// or starts bootc or a worker. All normal dispatch and introspection
 // remain generated.
 pub(super) struct CheckedPlatform(pub(super) Platform);
 
-const ZERO_ARGUMENT_METHODS: [&str; 4] =
-    ["GetStatus", "StartUpdate", "StartRollback", "StartReboot"];
+const ZERO_ARGUMENT_METHODS: [&str; 8] = [
+    "GetStatus",
+    "StartUpdate",
+    "StartRollback",
+    "StartReboot",
+    "EnableRemoteManagement",
+    "DisableRemoteManagement",
+    "ReenrollRemoteManagement",
+    "GetRemoteManagementEnrollment",
+];
 
 fn has_unexpected_arguments(member: &str, msg: &Message) -> bool {
     ZERO_ARGUMENT_METHODS.contains(&member)
@@ -130,6 +138,30 @@ mod tests {
     #[test]
     fn start_reboot_is_guarded_as_zero_argument() {
         assert!(ZERO_ARGUMENT_METHODS.contains(&"StartReboot"));
+    }
+
+    #[test]
+    fn remote_management_methods_are_guarded_as_zero_argument() {
+        for member in [
+            "EnableRemoteManagement",
+            "DisableRemoteManagement",
+            "ReenrollRemoteManagement",
+            "GetRemoteManagementEnrollment",
+        ] {
+            assert!(ZERO_ARGUMENT_METHODS.contains(&member), "{member}");
+            assert!(!has_unexpected_arguments(
+                member,
+                &method_call!(member, &())
+            ));
+            assert!(has_unexpected_arguments(
+                member,
+                &method_call!(member, &(0u32,))
+            ));
+            assert!(has_unexpected_arguments(
+                member,
+                &method_call!(member, &("x",))
+            ));
+        }
     }
 
     #[test]

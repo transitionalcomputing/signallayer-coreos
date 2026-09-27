@@ -12,6 +12,7 @@ COPY corectl ./corectl
 COPY sessiond ./sessiond
 COPY network-observer ./network-observer
 COPY authd ./authd
+COPY remote-worker ./remote-worker
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 
 # Policy authoring/analysis tools never enter the final runtime image.
@@ -50,7 +51,7 @@ RUN set -eu; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
         'VERSION="0.0.2"' \
-        'PLATFORM_API_VERSION="0.2"' \
+        'PLATFORM_API_VERSION="0.3"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \
         > /usr/lib/signallayer/release
@@ -60,6 +61,7 @@ COPY --from=platform-build /build/target/release/corectl /usr/bin/corectl
 COPY --from=platform-build /build/target/release/sl-sessiond /usr/bin/sl-sessiond
 COPY --from=platform-build /build/target/release/sl-network-observer /usr/bin/sl-network-observer
 COPY --from=platform-build /build/target/release/sl-authd /usr/bin/sl-authd
+COPY --from=platform-build /build/target/release/sl-remote-worker /usr/libexec/signallayer/sl-remote-worker
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
 COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.service
 COPY image/platform/sl-network-observer.service /usr/lib/systemd/system/sl-network-observer.service
@@ -67,6 +69,11 @@ COPY image/platform/sl-authd.service /usr/lib/systemd/system/sl-authd.service
 COPY image/platform/sl-update.service /usr/lib/systemd/system/sl-update.service
 COPY image/platform/sl-rollback.service /usr/lib/systemd/system/sl-rollback.service
 COPY image/platform/sl-reboot.service /usr/lib/systemd/system/sl-reboot.service
+COPY image/platform/sl-rm-enable.service /usr/lib/systemd/system/sl-rm-enable.service
+COPY image/platform/sl-rm-disable.service /usr/lib/systemd/system/sl-rm-disable.service
+COPY image/platform/sl-rm-rotate.service /usr/lib/systemd/system/sl-rm-rotate.service
+COPY image/platform/sl-rm-clear-reset.service /usr/lib/systemd/system/sl-rm-clear-reset.service
+COPY image/platform/sl-rm-boot-reset.service /usr/lib/systemd/system/sl-rm-boot-reset.service
 COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
 COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf
@@ -110,7 +117,7 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Fqx 'ExecStart=/usr/bin/systemctl --no-block reboot' /usr/lib/systemd/system/sl-reboot.service && \
     test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-reboot.service)" = 1 && \
     ! grep -Eq 'ExecStart=.*(sh|bash)' /usr/lib/systemd/system/sl-reboot.service && \
-    test "$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)" = 2 && \
+    test "$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)" = 3 && \
     awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="StartReboot"/>' && \
     awk '/<policy user="root">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<allow send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="StartReboot"/>' && \
     test "$(grep -c 'send_member="StartReboot"' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)" = 2 && \
@@ -137,6 +144,69 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(tr -s ' \n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -Eo '<allow [^>]*/>' | wc -l)" = 12 && \
     test "$(grep -rl 'org\.signallayer\.Auth1' /usr/share/dbus-1/system.d /etc/dbus-1 2>/dev/null)" = /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf && \
     ! grep -Eq 'org\.signallayer\.Platform1|StartReboot|StartUpdate|StartRollback' /usr/share/dbus-1/system.d/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf && \
+    test -x /usr/libexec/signallayer/sl-remote-worker && \
+    test "$(matchpathcon -n /usr/libexec/signallayer/sl-remote-worker)" = system_u:object_r:sl_remote_worker_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-rm-enable.service)" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-rm-disable.service)" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-rm-rotate.service)" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-rm-clear-reset.service)" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-rm-boot-reset.service)" = system_u:object_r:sl_rm_boot_reset_unit_file_t:s0 && \
+    test "$(matchpathcon -n -m dir /var/lib/sl-remote-management)" = system_u:object_r:sl_rm_state_t:s0 && \
+    test "$(matchpathcon -n -m file /var/lib/sl-remote-management/enabled)" = system_u:object_r:sl_rm_state_t:s0 && \
+    test "$(matchpathcon -n -m file /var/lib/sl-remote-management/reset-pending)" = system_u:object_r:sl_rm_state_t:s0 && \
+    test "$(matchpathcon -n -m dir /var/lib/sl-remote-management/tls)" = system_u:object_r:sl_rm_tls_t:s0 && \
+    test "$(matchpathcon -n -m lnk_file /var/lib/sl-remote-management/tls/current)" = system_u:object_r:sl_rm_tls_t:s0 && \
+    test "$(matchpathcon -n -m dir /var/lib/sl-remote-management/tls/gen-0123456789abcdef)" = system_u:object_r:sl_rm_tls_t:s0 && \
+    test "$(matchpathcon -n -m file /var/lib/sl-remote-management/tls/gen-0123456789abcdef/key.pem)" = system_u:object_r:sl_rm_tls_key_t:s0 && \
+    test "$(matchpathcon -n -m file /var/lib/sl-remote-management/tls/gen-0123456789abcdef/cert.pem)" = system_u:object_r:sl_rm_tls_t:s0 && \
+    test "$(matchpathcon -n -m file /var/lib/sl-remote-management/tls/gen-0123456789abcdef/fingerprint)" = system_u:object_r:sl_rm_tls_t:s0 && \
+    grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker enable' /usr/lib/systemd/system/sl-rm-enable.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-enable.service)" = 1 && \
+    grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-enable.service && \
+    grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-enable.service && \
+    grep -Fqx 'CapabilityBoundingSet=CAP_CHOWN' /usr/lib/systemd/system/sl-rm-enable.service && \
+    grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-enable.service && \
+    ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-enable.service && \
+    grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker disable' /usr/lib/systemd/system/sl-rm-disable.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-disable.service)" = 1 && \
+    grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-disable.service && \
+    grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-disable.service && \
+    grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-rm-disable.service && \
+    grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-disable.service && \
+    ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-disable.service && \
+    grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker rotate-tls' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-rotate.service)" = 1 && \
+    grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    grep -Fqx 'CapabilityBoundingSet=CAP_CHOWN' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker clear-reset-pending' /usr/lib/systemd/system/sl-rm-clear-reset.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-clear-reset.service)" = 1 && \
+    grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-clear-reset.service && \
+    grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-clear-reset.service && \
+    grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-rm-clear-reset.service && \
+    grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-clear-reset.service && \
+    ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-clear-reset.service && \
+    grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker boot-reset' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-boot-reset.service)" = 1 && \
+    grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'ConditionKernelCommandLine=signallayer.remote-management-reset' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'Requires=sl-authd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'After=sl-authd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'Before=sl-remoted.service sl-console.service sl-sessiond.service sl-platformd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'WantedBy=multi-user.target' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    test "$(awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="GetStatus" ' && \
+    test "$(awk '/<policy user="sl-console">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="DisableRemoteManagement" send_member="EnableRemoteManagement" send_member="GetRemoteManagementEnrollment" send_member="ReenrollRemoteManagement" ' && \
+    test "$(awk '/<policy user="root">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="DisableRemoteManagement" send_member="EnableRemoteManagement" send_member="GetRemoteManagementEnrollment" send_member="ReenrollRemoteManagement" send_member="StartReboot" send_member="StartRollback" send_member="StartUpdate" ' && \
+    awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="EnableRemoteManagement"/>' && \
+    awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="DisableRemoteManagement"/>' && \
+    awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="ReenrollRemoteManagement"/>' && \
+    awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Fq '<deny send_destination="org.signallayer.Platform1" send_path="/org/signallayer/Platform1" send_interface="org.signallayer.Platform1" send_member="GetRemoteManagementEnrollment"/>' && \
+    ! grep -q 'user="sl-remoted"' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf && \
     test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
     test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
     test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \
@@ -151,4 +221,5 @@ RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
     ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && \
     ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && \
     ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \
-    ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service
+    ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service && \
+    ln -s ../sl-rm-boot-reset.service /usr/lib/systemd/system/multi-user.target.wants/sl-rm-boot-reset.service

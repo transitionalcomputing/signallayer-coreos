@@ -551,6 +551,7 @@ dependencies = [
  "libc",
  "serde_json",
  "sl-protocol",
+ "sl-remote-state",
  "tokio",
  "zbus",
 ]
@@ -564,11 +565,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-remote-state"
+version = "0.0.2"
+
+[[package]]
+name = "sl-remote-worker"
+version = "0.0.2"
+dependencies = [
+ "libc",
+ "sl-remote-state",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "sl-sessiond"
 version = "0.0.2"
 dependencies = [
  "serde_json",
  "sl-platform-client",
+ "sl-protocol",
+ "sl-remote-state",
  "tokio",
  "zbus",
 ]

@@ -13,6 +13,7 @@ use tokio::{
 };
 
 mod checked_interface;
+mod remote;
 use checked_interface::CheckedPlatform;
 
 const OUTPUT_LIMIT: u64 = 64 * 1024;
@@ -35,6 +36,9 @@ struct Platform {
     connection: zbus::Connection,
     requests: Semaphore,
     mutation_starts: Semaphore,
+    /// Held by each remote-management method for its whole sequence; not
+    /// shared with `mutation_starts`.
+    remote_management: Semaphore,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -148,6 +152,37 @@ impl Platform {
             || start_worker(connection, REBOOT_UNIT, reboot_unavailable),
         )
         .await
+    }
+
+    async fn enable_remote_management(&self) -> Result<(), PlatformError> {
+        let backend = remote::SystemBackend {
+            connection: &self.connection,
+        };
+        remote::enable(&self.remote_management, &backend).await
+    }
+
+    async fn disable_remote_management(&self) -> Result<(), PlatformError> {
+        let backend = remote::SystemBackend {
+            connection: &self.connection,
+        };
+        remote::disable(&self.remote_management, &backend).await
+    }
+
+    async fn reenroll_remote_management(&self) -> Result<(), PlatformError> {
+        let backend = remote::SystemBackend {
+            connection: &self.connection,
+        };
+        remote::reenroll(&self.remote_management, &backend).await
+    }
+
+    #[zbus(out_args("url", "fingerprint", "pairing_code", "expires_at"))]
+    async fn get_remote_management_enrollment(
+        &self,
+    ) -> Result<(String, String, String, u64), PlatformError> {
+        let backend = remote::SystemBackend {
+            connection: &self.connection,
+        };
+        remote::enrollment(&self.remote_management, &backend).await
     }
 }
 
@@ -810,6 +845,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 connection: connection.clone(),
                 requests: Semaphore::new(1),
                 mutation_starts: Semaphore::new(1),
+                remote_management: Semaphore::new(1),
             }),
         )
         .await?;
@@ -822,7 +858,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use sl_protocol::{NetworkState, PrimaryConnection};
-    const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.2\"\nPLATFORM_API_VERSION=\"0.2\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
+    const RELEASE: &str = "NAME=\"SignalLayerIT CoreOS\"\nVERSION=\"0.0.2\"\nPLATFORM_API_VERSION=\"0.3\"\nSOURCE_REVISION=\"unknown\"\nBUILD_ID=\"unknown\"\n";
     fn fixture() -> Value {
         serde_json::json!({"apiVersion":"org.containers.bootc/v1", "kind":"BootcHost", "status": {
             "booted": {"ostree":{"checksum":"a".repeat(64), "deploySerial":0},

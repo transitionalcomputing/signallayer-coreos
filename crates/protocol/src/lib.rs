@@ -5,6 +5,9 @@ pub const BUS: &str = "org.signallayer.Platform1";
 pub const PATH: &str = "/org/signallayer/Platform1";
 pub const INTERFACE: &str = "org.signallayer.Platform1";
 pub const SCHEMA_VERSION: &str = "0.3";
+/// Session1's status schema: Platform's schema 0.3 plus `remote_management`.
+/// Platform's own `GetStatus` stays at [`SCHEMA_VERSION`].
+pub const SESSION_SCHEMA_VERSION: &str = "0.4";
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +25,57 @@ pub struct Status {
     pub update: UpdateStatus,
     pub rollback: RollbackStatus,
     pub health: Health,
+}
+
+/// Exactly the three contract facts; no authentication internals.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteManagementStatus {
+    pub enabled: bool,
+    pub listening: bool,
+    pub enrolled: bool,
+}
+
+/// Session1 status schema 0.4, aggregated by Session1 without owning any of
+/// it: every Platform schema 0.3 field, plus `remote_management`.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SessionStatus {
+    pub schema_version: String,
+    pub product: String,
+    pub version: String,
+    pub platform_api_version: String,
+    pub source_revision: Option<String>,
+    pub build_id: Option<String>,
+    pub machine: MachineStatus,
+    pub network: NetworkStatus,
+    pub booted: Deployment,
+    pub retained_rollback: Option<Deployment>,
+    pub update: UpdateStatus,
+    pub rollback: RollbackStatus,
+    pub health: Health,
+    pub remote_management: RemoteManagementStatus,
+}
+
+impl SessionStatus {
+    pub fn from_platform(status: Status, remote_management: RemoteManagementStatus) -> Self {
+        Self {
+            schema_version: SESSION_SCHEMA_VERSION.into(),
+            product: status.product,
+            version: status.version,
+            platform_api_version: status.platform_api_version,
+            source_revision: status.source_revision,
+            build_id: status.build_id,
+            machine: status.machine,
+            network: status.network,
+            booted: status.booted,
+            retained_rollback: status.retained_rollback,
+            update: status.update,
+            rollback: status.rollback,
+            health: status.health,
+            remote_management,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,6 +200,9 @@ pub enum PlatformError {
     RebootUnavailable(String),
     Conflict(String),
     Busy(String),
+    RemoteManagementUnavailable(String),
+    AuthUnavailable(String),
+    ResetIncomplete(String),
     #[zbus(error)]
     ZBus(zbus::Error),
 }
@@ -160,4 +217,10 @@ pub trait Platform {
     fn start_update(&self) -> zbus::Result<()>;
     fn start_rollback(&self) -> zbus::Result<()>;
     fn start_reboot(&self) -> zbus::Result<()>;
+    fn enable_remote_management(&self) -> zbus::Result<()>;
+    fn disable_remote_management(&self) -> zbus::Result<()>;
+    fn reenroll_remote_management(&self) -> zbus::Result<()>;
+    /// (url, fingerprint, pairing_code, expires_at); the pairing fields are
+    /// "" and 0 when no pairing is pending.
+    fn get_remote_management_enrollment(&self) -> zbus::Result<(String, String, String, u64)>;
 }

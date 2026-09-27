@@ -1,12 +1,10 @@
 [package]
-name = "sl-sessiond"
+name = "sl-remote-worker"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-sl-platform-client.workspace = true
-sl-protocol.workspace = true
 sl-remote-state.workspace = true
-serde_json.workspace = true
+libc.workspace = true
 zbus.workspace = true
 tokio.workspace = true
