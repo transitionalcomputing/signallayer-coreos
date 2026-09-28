@@ -22,7 +22,6 @@ TTYVTDisallocate=yes
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
-PrivateDevices=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes

@@ -5,6 +5,7 @@ Description=SignalLayerIT remote-management enable worker
 Type=oneshot
 ExecStart=/usr/libexec/signallayer/sl-remote-worker enable
 User=root
+Environment=SYSTEMD_BYPASS_USERDB=1
 StateDirectory=sl-remote-management
 StateDirectoryMode=0755
 NoNewPrivileges=yes

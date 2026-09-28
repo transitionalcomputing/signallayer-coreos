@@ -43,7 +43,7 @@ ARG BUILD_ID=unknown
 
 LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
-      org.opencontainers.image.version="0.0.2" \
+      org.opencontainers.image.version="0.0.3" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.opencontainers.image.source="https://github.com/transitionalcomputing/signallayer-coreos"
 
@@ -61,7 +61,7 @@ RUN set -eu; \
     chmod 0644 /usr/lib/signallayer/openssl.cnf; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
-        'VERSION="0.0.2"' \
+        'VERSION="0.0.3"' \
         'PLATFORM_API_VERSION="0.3"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \
@@ -158,6 +158,7 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Fqx 'Wants=sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'TTYPath=/dev/%I' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'StandardInput=tty-force' /usr/lib/systemd/system/sl-console@.service && \
+    ! grep -Fqx 'PrivateDevices=yes' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'AmbientCapabilities=' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'RestrictAddressFamilies=AF_UNIX' /usr/lib/systemd/system/sl-console@.service && \
@@ -193,6 +194,7 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-enable.service)" = 1 && \
     grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-enable.service && \
     grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-enable.service && \
+    grep -Fqx 'Environment=SYSTEMD_BYPASS_USERDB=1' /usr/lib/systemd/system/sl-rm-enable.service && \
     grep -Fqx 'CapabilityBoundingSet=CAP_CHOWN' /usr/lib/systemd/system/sl-rm-enable.service && \
     grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-enable.service && \
     ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-enable.service && \
@@ -207,6 +209,7 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-rotate.service)" = 1 && \
     grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-rotate.service && \
     grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-rotate.service && \
+    grep -Fqx 'Environment=SYSTEMD_BYPASS_USERDB=1' /usr/lib/systemd/system/sl-rm-rotate.service && \
     grep -Fqx 'CapabilityBoundingSet=CAP_CHOWN' /usr/lib/systemd/system/sl-rm-rotate.service && \
     grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-rotate.service && \
     ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-rotate.service && \

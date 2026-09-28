@@ -34,6 +34,9 @@ management contract.
 `sl-console@.service` runs as the dedicated `sl-console` user on two explicit
 instances: `tty1` and `ttyS0`. systemd opens the configured terminal and passes
 it as the process's standard input and output. The service always restarts.
+The service cannot use `PrivateDevices=yes`, because that would hide these
+physical terminals before systemd establishes standard input. SELinux still
+limits `sl_console_t` to the terminal descriptors inherited from systemd.
 The generic getty, serial-getty, and console-getty templates are masked in the
 image, so a console crash cannot reveal a Linux login prompt.
 

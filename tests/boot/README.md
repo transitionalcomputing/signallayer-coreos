@@ -261,3 +261,23 @@ exactly one reboot per transition. At boots 1, 2 and 3, Platform, Session1 and
 `corectl` must agree through 4D's converged Platform, Session1, Platform read.
 The 3F AVC allowlist is unchanged. Evidence is saved under an ignored
 `image/build/output/phase4e-acceptance-*` directory.
+
+For the 0.0.3 Phase 5E integrated acceptance, boot the inspected 0.0.3 disk
+with genuine KVM and the installed OVMF templates:
+
+```bash
+sudo python3 tests/boot/boot-qcow2.py \
+  image/build/output/coreos-0.0.3-x86_64.BUILD/signallayer-coreos-0.0.3-x86_64.qcow2 \
+  --phase5e \
+  --ovmf-code /usr/share/edk2/ovmf/OVMF_CODE.fd \
+  --ovmf-vars /usr/share/edk2/ovmf/OVMF_VARS.fd \
+  --timeout 1800
+```
+
+The single disposable boot validates the immutable base, both appliance
+console instances, getty displacement and restart behavior, the exact console
+D-Bus boundary, authentication and recovery, remote-management lifecycle,
+read-only HTTPS service, TLS rotation, boot-reset once-per-boot behavior,
+fail-closed listener invalidation, loaded SELinux policy and cross-service
+status agreement. Generated passwords, pairing codes, recovery keys and
+session cookies remain inside the guest and are not written to evidence.

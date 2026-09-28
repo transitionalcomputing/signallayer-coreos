@@ -97,10 +97,14 @@ def evaluate(evidence, expected_release, expected_manifest):
             route.get("dst") == "default" and route.get("gateway") for route in routes)
     except (ValueError, KeyError, TypeError):
         checks["network_address_and_route"] = False
+    release_values = dict(
+        line.split("=", 1) for line in expected_release.splitlines() if "=" in line
+    )
+    release_version = release_values.get("VERSION", '""').strip('"')
     try:
         booted = json.loads(text("bootc_status"))["status"]["booted"]
         checks["expected_bootc_deployment"] = ok("bootc_status") and bool(booted["ostree"]["checksum"]) and (
-            booted["image"]["image"]["image"] == "localhost/signallayer-coreos:0.0.1")
+            booted["image"]["image"]["image"] == f"localhost/signallayer-coreos:{release_version}")
         checks["source_manifest_matches"] = booted["image"]["imageDigest"] == expected_manifest
         checks["ostree_status_matches"] = ok("ostree_status") and (
             "* default " + booted["ostree"]["checksum"] + "." in text("ostree_status"))
@@ -133,6 +137,141 @@ def evaluate(evidence, expected_release, expected_manifest):
         checks["runtime_composefs"] = False
         checks["root_and_sysroot_readonly"] = False
     return checks
+
+
+def evaluate_phase5e(evidence, expected_release):
+    def text(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    checks = {}
+    try:
+        runtime = json.loads(text("phase5e_runtime"))
+        runtime_checks = runtime["checks"]
+        checks.update({"phase5e_" + name: value is True
+                       for name, value in runtime_checks.items()})
+        checks["phase5e_runtime_complete"] = ok("phase5e_runtime") and not runtime.get("error")
+    except (ValueError, KeyError, TypeError):
+        checks["phase5e_runtime_evidence_valid"] = False
+
+    checks["phase5e_release_identity"] = (
+        ok("phase5e_release")
+        and 'VERSION="0.0.3"' in text("phase5e_release")
+        and 'PLATFORM_API_VERSION="0.3"' in text("phase5e_release")
+        and 'VERSION="0.0.3"' in expected_release
+    )
+    processes = [line.split(None, 4) for line in text("phase5e_console_processes").splitlines()]
+    checks["phase5e_two_confined_console_processes"] = (
+        ok("phase5e_console_processes") and len(processes) == 2
+        and {row[2] for row in processes if len(row) == 5} == {"tty1", "ttyS0"}
+        and all(len(row) == 5 and row[1] == "sl-console"
+                and row[3] == "system_u:system_r:sl_console_t:s0"
+                and row[4] == "/usr/bin/sl-console" for row in processes)
+    )
+    # systemctl is-enabled intentionally exits nonzero for masked units.
+    checks["phase5e_gettys_masked"] = all(
+        f"{unit}=masked" in text("phase5e_console_masks")
+        for unit in ("getty@.service", "serial-getty@.service", "console-getty.service"))
+
+    console_unit = text("phase5e_console_unit")
+    checks["phase5e_console_fixed_unit"] = ok("phase5e_console_unit") and all(
+        value in console_unit for value in (
+            "ExecStart=/usr/bin/sl-console", "User=sl-console", "Restart=always",
+            "TTYPath=/dev/%I", "StandardInput=tty-force", "CapabilityBoundingSet=",
+            "AmbientCapabilities=", "RestrictAddressFamilies=AF_UNIX",
+            "Requires=dbus.service",
+            "Wants=sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service"))
+    platform_bus = text("phase5e_bus_platform")
+    auth_bus = text("phase5e_bus_auth")
+    checks["phase5e_console_platform_methods_exact"] = ok("phase5e_bus_platform") and all(
+        f'send_member="{name}"' in platform_bus for name in (
+            "EnableRemoteManagement", "DisableRemoteManagement",
+            "ReenrollRemoteManagement", "GetRemoteManagementEnrollment")) and all(
+        f'send_member="{name}"' not in platform_bus.split('<policy user="sl-console">', 1)[1].split('</policy>', 1)[0]
+        for name in ("StartUpdate", "StartRollback", "StartReboot"))
+    console_auth = auth_bus.split('<policy user="sl-console">', 1)[1].split('</policy>', 1)[0]
+    checks["phase5e_console_auth_methods_exact"] = ok("phase5e_bus_auth") and (
+        sorted(re.findall(r'send_member="([A-Za-z]+)"', console_auth)) ==
+        ["RecoverPassword", "VerifyPassword"])
+
+    remoted_unit = text("phase5e_remoted_unit")
+    checks["phase5e_remoted_unprivileged_fixed_unit"] = ok("phase5e_remoted_unit") and all(
+        value in remoted_unit for value in (
+            "ExecStart=/usr/bin/sl-remoted", "User=sl-remoted", "Group=sl-remoted",
+            "NoNewPrivileges=yes", "CapabilityBoundingSet=", "AmbientCapabilities=",
+            "ConditionPathExists=/var/lib/sl-remote-management/enabled",
+            "ConditionPathExists=!/var/lib/sl-remote-management/reset-pending"))
+    checks["phase5e_final_system_healthy"] = (
+        ok("phase5e_final_units") and not text("phase5e_final_units")
+        and ok("phase5e_final_state") and text("phase5e_final_state") == "running")
+    checks["phase5e_final_selinux_enforcing"] = (
+        ok("phase5e_final_selinux") and text("phase5e_final_selinux") == "Enforcing")
+    after = dict(evidence)
+    for old, new in (("mounts", "phase5e_final_mounts"),
+                     ("root_write", "phase5e_final_root_write"),
+                     ("usr_write", "phase5e_final_usr_write")):
+        after[old] = evidence.get(new, {})
+    immutable = evaluate(after, expected_release, "unused")
+    for name in ("runtime_composefs", "root_and_sysroot_readonly",
+                 "root_rejects_writes", "usr_rejects_writes"):
+        checks["phase5e_final_" + name] = immutable[name]
+    # Platform's status-backend negative probes were already accepted by the
+    # Phase 3B hardening evaluator. This gate covers the services added since.
+    related = ("sl_console_t", "sl_remoted_t", "sl_authd_t", "sl_sessiond_t",
+               "sl_remote_worker_t")
+    checks["phase5e_no_unexpected_service_avcs"] = ok("phase5e_audit") and not any(
+        "avc:" in line.lower() and "denied" in line.lower()
+        and (any(domain in line for domain in related) or "sl_rm_" in line)
+        for line in text("phase5e_audit").splitlines())
+    return checks
+
+
+def inspect_phase5e_policy(evidence, run, tools_image):
+    encoded = evidence.get("phase5e_loaded_policy", {})
+    policy = run / "phase5e-loaded-policy"
+    try:
+        policy.write_bytes(gzip.decompress(base64.b64decode(encoded["output"], validate=True)))
+    except (KeyError, ValueError, gzip.BadGzipFile):
+        return {"phase5e_loaded_policy_decoded": False}
+    queries = {
+        "domain": ["seinfo", "-t", "sl_console_t", "-x", "/policy"],
+        "permissive": ["seinfo", "--permissive", "/policy"],
+        "entry": ["sesearch", "-T", "-s", "init_t", "-t", "sl_console_exec_t", "-c", "process", "/policy"],
+        "transitions": ["sesearch", "-T", "-s", "sl_console_t", "-c", "process", "/policy"],
+        "capabilities": ["sesearch", "-A", "-s", "sl_console_t", "-c", "capability", "/policy"],
+        "network": ["sesearch", "-A", "-s", "sl_console_t", "-c", "tcp_socket", "/policy"],
+        "systemd": ["sesearch", "-A", "-s", "sl_console_t", "-t", "init_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "platform": ["sesearch", "-A", "-s", "sl_console_t", "-t", "sl_platformd_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "auth": ["sesearch", "-A", "-s", "sl_console_t", "-t", "sl_authd_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+        "session": ["sesearch", "-A", "-s", "sl_console_t", "-t", "sl_sessiond_t", "-c", "dbus", "-p", "send_msg", "/policy"],
+    }
+    analysis = {}
+    for name, query in queries.items():
+        command = ["podman", "run", "--rm", "--network=none", "--volume",
+                   str(policy) + ":/policy:ro,Z", tools_image] + query
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        analysis[name] = {"command": command, "exit_code": result.returncode,
+                          "output": result.stdout, "stderr": result.stderr}
+    (run / "phase5e-policy-analysis.json").write_text(json.dumps(analysis, indent=2) + "\n")
+    valid = all(value["exit_code"] == 0 for value in analysis.values())
+    return {
+        "phase5e_loaded_policy_hash_matches": (
+            evidence.get("phase5e_loaded_policy_hash", {}).get("exit_code") == 0
+            and checksum(policy) == evidence["phase5e_loaded_policy_hash"]["output"].split()[0]),
+        "phase5e_console_domain_confined": valid and "type sl_console_t," in analysis["domain"]["output"] and "unconfined" not in analysis["domain"]["output"] and "sl_console_t" not in analysis["permissive"]["output"],
+        "phase5e_console_entry_transition": valid and "type_transition init_t sl_console_exec_t:process sl_console_t;" in analysis["entry"]["output"],
+        "phase5e_console_no_process_transition": valid and set(
+            analysis["transitions"]["output"].splitlines()) <= {
+                "type_transition sl_console_t abrt_helper_exec_t:process abrt_helper_t;"},
+        "phase5e_console_no_capabilities": valid and not analysis["capabilities"]["output"].strip(),
+        "phase5e_console_no_network": valid and not re.search(
+            r"\b(create|bind|connect|listen|accept)\b", analysis["network"]["output"]),
+        "phase5e_console_no_systemd_control": valid and not analysis["systemd"]["output"].strip(),
+        "phase5e_console_fixed_peers_only": valid and all(
+            analysis[name]["output"].strip() for name in ("platform", "auth", "session")),
+    }
 
 
 def evaluate_platform(evidence, expected_release, status_schema="0.2"):
@@ -1072,6 +1211,7 @@ def main():
     parser.add_argument("--phase4b", action="store_true", help="Retain Phase 3A checks and validate the unprivileged Session1 status path")
     parser.add_argument("--phase4c", action="store_true", help="Retain Phase 4B checks and validate status schema 0.3 management facts")
     parser.add_argument("--phase4d", action="store_true", help="Retain Phase 4C checks, Platform API 0.2, and one real in-guest reboot")
+    parser.add_argument("--phase5e", action="store_true", help="Validate the integrated CoreOS 0.0.3 appliance runtime")
     parser.add_argument("--policy-tools-image", default="localhost/slit-policy-tools:phase3b", help="Native setools build-stage image for analyzing the guest's loaded policy")
     parser.add_argument("--source-release", type=Path)
     parser.add_argument("--source-image", type=Path)
@@ -1093,8 +1233,8 @@ def main():
         args.phase3a = True
     output = Path(__file__).resolve().parents[2] / "image/build/output"
     output.mkdir(parents=True, exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="phase4d-" if args.phase4d else "phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
-    report = {"phase": "4D" if args.phase4d else "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
+    run = Path(tempfile.mkdtemp(prefix="phase5e-" if args.phase5e else "phase4d-" if args.phase4d else "phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
+    report = {"phase": "5E" if args.phase5e else "4D" if args.phase4d else "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
     process = None
     qmp = None
     disk_hash = None
@@ -1109,6 +1249,8 @@ def main():
             raise RuntimeError("Guest virtual CPU count must be between 1 and 8")
         if args.phase3b and args.timeout < 1800:
             raise RuntimeError("Phase 3B requires --timeout >= 1800")
+        if args.phase5e and args.timeout < 900:
+            raise RuntimeError("Phase 5E requires --timeout >= 900")
         for tool in ("qemu-system-x86_64", "qemu-img"):
             if not shutil.which(tool):
                 raise RuntimeError(f"Required executable missing: {tool}")
@@ -1141,9 +1283,9 @@ def main():
         overlay = run / "boot.qcow2"
         subprocess.run(["qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", str(disk), str(overlay)], check=True)
         probe = Path(__file__).with_name("guest-probe.sh").read_text()
+        marker = "printf 'complete\\t0\\tZG9uZQ==\\n' >&3"
         if args.phase3a:
             extension = Path(__file__).with_name("guest-platform-probe.sh")
-            marker = "printf 'complete\\t0\\tZG9uZQ==\\n' >&3"
             if probe.count(marker) != 1:
                 raise RuntimeError("Boot probe completion marker is missing or ambiguous")
             probe = probe.replace(marker, extension.read_text() + "\n" + marker)
@@ -1193,6 +1335,13 @@ collect security_initial_failed_details sh -c 'systemctl --failed --no-legend --
             report["reboot_probe_sha256"] = checksum(pre)
             report["reboot_post_probe_sha256"] = checksum(post)
             report["boundary_probe_sha256"] = checksum(boundary)
+        if args.phase5e:
+            extension = Path(__file__).with_name("guest-phase5e-probe.sh")
+            if probe.count(marker) != 1:
+                raise RuntimeError("Boot probe completion marker is missing or ambiguous")
+            probe = probe.replace(marker, extension.read_text() + "\n" + marker)
+            report["phase5e_probe_sha256"] = checksum(extension)
+            subprocess.run(["podman", "image", "exists", args.policy_tools_image], check=True, timeout=30)
         unit = """[Unit]
 Description=Temporary CoreOS boot evidence probe
 DefaultDependencies=no
@@ -1262,6 +1411,10 @@ StandardError=journal+console
                     report["checks"].update(evaluate_management(
                         evidence, "0.2" if args.phase4d else "0.1"))
                     report["checks"].update(inspect_management_policy(
+                        evidence, run, args.policy_tools_image))
+                if args.phase5e:
+                    report["checks"].update(evaluate_phase5e(evidence, expected_release))
+                    report["checks"].update(inspect_phase5e_policy(
                         evidence, run, args.policy_tools_image))
                 (run / "guest-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
                 break

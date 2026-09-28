@@ -104,6 +104,7 @@ corecmd_exec_bin(sl_remote_worker_t)
 allow sl_remote_worker_t self:process { fork sigchld };
 allow sl_remote_worker_t self:fifo_file rw_fifo_file_perms;
 files_read_etc_files(sl_remote_worker_t)
+miscfiles_search_generic_cert_dirs(sl_remote_worker_t)
 kernel_read_crypto_sysctls(sl_remote_worker_t)
 allow sl_remote_worker_t sl_platformd_release_t:dir list_dir_perms;
 allow sl_remote_worker_t sl_platformd_release_t:file read_file_perms;
@@ -119,6 +120,8 @@ manage_files_pattern(sl_remote_worker_t, sl_rm_tls_t, sl_rm_tls_key_t)
 # Created objects get their frozen types by name.
 type_transition sl_remote_worker_t sl_rm_state_t:dir sl_rm_tls_t "tls";
 type_transition sl_remote_worker_t sl_rm_tls_t:file sl_rm_tls_key_t "key.pem";
+# PID 1 evaluates the fixed sl-remoted ConditionPathExists against `current`.
+allow init_t sl_rm_tls_t:lnk_file read_lnk_file_perms;
 
 # The boot reset calls sl-authd's ResetEnrollment over the system bus.
 dbus_system_bus_client(sl_remote_worker_t)

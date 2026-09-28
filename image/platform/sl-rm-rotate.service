@@ -5,6 +5,7 @@ Description=SignalLayerIT remote-management TLS rotation worker
 Type=oneshot
 ExecStart=/usr/libexec/signallayer/sl-remote-worker rotate-tls
 User=root
+Environment=SYSTEMD_BYPASS_USERDB=1
 StateDirectory=sl-remote-management
 StateDirectoryMode=0755
 NoNewPrivileges=yes
