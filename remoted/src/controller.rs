@@ -220,6 +220,7 @@ impl<L: Listeners> Controller<L> {
         changed?;
         loop {
             tokio::select! {
+                biased;
                 changed = events.changed() => changed?,
                 _ = sleep(DEBOUNCE) => return Ok(()),
             }
@@ -231,11 +232,17 @@ impl<L: Listeners> Controller<L> {
     pub async fn run(mut self, mut events: impl Events) -> io::Error {
         let mut next = Instant::now();
         loop {
+            // `biased`: when both are ready, invalidation always wins.
             let changed = tokio::select! {
+                biased;
                 changed = events.changed() => changed,
                 _ = sleep_until(next) => {
                     let refresh = fetch(Arc::clone(&self.status));
                     tokio::select! {
+                        biased;
+                        // The in-flight refresh is dropped here, so its
+                        // result can never be published.
+                        changed = events.changed() => changed,
                         view = refresh => {
                             let now = Instant::now();
                             next = match self.apply(view, now) {
@@ -244,9 +251,6 @@ impl<L: Listeners> Controller<L> {
                             };
                             continue;
                         }
-                        // The in-flight refresh is dropped here, so its
-                        // result can never be published.
-                        changed = events.changed() => changed,
                     }
                 }
             };

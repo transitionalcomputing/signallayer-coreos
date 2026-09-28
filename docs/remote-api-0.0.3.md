@@ -79,6 +79,10 @@ is never queued behind other work:
 | Session1 refresh | The refresh is cancelled (its future is dropped, so its result can never be published); immediate withdrawal, then the debounce and a new refresh. |
 | Debounce wait | The debounce restarts; eligibility is already withdrawn. |
 
+When an invalidation and a competing operation are ready in the same poll,
+explicit select priority (`biased`, invalidation first) resolves it in favour
+of the invalidation.
+
 Withdrawal itself (removing the marker, clearing eligibility and bumping the
 generation, which ends open connections, then closing listeners) is
 synchronous. Binding listeners and writing the marker are also synchronous,

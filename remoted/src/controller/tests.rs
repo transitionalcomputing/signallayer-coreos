@@ -514,3 +514,61 @@ async fn a_failing_event_source_during_a_refresh_withdraws_and_ends() {
     assert!(!harness.listening());
     assert!(!harness.admits("192.0.2.77"));
 }
+
+// Ties: invalidation and a competing future ready in the same poll.
+
+#[tokio::test(start_paused = true)]
+async fn invalidation_beats_a_refresh_result_ready_in_the_same_poll() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    let gate = gate(&harness);
+    harness.set_status(Ok(status(&["203.0.113.10/24"])));
+    harness.advance(RECONCILE).await;
+    let calls = harness.calls();
+    harness.set_status(Ok(status(&["198.51.100.20/24"])));
+    // Both become ready before the controller runs again.
+    release(&harness, &gate);
+    harness.events.send(Ok(())).unwrap();
+    harness.settle().await;
+    assert!(!harness.listening());
+    assert!(!harness.admits("192.0.2.77"), "old eligibility withdrawn");
+    assert!(!harness.admits("203.0.113.99"), "stale refresh not applied");
+    assert_eq!(harness.log.take(), ["close"], "nothing bound or served");
+    harness.advance(DEBOUNCE).await;
+    assert_eq!(harness.calls(), calls + 1);
+    let log = harness.log.take();
+    assert!(log.contains(&"bind 198.51.100.20 ok".to_owned()), "{log:?}");
+    assert!(
+        !log.iter().any(|entry| entry.contains("203.0.113.10")),
+        "{log:?}"
+    );
+    assert!(harness.admits("198.51.100.99"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn invalidation_beats_a_reconcile_timer_ready_in_the_same_poll() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    let calls = harness.calls();
+    harness.set_status(Ok(status(&["203.0.113.10/24"])));
+    // The event is queued, then the reconcile deadline arrives: both ready.
+    harness.events.send(Ok(())).unwrap();
+    harness.advance(RECONCILE).await;
+    assert_eq!(
+        harness.calls(),
+        calls,
+        "no refresh started before invalidation"
+    );
+    assert!(!harness.listening());
+    assert!(!harness.admits("192.0.2.77"));
+    assert_eq!(harness.log.take(), ["close"]);
+    harness.set_status(Ok(status(&["198.51.100.20/24"])));
+    harness.advance(DEBOUNCE).await;
+    assert_eq!(harness.calls(), calls + 1);
+    let log = harness.log.take();
+    assert!(
+        !log.iter().any(|entry| entry.contains("203.0.113.10")),
+        "{log:?}"
+    );
+    assert!(harness.admits("198.51.100.99"));
+}
