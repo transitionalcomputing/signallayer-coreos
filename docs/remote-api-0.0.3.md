@@ -68,6 +68,24 @@ decision.
   to the reconcile period.
 - Session1 refreshes time out after **20 s**.
 
+### Controller concurrency
+The controller task is the only consumer of rtnetlink notifications. Every
+await it performs is raced against the next notification, so an invalidation
+is never queued behind other work:
+
+| Await | If an invalidation arrives during it |
+|---|---|
+| Idle wait until the next reconcile or retry | Immediate withdrawal, then the debounce. |
+| Session1 refresh | The refresh is cancelled (its future is dropped, so its result can never be published); immediate withdrawal, then the debounce and a new refresh. |
+| Debounce wait | The debounce restarts; eligibility is already withdrawn. |
+
+Withdrawal itself (removing the marker, clearing eligibility and bumping the
+generation, which ends open connections, then closing listeners) is
+synchronous. Binding listeners and writing the marker are also synchronous,
+non-blocking and contain no await: they cannot wait on anything external, and
+an invalidation that arrives during them is acted on at the controller's next
+poll, immediately after they return.
+
 ### Listening marker (`/run/sl-remoted/listening`)
 - Present if and only if at least one listener is bound to a currently
   eligible primary-interface address, the view is fresh, and the TLS

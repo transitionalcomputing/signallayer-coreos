@@ -181,12 +181,9 @@ impl<L: Listeners> Controller<L> {
         self.published = Some((view, complete));
     }
 
-    async fn reconcile(&mut self, now: Instant) -> Result<(), ()> {
-        let view = self
-            .status
-            .status()
-            .await
-            .and_then(|status| view_from_status(&status));
+    /// Applies a completed Session1 refresh. Never called with a refresh that
+    /// an invalidation interrupted: that future is dropped instead.
+    fn apply(&mut self, view: Result<View, ()>, now: Instant) -> Result<(), ()> {
         match view {
             Ok(view) => {
                 let unchanged = self
@@ -213,40 +210,59 @@ impl<L: Listeners> Controller<L> {
         }
     }
 
-    /// Runs until the change-event source fails; everything is withdrawn
-    /// before returning.
-    pub async fn run(mut self, mut events: impl Events) -> io::Error {
-        let mut next = Instant::now();
+    /// Withdraws at once, then coalesces a burst of notifications.
+    async fn invalidate(
+        &mut self,
+        changed: io::Result<()>,
+        events: &mut impl Events,
+    ) -> Result<(), io::Error> {
+        self.withdraw();
+        changed?;
         loop {
             tokio::select! {
-                changed = events.changed() => {
-                    self.withdraw();
-                    if let Err(error) = changed {
-                        return error;
-                    }
-                    // Coalesce a burst into one refresh.
-                    loop {
-                        tokio::select! {
-                            changed = events.changed() => {
-                                if let Err(error) = changed {
-                                    return error;
-                                }
-                            }
-                            _ = sleep(DEBOUNCE) => break,
-                        }
-                    }
-                    next = Instant::now();
-                }
-                _ = sleep_until(next) => {
-                    let now = Instant::now();
-                    next = match self.reconcile(now).await {
-                        Ok(()) => now + RECONCILE,
-                        Err(()) => now + RETRY,
-                    };
-                }
+                changed = events.changed() => changed?,
+                _ = sleep(DEBOUNCE) => return Ok(()),
             }
         }
     }
+
+    /// Runs until the change-event source fails; everything is withdrawn
+    /// before returning. Every await is raced against the next notification.
+    pub async fn run(mut self, mut events: impl Events) -> io::Error {
+        let mut next = Instant::now();
+        loop {
+            let changed = tokio::select! {
+                changed = events.changed() => changed,
+                _ = sleep_until(next) => {
+                    let refresh = fetch(Arc::clone(&self.status));
+                    tokio::select! {
+                        view = refresh => {
+                            let now = Instant::now();
+                            next = match self.apply(view, now) {
+                                Ok(()) => now + RECONCILE,
+                                Err(()) => now + RETRY,
+                            };
+                            continue;
+                        }
+                        // The in-flight refresh is dropped here, so its
+                        // result can never be published.
+                        changed = events.changed() => changed,
+                    }
+                }
+            };
+            if let Err(error) = self.invalidate(changed, &mut events).await {
+                return error;
+            }
+            next = Instant::now();
+        }
+    }
+}
+
+async fn fetch(status: Arc<dyn StatusSource>) -> Result<View, ()> {
+    status
+        .status()
+        .await
+        .and_then(|status| view_from_status(&status))
 }
 
 #[cfg(test)]

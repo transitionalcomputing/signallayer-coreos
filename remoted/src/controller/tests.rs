@@ -17,13 +17,20 @@ fn status(addresses: &[&str]) -> String {
 struct FakeStatus {
     current: Mutex<Result<String, ()>>,
     calls: AtomicUsize,
+    /// While set, a refresh captures its result, then waits to be released.
+    gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
 }
 
 #[async_trait]
 impl StatusSource for FakeStatus {
     async fn status(&self) -> Result<String, ()> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        self.current.lock().unwrap().clone()
+        let result = self.current.lock().unwrap().clone();
+        let gate = self.gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.notified().await;
+        }
+        result
     }
 }
 
@@ -116,15 +123,24 @@ struct Harness {
 
 impl Harness {
     async fn start(initial: Result<String, ()>) -> Self {
-        Self::start_with_marker(initial, None).await
+        Self::start_with(initial, None, None).await
     }
 
     async fn start_with_marker(initial: Result<String, ()>, marker: Option<PathBuf>) -> Self {
+        Self::start_with(initial, marker, None).await
+    }
+
+    async fn start_with(
+        initial: Result<String, ()>,
+        marker: Option<PathBuf>,
+        gate: Option<Arc<tokio::sync::Notify>>,
+    ) -> Self {
         let directory = TempDir::new();
         let marker = marker.unwrap_or_else(|| directory.0.join("listening"));
         let status = Arc::new(FakeStatus {
             current: Mutex::new(initial),
             calls: AtomicUsize::new(0),
+            gate: Mutex::new(gate),
         });
         let log = Log::default();
         let failing = Arc::new(Mutex::new(Vec::new()));
@@ -395,6 +411,100 @@ async fn a_marker_that_cannot_be_written_withdraws_everything() {
 async fn a_failed_event_source_withdraws_and_ends_the_controller() {
     let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
     assert!(harness.listening());
+    harness
+        .events
+        .send(Err(io::Error::other("netlink failed")))
+        .unwrap();
+    harness.settle().await;
+    assert!(harness.task.is_finished());
+    assert!(!harness.listening());
+    assert!(!harness.admits("192.0.2.77"));
+}
+
+// Invalidation during each await (docs/remote-api-0.0.3.md, "Controller
+// concurrency"). Idle and debounce waits are covered above.
+
+fn gate(harness: &Harness) -> Arc<tokio::sync::Notify> {
+    let gate = Arc::new(tokio::sync::Notify::new());
+    *harness.status.gate.lock().unwrap() = Some(gate.clone());
+    gate
+}
+
+fn release(harness: &Harness, gate: &tokio::sync::Notify) {
+    *harness.status.gate.lock().unwrap() = None;
+    gate.notify_waiters();
+}
+
+#[tokio::test(start_paused = true)]
+async fn invalidation_during_a_periodic_refresh_withdraws_at_once_and_drops_it() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    let gate = gate(&harness);
+    // The in-flight refresh has already captured a view that is now stale.
+    harness.set_status(Ok(status(&["203.0.113.10/24"])));
+    harness.advance(RECONCILE).await;
+    let calls = harness.calls();
+    assert!(harness.listening(), "refresh in flight");
+    harness.set_status(Ok(status(&["198.51.100.20/24"])));
+    harness.event().await;
+    assert!(
+        !harness.listening(),
+        "withdrawn without waiting for the refresh"
+    );
+    assert!(!harness.admits("192.0.2.77"));
+    assert_eq!(harness.log.take(), ["close"]);
+    release(&harness, &gate);
+    harness.settle().await;
+    assert!(
+        harness.log.take().is_empty(),
+        "the stale result is not applied"
+    );
+    harness.advance(DEBOUNCE).await;
+    assert_eq!(
+        harness.calls(),
+        calls + 1,
+        "a fresh refresh after the debounce"
+    );
+    let log = harness.log.take();
+    assert!(log.contains(&"bind 198.51.100.20 ok".to_owned()), "{log:?}");
+    assert!(
+        !log.iter().any(|entry| entry.contains("203.0.113.10")),
+        "{log:?}"
+    );
+    assert!(harness.admits("198.51.100.99"));
+    assert!(!harness.admits("203.0.113.99"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn invalidation_during_the_first_refresh_drops_it() {
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let harness =
+        Harness::start_with(Ok(status(&["203.0.113.10/24"])), None, Some(gate.clone())).await;
+    assert_eq!(harness.calls(), 1, "first refresh in flight");
+    harness.set_status(Ok(status(&["198.51.100.20/24"])));
+    harness.event().await;
+    release(&harness, &gate);
+    harness.settle().await;
+    assert!(!harness.listening());
+    assert!(
+        !harness.admits("203.0.113.99"),
+        "the stale view is never published"
+    );
+    harness.advance(DEBOUNCE).await;
+    assert!(harness.listening());
+    assert!(harness.admits("198.51.100.99"));
+    assert!(!harness
+        .log
+        .take()
+        .iter()
+        .any(|entry| entry.contains("203.0.113.10")));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failing_event_source_during_a_refresh_withdraws_and_ends() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    let _gate = gate(&harness);
+    harness.advance(RECONCILE).await;
     harness
         .events
         .send(Err(io::Error::other("netlink failed")))

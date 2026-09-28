@@ -238,6 +238,8 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Eqx 'After=sl-rm-boot-reset\.service( .*)?' /usr/lib/systemd/system/sl-remoted.service && \
     grep -Fqx 'WantedBy=multi-user.target' /usr/lib/systemd/system/sl-remoted.service && \
     grep -Fqx 'RemainAfterExit=yes' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    ! find / -xdev \( -path /proc -o -path /sys \) -prune -o -name 'tls_fixture*' -print | grep -q . && \
+    ! grep -rqF -e 'MIIBdjCCARugAwIBAgIUP22sb/7007zskPnAyvXdd5FNGmswCgYIKoZIzj0EAwIw' -e 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg4RY9F5svzWhX8bED' /usr/bin /usr/libexec/signallayer /usr/lib/systemd/system /etc /var && \
     test "$(matchpathcon -n /usr/lib/signallayer/release)" = system_u:object_r:sl_platformd_release_t:s0 && \
     test "$(matchpathcon -n -m dir /ostree)" = system_u:object_r:sl_platformd_ostree_t:s0 && \
     test "$(matchpathcon -n -m file /ostree/lock)" = system_u:object_r:sl_platformd_lock_t:s0 && \
