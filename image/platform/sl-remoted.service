@@ -1,0 +1,41 @@
+[Unit]
+Description=SignalLayerIT remote management HTTPS service
+Requires=sl-rm-boot-reset.service
+After=sl-rm-boot-reset.service dbus.service sl-authd.service sl-sessiond.service
+Wants=sl-authd.service sl-sessiond.service
+ConditionPathExists=/var/lib/sl-remote-management/enabled
+ConditionPathExists=/var/lib/sl-remote-management/tls/current
+ConditionPathExists=!/var/lib/sl-remote-management/reset-pending
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sl-remoted
+User=sl-remoted
+Group=sl-remoted
+RuntimeDirectory=sl-remoted
+RuntimeDirectoryMode=0755
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

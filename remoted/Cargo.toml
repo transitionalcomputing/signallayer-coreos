@@ -1,0 +1,25 @@
+[package]
+name = "sl-remoted"
+version.workspace = true
+edition.workspace = true
+
+# No Platform1 dependency of any kind: sl-protocol and sl-platform-client are
+# deliberately absent (checked in the platform-build stage).
+[dependencies]
+sl-remote-state.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zbus.workspace = true
+tokio = { workspace = true, features = ["net"] }
+libc.workspace = true
+axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-pki-types.workspace = true
+cookie.workspace = true
+tower-service = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

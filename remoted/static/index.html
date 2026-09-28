@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalLayer remote management</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+<h1>SignalLayer remote management</h1>
+<p id="message" role="status"></p>
+
+<section id="login" hidden>
+<h2>Sign in</h2>
+<form id="login-form">
+<label>Operator password <input id="login-password" type="password" autocomplete="current-password" required></label>
+<button type="submit">Sign in</button>
+</form>
+<p><button type="button" class="link" id="show-pair">Pair this browser (first-time setup)</button></p>
+</section>
+
+<section id="pair" hidden>
+<h2>Pair</h2>
+<p>Enter the pairing code shown on the machine's console, and choose the operator password (at least 12 characters).</p>
+<form id="pair-form">
+<label>Pairing code <input id="pair-code" autocomplete="off" required></label>
+<label>New password <input id="pair-password" type="password" autocomplete="new-password" required></label>
+<label>Repeat password <input id="pair-repeat" type="password" autocomplete="new-password" required></label>
+<button type="submit">Pair</button>
+</form>
+<p><button type="button" class="link" id="show-login">Back to sign in</button></p>
+</section>
+
+<section id="confirm" hidden>
+<h2>Save your recovery key</h2>
+<p>This recovery key is shown once. Store it safely: it is needed to recover the password at the console. Enter it again below to finish enrollment.</p>
+<pre id="recovery-key"></pre>
+<form id="confirm-form">
+<label>Recovery key <input id="confirm-key" autocomplete="off" required></label>
+<button type="submit">Confirm</button>
+</form>
+</section>
+
+<section id="status" hidden>
+<h2>Machine status</h2>
+<pre id="status-json"></pre>
+<p><button type="button" id="refresh">Refresh</button> <button type="button" id="logout">Sign out</button></p>
+</section>
+</main>
+</body>
+</html>

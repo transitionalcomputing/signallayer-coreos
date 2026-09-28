@@ -7,6 +7,10 @@ Before=sl-remoted.service sl-console.service sl-sessiond.service sl-platformd.se
 
 [Service]
 Type=oneshot
+# Stays active (exited) after a successful reset, so later starts of
+# sl-remoted in the same boot (Requires=) never re-run it. A failed reset
+# can still be retried.
+RemainAfterExit=yes
 ExecStart=/usr/libexec/signallayer/sl-remote-worker boot-reset
 User=root
 StateDirectory=sl-remote-management

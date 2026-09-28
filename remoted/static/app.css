@@ -1,0 +1,16 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f7f9; color: #1c1f24; }
+main { max-width: 44rem; margin: 2rem auto; padding: 0 1rem; }
+section { background: #fff; border: 1px solid #d8dce2; border-radius: 6px; padding: 1rem 1.25rem; }
+label { display: block; margin: 0.75rem 0; }
+input { display: block; width: 100%; box-sizing: border-box; padding: 0.4rem; font: inherit; }
+button { font: inherit; padding: 0.4rem 0.9rem; }
+button.link { background: none; border: none; color: #1f5fbf; padding: 0; text-decoration: underline; cursor: pointer; }
+pre { background: #eef0f3; padding: 0.75rem; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+#message { min-height: 1.5em; color: #9b1c1c; }
+@media (prefers-color-scheme: dark) {
+  body { background: #15171a; color: #e4e6ea; }
+  section { background: #1d2024; border-color: #33373d; }
+  pre { background: #26292e; }
+  button.link { color: #7aa7ff; }
+  #message { color: #ff8d8d; }
+}
