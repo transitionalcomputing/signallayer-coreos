@@ -3,7 +3,7 @@ Description=SignalLayerIT remote-management boot-time reset worker
 ConditionKernelCommandLine=signallayer.remote-management-reset
 Requires=sl-authd.service
 After=sl-authd.service
-Before=sl-remoted.service sl-console.service sl-sessiond.service sl-platformd.service
+Before=sl-remoted.service sl-console@tty1.service sl-console@ttyS0.service sl-sessiond.service sl-platformd.service
 
 [Service]
 Type=oneshot

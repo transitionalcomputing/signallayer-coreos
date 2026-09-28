@@ -1,0 +1,44 @@
+[Unit]
+Description=SignalLayerIT appliance console on %I
+Requires=dbus.service
+Wants=sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service
+After=dbus.service sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service
+Conflicts=getty@%i.service serial-getty@%i.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sl-console
+User=sl-console
+Group=sl-console
+Restart=always
+RestartSec=2
+TTYPath=/dev/%I
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=journal
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

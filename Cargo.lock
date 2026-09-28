@@ -794,6 +794,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-console"
+version = "0.0.2"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "sl-protocol",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "sl-network-observer"
 version = "0.0.2"
 dependencies = [
