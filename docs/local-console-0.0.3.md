@@ -37,6 +37,11 @@ it as the process's standard input and output. The service always restarts.
 The generic getty, serial-getty, and console-getty templates are masked in the
 image, so a console crash cannot reveal a Linux login prompt.
 
+The console is ordered after and wants the fixed boot-reset worker, but does
+not require that worker to succeed. A failed reset can therefore leave
+`reset-pending` while the appliance console still starts and presents Reenroll
+as the repair path.
+
 The SELinux `sl_console_t` domain can use inherited terminal descriptors and
 exchange D-Bus messages with Auth1, Platform1, and Session1. It receives no
 capabilities or network socket access. Broker policy continues to enforce the

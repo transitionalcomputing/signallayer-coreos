@@ -154,6 +154,8 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-console@.service)" = 1 && \
     grep -Fqx 'User=sl-console' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'Restart=always' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'Requires=dbus.service' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'Wants=sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'TTYPath=/dev/%I' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'StandardInput=tty-force' /usr/lib/systemd/system/sl-console@.service && \
     grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-console@.service && \

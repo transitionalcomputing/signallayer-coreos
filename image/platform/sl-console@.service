@@ -1,7 +1,7 @@
 [Unit]
 Description=SignalLayerIT appliance console on %I
-Requires=dbus.service sl-rm-boot-reset.service
-Wants=sl-authd.service sl-platformd.service sl-sessiond.service
+Requires=dbus.service
+Wants=sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service
 After=dbus.service sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service
 Conflicts=getty@%i.service serial-getty@%i.service
 
