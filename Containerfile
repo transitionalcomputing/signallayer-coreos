@@ -14,7 +14,10 @@ COPY network-observer ./network-observer
 COPY authd ./authd
 COPY remote-worker ./remote-worker
 COPY remoted ./remoted
+COPY console ./console
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
+RUN ! grep -rEq 'Start(Update|Rollback|Reboot)|Command::new|std::process|systemctl|/bin/(sh|bash)' console/src && \
+    test "$(grep -oE '"(EnableRemoteManagement|DisableRemoteManagement|ReenrollRemoteManagement|GetRemoteManagementEnrollment)"' console/src/lib.rs | sort -u | tr '\n' ' ')" = '"DisableRemoteManagement" "EnableRemoteManagement" "GetRemoteManagementEnrollment" "ReenrollRemoteManagement" '
 # sl-remoted has no Platform1 dependency of any kind: no Platform crate in its
 # dependency tree (the positive control proves the tree was produced), in its
 # manifest, or referenced in its sources and bundled pages.
@@ -71,6 +74,7 @@ COPY --from=platform-build /build/target/release/sl-network-observer /usr/bin/sl
 COPY --from=platform-build /build/target/release/sl-authd /usr/bin/sl-authd
 COPY --from=platform-build /build/target/release/sl-remote-worker /usr/libexec/signallayer/sl-remote-worker
 COPY --from=platform-build /build/target/release/sl-remoted /usr/bin/sl-remoted
+COPY --from=platform-build /build/target/release/sl-console /usr/bin/sl-console
 COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service
 COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.service
 COPY image/platform/sl-network-observer.service /usr/lib/systemd/system/sl-network-observer.service
@@ -84,6 +88,7 @@ COPY image/platform/sl-rm-rotate.service /usr/lib/systemd/system/sl-rm-rotate.se
 COPY image/platform/sl-rm-clear-reset.service /usr/lib/systemd/system/sl-rm-clear-reset.service
 COPY image/platform/sl-rm-boot-reset.service /usr/lib/systemd/system/sl-rm-boot-reset.service
 COPY image/platform/sl-remoted.service /usr/lib/systemd/system/sl-remoted.service
+COPY image/platform/sl-console@.service /usr/lib/systemd/system/sl-console@.service
 COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf
 COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf
 COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf
@@ -106,6 +111,8 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     test "$(matchpathcon -n /usr/bin/sl-sessiond)" = system_u:object_r:sl_sessiond_exec_t:s0 && \
     test "$(matchpathcon -n /usr/bin/sl-network-observer)" = system_u:object_r:sl_network_observer_exec_t:s0 && \
     test "$(matchpathcon -n /usr/bin/sl-authd)" = system_u:object_r:sl_authd_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/bin/sl-console)" = system_u:object_r:sl_console_exec_t:s0 && \
+    test "$(matchpathcon -n /usr/lib/systemd/system/sl-console@.service)" = system_u:object_r:sl_console_unit_file_t:s0 && \
     test "$(matchpathcon -n -m dir /var/lib/sl-authd)" = system_u:object_r:sl_authd_var_lib_t:s0 && \
     test "$(matchpathcon -n -m file /var/lib/sl-authd/state.json)" = system_u:object_r:sl_authd_var_lib_t:s0 && \
     test "$(matchpathcon -n /usr/bin/bootc)" = system_u:object_r:install_exec_t:s0 && \
@@ -143,6 +150,16 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Fqx 'u sl-authd - "SignalLayerIT authentication service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-authd.conf && \
     grep -Fqx 'u sl-remoted - "SignalLayerIT remote management service" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-remoted.conf && \
     grep -Fqx 'u sl-console - "SignalLayerIT local console" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-console.conf && \
+    grep -Fqx 'ExecStart=/usr/bin/sl-console' /usr/lib/systemd/system/sl-console@.service && \
+    test "$(grep -c '^Exec' /usr/lib/systemd/system/sl-console@.service)" = 1 && \
+    grep -Fqx 'User=sl-console' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'Restart=always' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'TTYPath=/dev/%I' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'StandardInput=tty-force' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'AmbientCapabilities=' /usr/lib/systemd/system/sl-console@.service && \
+    grep -Fqx 'RestrictAddressFamilies=AF_UNIX' /usr/lib/systemd/system/sl-console@.service && \
+    ! grep -Eq 'ExecStart=.*(sh|bash)|Start(Update|Rollback|Reboot)|systemctl' /usr/lib/systemd/system/sl-console@.service && \
     test "$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf)" = 6 && \
     test "$(awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \n' ' ')" = ' <policy context="default"> <deny own="org.signallayer.Auth1"/> <deny send_destination="org.signallayer.Auth1"/> </policy> ' && \
     test "$(awk '/<policy user="sl-authd">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \n' ' ')" = ' <policy user="sl-authd"> <allow own="org.signallayer.Auth1"/> </policy> ' && \
@@ -207,7 +224,7 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
     grep -Fqx 'ConditionKernelCommandLine=signallayer.remote-management-reset' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
     grep -Fqx 'Requires=sl-authd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
     grep -Fqx 'After=sl-authd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
-    grep -Fqx 'Before=sl-remoted.service sl-console.service sl-sessiond.service sl-platformd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
+    grep -Fqx 'Before=sl-remoted.service sl-console@tty1.service sl-console@ttyS0.service sl-sessiond.service sl-platformd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
     grep -Fqx 'WantedBy=multi-user.target' /usr/lib/systemd/system/sl-rm-boot-reset.service && \
     test "$(awk '/<policy context="default">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="GetStatus" ' && \
     test "$(awk '/<policy user="sl-console">/,/<\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member="[A-Za-z]*"' | sort | tr '\n' ' ')" = 'send_member="DisableRemoteManagement" send_member="EnableRemoteManagement" send_member="GetRemoteManagementEnrollment" send_member="ReenrollRemoteManagement" ' && \
@@ -256,4 +273,15 @@ RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
     ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \
     ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service && \
     ln -s ../sl-rm-boot-reset.service /usr/lib/systemd/system/multi-user.target.wants/sl-rm-boot-reset.service && \
-    ln -s ../sl-remoted.service /usr/lib/systemd/system/multi-user.target.wants/sl-remoted.service
+    ln -s ../sl-remoted.service /usr/lib/systemd/system/multi-user.target.wants/sl-remoted.service && \
+    ln -s ../sl-console@.service /usr/lib/systemd/system/multi-user.target.wants/sl-console@tty1.service && \
+    ln -s ../sl-console@.service /usr/lib/systemd/system/multi-user.target.wants/sl-console@ttyS0.service && \
+    install -d /etc/systemd/system && \
+    ln -s /dev/null /etc/systemd/system/getty@.service && \
+    ln -s /dev/null /etc/systemd/system/serial-getty@.service && \
+    ln -s /dev/null /etc/systemd/system/console-getty.service && \
+    test "$(readlink /etc/systemd/system/getty@.service)" = /dev/null && \
+    test "$(readlink /etc/systemd/system/serial-getty@.service)" = /dev/null && \
+    test "$(readlink /etc/systemd/system/console-getty.service)" = /dev/null && \
+    test "$(readlink /usr/lib/systemd/system/multi-user.target.wants/sl-console@tty1.service)" = ../sl-console@.service && \
+    test "$(readlink /usr/lib/systemd/system/multi-user.target.wants/sl-console@ttyS0.service)" = ../sl-console@.service

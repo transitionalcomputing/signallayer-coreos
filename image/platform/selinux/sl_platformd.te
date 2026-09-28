@@ -184,6 +184,33 @@ manage_files_pattern(sl_remoted_t, sl_remoted_runtime_t, sl_remoted_runtime_t)
 allow sl_sessiond_t sl_remoted_runtime_t:dir search_dir_perms;
 allow sl_sessiond_t sl_remoted_runtime_t:file getattr;
 
+# The trusted local appliance console is unprivileged and has no filesystem,
+# process-management, capability or network authority. systemd opens its exact
+# TTYPath before dropping privileges; the domain can use only inherited
+# terminal descriptors. D-Bus policy independently restricts exact members.
+type sl_console_t;
+type sl_console_exec_t;
+init_daemon_domain(sl_console_t, sl_console_exec_t)
+domtrans_pattern(init_t, sl_console_exec_t, sl_console_t)
+allow init_t sl_console_t:process2 nnp_transition;
+
+libs_use_ld_so(sl_console_t)
+libs_use_shared_libs(sl_console_t)
+files_read_usr_files(sl_console_t)
+miscfiles_read_localization(sl_console_t)
+fs_read_cgroup_files(sl_console_t)
+dbus_system_bus_client(sl_console_t)
+term_use_all_inherited_terms(sl_console_t)
+allow sl_console_t sl_authd_t:dbus send_msg;
+allow sl_authd_t sl_console_t:dbus send_msg;
+allow sl_console_t sl_platformd_t:dbus send_msg;
+allow sl_platformd_t sl_console_t:dbus send_msg;
+allow sl_console_t sl_sessiond_t:dbus send_msg;
+allow sl_sessiond_t sl_console_t:dbus send_msg;
+
+type sl_console_unit_file_t;
+systemd_unit_file(sl_console_unit_file_t)
+
 # Platform starts, stops and observes sl-remoted (Enable, Disable, Reenroll).
 type sl_remoted_unit_file_t;
 systemd_unit_file(sl_remoted_unit_file_t)
