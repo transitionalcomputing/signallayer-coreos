@@ -53,6 +53,10 @@ decision.
 - **Invalidation trigger:** a kernel rtnetlink socket subscribed to link,
   IPv4/IPv6 address and IPv4/IPv6 route notifications. Message contents are
   not parsed; any notification (or an overrun) is only a trigger.
+- A change to the owner of the exact Session1 bus name is also an invalidation
+  trigger. Loss or replacement of that owner makes every previously fetched
+  Session1 view untrustworthy immediately; restoration requires a new
+  successful Session1 fetch.
 - **On any trigger:** immediately withdraw eligibility, close all listeners,
   end all open connections, and remove the listening marker. Then wait for
   **500 ms** without further notifications (debounce), and refresh Session1
@@ -69,7 +73,7 @@ decision.
 - Session1 refreshes time out after **20 s**.
 
 ### Controller concurrency
-The controller task is the only consumer of rtnetlink notifications. Every
+The controller task is the only consumer of invalidation notifications. Every
 await it performs is raced against the next notification, so an invalidation
 is never queued behind other work:
 

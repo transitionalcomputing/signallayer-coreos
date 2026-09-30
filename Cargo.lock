@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "corectl"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "serde_json",
  "sl-platform-client",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "sl-authd"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "argon2",
  "libc",
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "sl-console"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "libc",
  "serde",
@@ -807,7 +807,7 @@ dependencies = [
 
 [[package]]
 name = "sl-network-observer"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "serde_json",
  "sl-protocol",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "sl-platform-client"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "serde_json",
  "sl-protocol",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "sl-platformd"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "libc",
  "serde_json",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "sl-protocol"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "serde",
  "zbus",
@@ -846,11 +846,11 @@ dependencies = [
 
 [[package]]
 name = "sl-remote-state"
-version = "0.0.2"
+version = "0.0.3"
 
 [[package]]
 name = "sl-remote-worker"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "libc",
  "sl-remote-state",
@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "sl-remoted"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "axum",
  "cookie",
@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "sl-sessiond"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "serde_json",
  "sl-platform-client",

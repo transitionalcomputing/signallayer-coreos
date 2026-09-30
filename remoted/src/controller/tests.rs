@@ -117,6 +117,7 @@ struct Harness {
     shared: Arc<Shared>,
     marker: PathBuf,
     events: mpsc::UnboundedSender<io::Result<()>>,
+    session_events: mpsc::UnboundedSender<io::Result<()>>,
     task: tokio::task::JoinHandle<io::Error>,
     _directory: TempDir,
 }
@@ -146,6 +147,7 @@ impl Harness {
         let failing = Arc::new(Mutex::new(Vec::new()));
         let shared = Shared::new();
         let (events, receiver) = mpsc::unbounded_channel();
+        let (session_events, session_receiver) = mpsc::unbounded_channel();
         let controller = Controller::new(
             status.clone(),
             FakeListeners {
@@ -157,7 +159,8 @@ impl Harness {
             },
             shared.clone(),
         );
-        let task = tokio::spawn(controller.run(FakeEvents(receiver)));
+        let invalidations = Invalidations::new(FakeEvents(session_receiver), FakeEvents(receiver));
+        let task = tokio::spawn(controller.run(invalidations));
         let harness = Self {
             status,
             log,
@@ -165,6 +168,7 @@ impl Harness {
             shared,
             marker,
             events,
+            session_events,
             task,
             _directory: directory,
         };
@@ -208,6 +212,37 @@ impl Harness {
         self.events.send(Ok(())).unwrap();
         self.settle().await;
     }
+
+    async fn session_owner_change(&self) {
+        self.session_events.send(Ok(())).unwrap();
+        self.settle().await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn session_owner_loss_withdraws_until_a_fresh_status_fetch_succeeds() {
+    let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
+    harness.log.take();
+    let old_generation = harness.generation();
+    harness.set_status(Err(()));
+
+    harness.session_owner_change().await;
+    assert!(!harness.listening(), "withdrawn without waiting for timers");
+    assert!(!harness
+        .shared
+        .admits(old_generation, "192.0.2.77".parse().unwrap()));
+    assert!(!harness.shared.is_current(old_generation));
+    assert_eq!(harness.log.take(), ["close"]);
+
+    harness.advance(DEBOUNCE).await;
+    assert!(!harness.listening(), "failed fresh fetch stays withdrawn");
+    harness.set_status(Ok(status(&["198.51.100.20/24"])));
+    harness.settle().await;
+    assert!(!harness.listening(), "old state is never reused");
+    harness.advance(RETRY).await;
+    assert!(harness.listening());
+    assert!(harness.admits("198.51.100.99"));
+    assert!(!harness.admits("192.0.2.77"));
 }
 
 #[tokio::test(start_paused = true)]
@@ -518,7 +553,7 @@ async fn a_failing_event_source_during_a_refresh_withdraws_and_ends() {
 // Ties: invalidation and a competing future ready in the same poll.
 
 #[tokio::test(start_paused = true)]
-async fn invalidation_beats_a_refresh_result_ready_in_the_same_poll() {
+async fn session_owner_loss_beats_a_refresh_result_ready_in_the_same_poll() {
     let harness = Harness::start(Ok(status(&["192.0.2.10/24"]))).await;
     harness.log.take();
     let gate = gate(&harness);
@@ -528,7 +563,7 @@ async fn invalidation_beats_a_refresh_result_ready_in_the_same_poll() {
     harness.set_status(Ok(status(&["198.51.100.20/24"])));
     // Both become ready before the controller runs again.
     release(&harness, &gate);
-    harness.events.send(Ok(())).unwrap();
+    harness.session_events.send(Ok(())).unwrap();
     harness.settle().await;
     assert!(!harness.listening());
     assert!(!harness.admits("192.0.2.77"), "old eligibility withdrawn");

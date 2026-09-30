@@ -20,8 +20,8 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     // Without change notifications a stale listener could outlive a network
-    // change, so there is no listening without them.
-    let events = match netlink::Netlink::open() {
+    // or Session1 owner change, so there is no listening without them.
+    let network_events = match netlink::Netlink::open() {
         Ok(events) => events,
         Err(_) => {
             eprintln!("sl-remoted: network change notifications are unavailable");
@@ -31,6 +31,13 @@ async fn main() -> ExitCode {
     let Ok(connection) = zbus::Connection::system().await else {
         eprintln!("sl-remoted: the system bus is unavailable");
         return ExitCode::FAILURE;
+    };
+    let session_events = match peers::SessionOwnerEvents::new(&connection).await {
+        Ok(events) => events,
+        Err(_) => {
+            eprintln!("sl-remoted: Session1 owner notifications are unavailable");
+            return ExitCode::FAILURE;
+        }
     };
     let status: Arc<dyn peers::StatusSource> = Arc::new(peers::BusSession {
         connection: connection.clone(),
@@ -57,9 +64,10 @@ async fn main() -> ExitCode {
         },
         shared,
     );
+    let events = controller::Invalidations::new(session_events, network_events);
     let error = controller.run(events).await;
     eprintln!(
-        "sl-remoted: network change notifications failed: {}",
+        "sl-remoted: invalidation notifications failed: {}",
         error.kind()
     );
     ExitCode::FAILURE

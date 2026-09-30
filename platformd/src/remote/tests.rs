@@ -528,3 +528,31 @@ fn a_worker_succeeds_only_when_inactive_with_result_success() {
         assert!(!worker_succeeded(active, result), "{active} {result}");
     }
 }
+
+#[test]
+fn a_worker_waits_only_while_the_exact_start_job_is_listed() {
+    let expected =
+        zbus::zvariant::OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/7").unwrap();
+    let other =
+        zbus::zvariant::OwnedObjectPath::try_from("/org/freedesktop/systemd1/job/8").unwrap();
+    let unit = zbus::zvariant::OwnedObjectPath::try_from(
+        "/org/freedesktop/systemd1/unit/sl_2drm_2denable_2eservice",
+    )
+    .unwrap();
+    let jobs = vec![(
+        7,
+        ENABLE_UNIT.into(),
+        "start".into(),
+        "running".into(),
+        expected.clone(),
+        unit.clone(),
+    )];
+    assert!(job_pending(&jobs, &expected));
+    assert!(!job_pending(&jobs, &other));
+    assert!(!job_pending(&[], &expected));
+}
+
+#[test]
+fn the_worker_completion_bound_remains_thirty_seconds() {
+    assert_eq!(WORKER_TIMEOUT, Duration::from_secs(30));
+}

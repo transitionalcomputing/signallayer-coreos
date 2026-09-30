@@ -253,6 +253,19 @@ fn idle(active_state: &str) -> bool {
     matches!(active_state, "inactive" | "failed")
 }
 
+type SystemdJob = (
+    u32,
+    String,
+    String,
+    String,
+    zbus::zvariant::OwnedObjectPath,
+    zbus::zvariant::OwnedObjectPath,
+);
+
+fn job_pending(jobs: &[SystemdJob], expected: &zbus::zvariant::OwnedObjectPath) -> bool {
+    jobs.iter().any(|job| &job.4 == expected)
+}
+
 /// The production backend: systemd and sl-authd over the system bus, and the
 /// read-only state directory.
 pub(crate) struct SystemBackend<'a> {
@@ -322,22 +335,22 @@ impl Backend for SystemBackend<'_> {
             if !idle(&active) {
                 return Ok(Err(WorkerError::Busy));
             }
-            let previous: Vec<u8> = unit.get_property("InvocationID").await?;
-            let _: zbus::zvariant::OwnedObjectPath =
+            let job_path: zbus::zvariant::OwnedObjectPath =
                 manager.call("StartUnit", &(name, "fail")).await?;
             loop {
-                let invocation: Vec<u8> = unit.get_property("InvocationID").await?;
-                let active: String = unit.get_property("ActiveState").await?;
-                if invocation != previous && idle(&active) {
-                    let result: String = service.get_property("Result").await?;
-                    return Ok::<_, zbus::Error>(if worker_succeeded(&active, &result) {
-                        Ok(())
-                    } else {
-                        Err(WorkerError::Failed)
-                    });
+                let jobs: Vec<SystemdJob> = manager.call("ListJobs", &()).await?;
+                if !job_pending(&jobs, &job_path) {
+                    break;
                 }
                 sleep(POLL_INTERVAL).await;
             }
+            let active: String = unit.get_property("ActiveState").await?;
+            let result: String = service.get_property("Result").await?;
+            Ok::<_, zbus::Error>(if worker_succeeded(&active, &result) {
+                Ok(())
+            } else {
+                Err(WorkerError::Failed)
+            })
         })
         .await;
         match outcome {

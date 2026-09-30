@@ -10,7 +10,12 @@ const PLATFORM_BUS: &str = "org.signallayer.Platform1";
 const PLATFORM_PATH: &str = "/org/signallayer/Platform1";
 const SESSION_BUS: &str = "org.signallayer.Session1";
 const SESSION_PATH: &str = "/org/signallayer/Session1";
-const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+// Read and authentication calls retain their short bound. Enable and Disable
+// can compose to 50 seconds in Platform; Reenroll can compose to 100 seconds.
+// Each lifecycle deadline includes ten seconds of D-Bus/transport slack.
+const READ_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(60);
+const REENROLL_TIMEOUT: Duration = Duration::from_secs(110);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Enrollment {
@@ -109,7 +114,22 @@ impl<B: Backend> Controller<B> {
 
     pub async fn refresh(&mut self) -> Result<View, ConsoleError> {
         let status = self.status().await?;
-        let enrollment = self.backend.enrollment().await?;
+        let enrollment = match self.backend.enrollment().await {
+            Ok(enrollment) => {
+                self.reset_incomplete = false;
+                enrollment
+            }
+            Err(ConsoleError::Platform(PlatformFailure::ResetIncomplete)) => {
+                self.reset_incomplete = true;
+                Enrollment {
+                    url: String::new(),
+                    fingerprint: String::new(),
+                    pairing_code: String::new(),
+                    expires_at: 0,
+                }
+            }
+            Err(error) => return Err(error),
+        };
         Ok(View {
             product: status.product,
             version: status.version,
@@ -187,6 +207,9 @@ impl BusBackend {
     pub async fn connect() -> Result<Self, ConsoleError> {
         let connection = zbus::connection::Builder::system()
             .map_err(|_| ConsoleError::StatusUnavailable)?
+            // Per-call outer deadlines remain authoritative; this prevents
+            // zbus's connection-level deadline from expiring first.
+            .method_timeout(REENROLL_TIMEOUT)
             .build()
             .await
             .map_err(|_| ConsoleError::StatusUnavailable)?;
@@ -199,12 +222,13 @@ impl BusBackend {
         path: &'static str,
         member: &'static str,
         body: &B,
+        limit: Duration,
     ) -> Result<R, zbus::Error>
     where
         B: serde::Serialize + zbus::zvariant::DynamicType + Sync,
         R: for<'d> serde::Deserialize<'d> + zbus::zvariant::Type,
     {
-        tokio::time::timeout(CALL_TIMEOUT, async {
+        tokio::time::timeout(limit, async {
             let proxy = zbus::Proxy::new(&self.connection, bus, path, bus).await?;
             proxy.call(member, body).await
         })
@@ -216,7 +240,13 @@ impl BusBackend {
 impl Backend for BusBackend {
     async fn status(&self) -> Result<SessionStatus, ConsoleError> {
         let text: String = self
-            .call(SESSION_BUS, SESSION_PATH, "GetPlatformStatus", &())
+            .call(
+                SESSION_BUS,
+                SESSION_PATH,
+                "GetPlatformStatus",
+                &(),
+                READ_AUTH_TIMEOUT,
+            )
             .await
             .map_err(|_| ConsoleError::StatusUnavailable)?;
         let status: SessionStatus =
@@ -233,6 +263,7 @@ impl Backend for BusBackend {
                 PLATFORM_PATH,
                 "GetRemoteManagementEnrollment",
                 &(),
+                READ_AUTH_TIMEOUT,
             )
             .await
             .map_err(|error| ConsoleError::Platform(platform_failure(&error)))?;
@@ -245,9 +276,15 @@ impl Backend for BusBackend {
     }
 
     async fn verify_password(&self, password: &str) -> Result<(), AuthFailure> {
-        self.call(AUTH_BUS, AUTH_PATH, "VerifyPassword", &(password,))
-            .await
-            .map_err(|error| auth_failure(&error))
+        self.call(
+            AUTH_BUS,
+            AUTH_PATH,
+            "VerifyPassword",
+            &(password,),
+            READ_AUTH_TIMEOUT,
+        )
+        .await
+        .map_err(|error| auth_failure(&error))
     }
 
     async fn recover_password(
@@ -260,6 +297,7 @@ impl Backend for BusBackend {
             AUTH_PATH,
             "RecoverPassword",
             &(recovery_key, new_password),
+            READ_AUTH_TIMEOUT,
         )
         .await
         .map_err(|error| auth_failure(&error))
@@ -271,9 +309,22 @@ impl Backend for BusBackend {
             Action::Disable => "DisableRemoteManagement",
             Action::Reenroll => "ReenrollRemoteManagement",
         };
-        self.call(PLATFORM_BUS, PLATFORM_PATH, member, &())
-            .await
-            .map_err(|error| platform_failure(&error))
+        self.call(
+            PLATFORM_BUS,
+            PLATFORM_PATH,
+            member,
+            &(),
+            lifecycle_timeout(action),
+        )
+        .await
+        .map_err(|error| platform_failure(&error))
+    }
+}
+
+fn lifecycle_timeout(action: Action) -> Duration {
+    match action {
+        Action::Enable | Action::Disable => LIFECYCLE_TIMEOUT,
+        Action::Reenroll => REENROLL_TIMEOUT,
     }
 }
 

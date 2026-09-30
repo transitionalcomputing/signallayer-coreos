@@ -1,7 +1,8 @@
 //! sl-remoted's only D-Bus peers: org.signallayer.Auth1 and
 //! org.signallayer.Session1.
-use std::time::Duration;
+use std::{future::poll_fn, io, pin::Pin, time::Duration};
 use zbus::export::async_trait::async_trait;
+use zbus::export::futures_core::Stream;
 
 const AUTH_BUS: &str = "org.signallayer.Auth1";
 const AUTH_PATH: &str = "/org/signallayer/Auth1";
@@ -11,6 +12,28 @@ const SESSION_PATH: &str = "/org/signallayer/Session1";
 /// Argon2id admission can queue several hashes.
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 pub const SESSION_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// An exact-name owner-change subscription installed before the first status
+/// fetch. Any owner change invalidates Session1-derived state; only a later
+/// successful status fetch may establish it again.
+pub struct SessionOwnerEvents {
+    changes: zbus::proxy::OwnerChangedStream<'static>,
+}
+
+impl SessionOwnerEvents {
+    pub async fn new(connection: &zbus::Connection) -> zbus::Result<Self> {
+        let proxy = zbus::Proxy::new(connection, SESSION_BUS, SESSION_PATH, SESSION_BUS).await?;
+        let changes = proxy.receive_owner_changed().await?;
+        Ok(Self { changes })
+    }
+
+    pub async fn changed(&mut self) -> io::Result<()> {
+        match poll_fn(|context| Pin::new(&mut self.changes).poll_next(context)).await {
+            Some(_) => Ok(()),
+            None => Err(io::Error::other("Session1 owner-change stream ended")),
+        }
+    }
+}
 
 /// The frozen Auth1 errors; anything else (including bus failures and
 /// timeouts) is `Unavailable`.

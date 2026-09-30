@@ -95,10 +95,41 @@ pub trait Events: Send {
     async fn changed(&mut self) -> io::Result<()>;
 }
 
+/// Combines independent invalidation sources. The first source is polled
+/// first so Session1 ownership changes win scheduler ties.
+pub struct Invalidations<A, B> {
+    first: A,
+    second: B,
+}
+
+impl<A, B> Invalidations<A, B> {
+    pub fn new(first: A, second: B) -> Self {
+        Self { first, second }
+    }
+}
+
+#[async_trait]
+impl<A: Events, B: Events> Events for Invalidations<A, B> {
+    async fn changed(&mut self) -> io::Result<()> {
+        tokio::select! {
+            biased;
+            changed = self.first.changed() => changed,
+            changed = self.second.changed() => changed,
+        }
+    }
+}
+
 #[async_trait]
 impl Events for crate::netlink::Netlink {
     async fn changed(&mut self) -> io::Result<()> {
         crate::netlink::Netlink::changed(self).await
+    }
+}
+
+#[async_trait]
+impl Events for crate::peers::SessionOwnerEvents {
+    async fn changed(&mut self) -> io::Result<()> {
+        crate::peers::SessionOwnerEvents::changed(self).await
     }
 }
 
