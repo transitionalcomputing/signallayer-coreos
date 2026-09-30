@@ -98,6 +98,10 @@ directory that `current` does not reference.
 Platform needs one new helper beside `start_worker`: `run_worker`.
 - It starts a oneshot worker the same way, then waits, within a bounded
   timeout, for that invocation to finish.
+- Completion polls systemd's authoritative job list for the exact job object
+  returned by `StartUnit`; removal of that object is the completion witness.
+  This remains reliable when systemd clears a fast oneshot's invocation and
+  execution timestamps before Platform can observe them.
 - It succeeds only if the unit returns to `inactive` with
   `Result=success`.
 - Any other outcome is `RemoteManagementUnavailable`.

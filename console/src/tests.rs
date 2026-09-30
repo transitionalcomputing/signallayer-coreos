@@ -9,6 +9,7 @@ struct Fake {
     platform: RefCell<VecDeque<Result<(), PlatformFailure>>>,
     calls: RefCell<Vec<&'static str>>,
     status_available: RefCell<bool>,
+    reset_incomplete: RefCell<bool>,
 }
 
 impl Fake {
@@ -20,6 +21,7 @@ impl Fake {
             platform: RefCell::new(VecDeque::new()),
             calls: RefCell::new(Vec::new()),
             status_available: RefCell::new(true),
+            reset_incomplete: RefCell::new(false),
         }
     }
 }
@@ -52,6 +54,9 @@ impl Backend for Fake {
 
     async fn enrollment(&self) -> Result<Enrollment, ConsoleError> {
         self.calls.borrow_mut().push("enrollment");
+        if *self.reset_incomplete.borrow() {
+            return Err(ConsoleError::Platform(PlatformFailure::ResetIncomplete));
+        }
         Ok(Enrollment {
             url: "https://10.0.0.2:8443/".into(),
             fingerprint: "AA".into(),
@@ -82,11 +87,17 @@ impl Backend for Fake {
             Action::Reenroll => "reenroll",
         });
         let result = self.platform.borrow_mut().pop_front().unwrap_or(Ok(()));
+        if result == Err(PlatformFailure::ResetIncomplete) {
+            *self.reset_incomplete.borrow_mut() = true;
+        }
         if result.is_ok() {
             match action {
                 Action::Enable => *self.enabled.borrow_mut() = true,
                 Action::Disable => *self.enabled.borrow_mut() = false,
-                Action::Reenroll => *self.enrolled.borrow_mut() = false,
+                Action::Reenroll => {
+                    *self.enrolled.borrow_mut() = false;
+                    *self.reset_incomplete.borrow_mut() = false;
+                }
             }
         }
         result
@@ -161,6 +172,35 @@ async fn reset_incomplete_is_a_distinct_reenroll_repair_state() {
 }
 
 #[tokio::test]
+async fn fresh_console_discovers_preexisting_incomplete_reset_without_mutation() {
+    let fake = Fake::with(false, false);
+    *fake.reset_incomplete.borrow_mut() = true;
+    let mut controller = Controller::new(fake);
+
+    let view = controller.refresh().await.unwrap();
+    assert!(view.reset_incomplete);
+    assert_eq!(
+        view.enrollment,
+        Enrollment {
+            url: String::new(),
+            fingerprint: String::new(),
+            pairing_code: String::new(),
+            expires_at: 0,
+        }
+    );
+    assert_eq!(
+        &*controller.backend.calls.borrow(),
+        &["status", "enrollment"]
+    );
+
+    assert_eq!(
+        controller.act(Action::Enable).await.unwrap_err(),
+        ConsoleError::Platform(PlatformFailure::ResetIncomplete)
+    );
+    assert!(!controller.backend.calls.borrow().contains(&"enable"));
+}
+
+#[tokio::test]
 async fn recovery_uses_authd_and_does_not_grant_a_session() {
     let mut controller = Controller::new(Fake::with(true, true));
     let view = controller
@@ -209,4 +249,17 @@ async fn backend_loss_fails_closed() {
 #[test]
 fn console_abstraction_contains_only_frozen_actions() {
     assert_eq!([Action::Enable, Action::Disable, Action::Reenroll].len(), 3);
+}
+
+#[test]
+fn call_deadlines_cover_platform_contracts_with_bounded_slack() {
+    assert_eq!(READ_AUTH_TIMEOUT, Duration::from_secs(30));
+    assert_eq!(lifecycle_timeout(Action::Enable), Duration::from_secs(60));
+    assert_eq!(lifecycle_timeout(Action::Disable), Duration::from_secs(60));
+    assert_eq!(
+        lifecycle_timeout(Action::Reenroll),
+        Duration::from_secs(110)
+    );
+    assert!(lifecycle_timeout(Action::Enable) > Duration::from_secs(50));
+    assert!(lifecycle_timeout(Action::Reenroll) > Duration::from_secs(100));
 }

@@ -21,6 +21,12 @@ public certificate directories, and permits PID 1 to inspect only the
 dedicated remote-management TLS identity symlink used by the fixed
 `sl-remoted.service` start condition.
 
+Integrated validation also requires Platform to recognize a completed fast
+oneshot after systemd clears its invocation ID and service execution-start
+timestamp. The bounded worker observer therefore follows the exact systemd job
+object returned by `StartUnit` in the manager's authoritative job list until
+it is removed.
+
 The historical 0.0.2 A-to-B-to-A lifecycle remains accepted evidence. Phase
 5E does not repeat it unless a concrete deployment-lifecycle regression is
 found.

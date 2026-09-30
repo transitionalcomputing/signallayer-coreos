@@ -66,6 +66,14 @@ def wait_for(predicate, seconds=30):
         time.sleep(0.05)
     return False
 
+def listener_open(address):
+    try:
+        connection = socket.create_connection((address, 8443), timeout=0.25)
+        connection.close()
+        return True
+    except OSError:
+        return False
+
 def session_status():
     return json.loads(data(SESSION, "GetPlatformStatus")[0])
 
@@ -291,16 +299,34 @@ try:
     rebound = wait_for(LISTENING.exists, 30)
     results["network_invalidation_fail_closed"] = withdrew and rebound
 
-    # With Session1 unavailable, a fresh remoted process cannot publish a
-    # listener; restoring Session1 restores it without widening the bind.
-    systemctl("stop", "sl-remoted.service", check=False)
+    # Begin healthy, then remove Session1 without restarting sl-remoted (whose
+    # Wants= relationship would otherwise restart Session1 and invalidate the
+    # negative test). The existing process/service policy must withdraw both
+    # its publication marker and TCP admission while Session1 is unavailable.
+    session_healthy = (
+        systemctl("is-active", "sl-sessiond.service", check=False).returncode == 0 and
+        systemctl("is-active", "sl-remoted.service", check=False).returncode == 0 and
+        LISTENING.exists() and listener_open(address))
     systemctl("stop", "sl-sessiond.service")
-    systemctl("start", "sl-remoted.service", check=False)
-    time.sleep(1)
-    results["session_loss_has_no_listener"] = not LISTENING.exists()
+    session_unavailable = (
+        systemctl("is-active", "sl-sessiond.service", check=False).returncode != 0 and
+        call(SESSION, "GetPlatformStatus", check=False).returncode != 0)
+    withdrew = wait_for(
+        lambda: not LISTENING.exists() and not listener_open(address), 30)
+    results["session_loss_has_no_listener"] = (
+        session_healthy and session_unavailable and withdrew)
+
+    # Restore only Session1. sl-remoted must recover through its normal
+    # same-process/restart policy; the probe never starts or restarts it.
     systemctl("start", "sl-sessiond.service")
-    systemctl("restart", "sl-remoted.service")
-    results["session_restore_rebinds"] = wait_for(LISTENING.exists, 30)
+    def session_restored():
+        if not LISTENING.exists() or not listener_open(address):
+            return False
+        try:
+            return session_status()["remote_management"]["listening"]
+        except (KeyError, RuntimeError, json.JSONDecodeError):
+            return False
+    results["session_restore_rebinds"] = wait_for(session_restored, 30)
 
     final = session_status()
     results["cross_service_final_state"] = final["remote_management"] == {
