@@ -105,7 +105,8 @@ class DefaultReproduces3FTests(unittest.TestCase):
 
 
 def release_evidence(corectl_exits=(0, 0), sequence=None, agreement=None, schema="0.3", api="0.2",
-                     version="0.0.2", reference="localhost/signallayer-coreos:0.0.2"):
+                     version="0.0.2", reference="localhost/signallayer-coreos:0.0.2",
+                     session_schema="0.3", facts=None):
     """The accepted 3F evidence, adjusted to what a passing 0.0.2 run records."""
     evidence = copy.deepcopy(fixture("phase3f-acceptance-evidence.json"))
     for suffix in lifecycle.STATUS_SUFFIXES:
@@ -127,6 +128,11 @@ def release_evidence(corectl_exits=(0, 0), sequence=None, agreement=None, schema
         session = copy.deepcopy(status)
         if agreement == "never":
             session["health"]["failed_units"] = 1
+        if session_schema == "0.4":
+            session["schema_version"] = "0.4"
+            session["remote_management"] = (
+                facts if facts is not None
+                else {"enabled": False, "listening": False, "enrolled": False})
         envelope = json.dumps({"type": "s", "data": [json.dumps(session)]})
         evidence[f"{suffix}_agree_1_platform_a"] = record(json.dumps(status))
         evidence[f"{suffix}_agree_1_session"] = record(envelope)
@@ -271,6 +277,63 @@ class Release002ProbeTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             lifecycle.compose_release_0_0_2_probe(b"#!/usr/bin/bash\n")
 
+
+
+def release_0_0_3_evidence(**kwargs):
+    kwargs = {"api": "0.3", "version": "0.0.3", "reference": "localhost/signallayer-coreos:0.0.3",
+              "session_schema": "0.4", **kwargs}
+    return release_evidence(**kwargs)
+
+
+class Release003ModeTests(unittest.TestCase):
+    def evaluate(self, **kwargs):
+        return lifecycle.evaluate_release(release_0_0_3_evidence(**kwargs), "0.0.3")
+
+    def test_passing_run(self):
+        checks, details = self.evaluate()
+        self.assertTrue(all(checks.values()), {k: v for k, v in checks.items() if not v})
+        self.assertIn("release_0_0_3_status_all_boots", checks)
+        self.assertIn("release_0_0_3_identity_all_boots", checks)
+        for suffix in lifecycle.AGREEMENT_SUFFIXES:
+            self.assertEqual(details["session_agreement"][suffix]["converged_attempt"], 1)
+
+    def test_api_version_and_identity_are_0_0_3(self):
+        for kwargs in ({"api": "0.2"}, {"version": "0.0.2"},
+                       {"reference": "localhost/signallayer-coreos:0.0.2"}):
+            checks, _ = self.evaluate(**kwargs)
+            self.assertFalse(all(checks.values()), kwargs)
+
+    def test_session_must_be_schema_0_4_with_exactly_three_facts(self):
+        for suffix in lifecycle.AGREEMENT_SUFFIXES:
+            self.assertTrue(self.evaluate()[0][f"{suffix}_platform_session_agree"])
+        for kwargs in ({"session_schema": "0.3"},
+                       {"facts": {"enabled": True, "listening": False}},
+                       {"facts": {"enabled": True, "listening": False, "enrolled": 1}},
+                       {"facts": {"enabled": True, "listening": False, "enrolled": True, "extra": True}},
+                       {"agreement": "never"}):
+            checks, _ = self.evaluate(**kwargs)
+            self.assertFalse(checks["seed_platform_session_agree"], kwargs)
+
+    def test_common_fields_must_still_agree(self):
+        self.assertIsNotNone(lifecycle.common_session_status(json.dumps(
+            {"schema_version": "0.4", "version": "0.0.3",
+             "remote_management": {"enabled": True, "listening": True, "enrolled": True}})))
+        self.assertIsNone(lifecycle.common_session_status("not json"))
+        self.assertIsNone(lifecycle.common_session_status(json.dumps({"schema_version": "0.4"})))
+
+    def test_guest_comparison_uses_common_fields_only_in_0_0_3(self):
+        probe = lifecycle.compose_release_probe(probe_bytes(), "0.0.3").decode()
+        self.assertNotIn(lifecycle.GUEST_EXACT_AGREEMENT, probe)
+        self.assertEqual(probe.count("def common(text):"), len(lifecycle.AGREEMENT_SUFFIXES))
+        self.assertNotIn("'", lifecycle.GUEST_COMMON_AGREEMENT)
+        old = lifecycle.compose_release_0_0_2_probe(probe_bytes()).decode()
+        self.assertNotIn("def common(text):", old)
+        self.assertIn(lifecycle.GUEST_EXACT_AGREEMENT, old)
+
+    def test_registry_target_and_reference(self):
+        self.assertEqual(lifecycle.registry_target("0.0.3"),
+                         "docker://localhost:5000/signallayer-coreos:0.0.3")
+        self.assertEqual(lifecycle.image_reference("0.0.3"), "localhost/signallayer-coreos:0.0.3")
 
 if __name__ == "__main__":
     unittest.main()
