@@ -14,6 +14,7 @@ use tokio::{
 
 mod checked_interface;
 mod remote;
+mod shared_read;
 use checked_interface::CheckedPlatform;
 
 const OUTPUT_LIMIT: u64 = 64 * 1024;
@@ -34,7 +35,8 @@ const NETWORK_OBSERVER_INTERFACE: &str = "org.signallayer.NetworkObserver1";
 
 struct Platform {
     connection: zbus::Connection,
-    requests: Semaphore,
+    /// Concurrent `GetStatus` calls share one in-flight observation.
+    status_reads: shared_read::SharedRead<Result<String, PlatformError>>,
     mutation_starts: Semaphore,
     /// Held by each remote-management method for its whole sequence; not
     /// shared with `mutation_starts`.
@@ -51,45 +53,11 @@ struct WorkerObservation {
 #[zbus::interface(name = "org.signallayer.Platform1")]
 impl Platform {
     async fn get_status(&self) -> Result<String, PlatformError> {
-        let _permit = self.requests.try_acquire().map_err(|_| {
-            PlatformError::Busy("A status observation is already in progress".into())
-        })?;
-        let update_worker = observe_worker(&self.connection, UPDATE_UNIT)
+        let connection = self.connection.clone();
+        self.status_reads
+            .run(|| observe_status(connection))
             .await
-            .map_err(|_| update_unavailable())?;
-        let rollback_worker = observe_worker(&self.connection, ROLLBACK_UNIT)
-            .await
-            .map_err(|_| rollback_unavailable())?;
-        let release = std::fs::read_to_string("/usr/lib/signallayer/release").map_err(|_| {
-            PlatformError::MetadataUnavailable("Image release metadata is unreadable".into())
-        })?;
-        let machine = observe_machine()?;
-        let (backend, network) = tokio::try_join!(
-            backend_command("/usr/bin/bootc", &["status", "--json"], BACKEND_TIMEOUT),
-            observe_network(&self.connection)
-        )?;
-        let manager =
-            zbus::Proxy::new(&self.connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER)
-                .await
-                .map_err(|_| health_error())?;
-        let health = timeout(Duration::from_secs(3), async {
-            let state: String = manager.get_property("SystemState").await?;
-            let failed: u32 = manager.get_property("NFailedUnits").await?;
-            Ok::<_, zbus::Error>(observed_health(state, failed))
-        })
-        .await
-        .map_err(|_| health_error())?
-        .map_err(|_| health_error())?;
-        let status = status_from_observations(
-            &release,
-            &backend,
-            machine,
-            network,
-            health,
-            &update_worker,
-            &rollback_worker,
-        )?;
-        serde_json::to_string(&status).map_err(|_| invalid("Status serialization failed"))
+            .unwrap_or_else(|| Err(invalid("Status observation failed")))
     }
 
     async fn start_update(&self) -> Result<(), PlatformError> {
@@ -834,6 +802,44 @@ fn update_from_observations(
     }
 }
 
+async fn observe_status(connection: zbus::Connection) -> Result<String, PlatformError> {
+    let update_worker = observe_worker(&connection, UPDATE_UNIT)
+        .await
+        .map_err(|_| update_unavailable())?;
+    let rollback_worker = observe_worker(&connection, ROLLBACK_UNIT)
+        .await
+        .map_err(|_| rollback_unavailable())?;
+    let release = std::fs::read_to_string("/usr/lib/signallayer/release").map_err(|_| {
+        PlatformError::MetadataUnavailable("Image release metadata is unreadable".into())
+    })?;
+    let machine = observe_machine()?;
+    let (backend, network) = tokio::try_join!(
+        backend_command("/usr/bin/bootc", &["status", "--json"], BACKEND_TIMEOUT),
+        observe_network(&connection)
+    )?;
+    let manager = zbus::Proxy::new(&connection, SYSTEMD_BUS, SYSTEMD_PATH, SYSTEMD_MANAGER)
+        .await
+        .map_err(|_| health_error())?;
+    let health = timeout(Duration::from_secs(3), async {
+        let state: String = manager.get_property("SystemState").await?;
+        let failed: u32 = manager.get_property("NFailedUnits").await?;
+        Ok::<_, zbus::Error>(observed_health(state, failed))
+    })
+    .await
+    .map_err(|_| health_error())?
+    .map_err(|_| health_error())?;
+    let status = status_from_observations(
+        &release,
+        &backend,
+        machine,
+        network,
+        health,
+        &update_worker,
+        &rollback_worker,
+    )?;
+    serde_json::to_string(&status).map_err(|_| invalid("Status serialization failed"))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connection = zbus::connection::Builder::system()?.build().await?;
@@ -843,7 +849,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             PATH,
             CheckedPlatform(Platform {
                 connection: connection.clone(),
-                requests: Semaphore::new(1),
+                status_reads: shared_read::SharedRead::new(),
                 mutation_starts: Semaphore::new(1),
                 remote_management: Semaphore::new(1),
             }),

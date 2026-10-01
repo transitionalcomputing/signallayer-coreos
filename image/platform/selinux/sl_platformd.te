@@ -286,6 +286,12 @@ can_exec(sl_platformd_t, install_exec_t)
 allow sl_platformd_t self:process { fork sigchld signal sigkill };
 allow sl_platformd_t self:fifo_file rw_fifo_file_perms;
 allow sl_platformd_t self:capability { sys_admin sys_ptrace };
+# Fedora 44 bootc captures its findmnt helper's output in a memfd, which is
+# labeled tmpfs_t; these are exactly the permissions the 0.0.3 RC denied.
+gen_require(`
+    type tmpfs_t;
+')
+allow sl_platformd_t tmpfs_t:file { getattr ioctl read write };
 
 # Public, read-only system-bus service plus observed systemd health properties.
 dbus_system_bus_client(sl_platformd_t)
