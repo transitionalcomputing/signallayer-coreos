@@ -1,0 +1,9 @@
+FROM localhost/sl-5cd-platform-build:pass3 AS build
+COPY fixture.c /src/fixture.c
+RUN mkdir -p /out && gcc -O2 -Wall -Wextra -Werror -o /out/sl-phase1-fixture /src/fixture.c
+
+FROM scratch
+COPY --from=build /out/sl-phase1-fixture /usr/bin/sl-phase1-fixture
+COPY --from=build /lib64/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+COPY --from=build /lib64/libc.so.6 /lib64/libc.so.6
+ENTRYPOINT ["/usr/bin/sl-phase1-fixture"]
