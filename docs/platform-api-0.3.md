@@ -372,8 +372,9 @@ reset. Without one, the marker does not exist and stays absent.
   - This crash-equivalence is sufficient: `StartReboot` does not refuse,
     wait for or conflict with remote-management sequences.
   - An update or rollback staged during a sequence does not affect it.
-- **Status reads:** `GetStatus` keeps its own `requests` permit and is not
-  blocked by these methods.
+- **Status reads:** concurrent `GetStatus` calls share one in-flight
+  observation (no caching; a call after it completes starts a new one) and
+  never return `Busy`. They are not blocked by these methods.
 
 ## Authorization
 

@@ -332,6 +332,21 @@ RELEASE_VERSION = "0.0.2"
 RELEASE_IMAGE_REFERENCE = "localhost/signallayer-coreos:0.0.2"
 DEFAULT_REGISTRY_TARGET = "docker://localhost:5000/signallayer-coreos:0.0.1"
 RELEASE_REGISTRY_TARGET = "docker://localhost:5000/signallayer-coreos:0.0.2"
+# Release modes: 0.0.2 (4E) and the 0.0.3 release candidate. Only the
+# identity, the Platform API version and Session1's status schema differ; from
+# schema 0.4, Platform and Session1 must agree on the common schema 0.3 fields.
+RELEASES = {
+    "0.0.2": {"api": "0.2", "session_schema": "0.3", "prefix": "phase4e-acceptance", "phase": "4E"},
+    "0.0.3": {"api": "0.3", "session_schema": "0.4", "prefix": "release-0.0.3-lifecycle", "phase": "0.0.3-RC"},
+}
+GUEST_EXACT_AGREEMENT = 'sys.exit(0 if envelope and a == json.loads(s["data"][0]) == b else 1)'
+GUEST_COMMON_AGREEMENT = """def common(text):
+    session = json.loads(text)
+    facts = session.pop("remote_management", None)
+    if session.get("schema_version") != "0.4" or not isinstance(facts, dict) or sorted(facts) != ["enabled", "enrolled", "listening"] or not all(isinstance(value, bool) for value in facts.values()):
+        return None
+    return dict(session, schema_version="0.3")
+sys.exit(0 if envelope and a == common(s["data"][0]) == b else 1)"""
 BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -345,28 +360,83 @@ def load_boot_qcow2():
     return module
 
 
-def agreement_block(prefix):
+def image_reference(release):
+    return f"localhost/signallayer-coreos:{release}"
+
+
+def registry_target(release):
+    return f"docker://localhost:5000/signallayer-coreos:{release}"
+
+
+def common_session_status(text):
+    """Session1 schema 0.4 reduced to Platform's schema 0.3 fields, after
+    checking remote_management holds exactly its three booleans; else None."""
+    try:
+        session = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(session, dict) or session.get("schema_version") != "0.4":
+        return None
+    facts = session.pop("remote_management", None)
+    if (
+        not isinstance(facts, dict)
+        or sorted(facts) != ["enabled", "enrolled", "listening"]
+        or not all(isinstance(value, bool) for value in facts.values())
+    ):
+        return None
+    return dict(session, schema_version="0.3")
+
+
+def normalize_session_records(records):
+    """Host-side counterpart of the guest's common-field comparison."""
+    normalized = {}
+    for key, record in records.items():
+        if key.endswith("_session") and isinstance(record, dict):
+            output = "invalid Session1 schema 0.4 status"
+            try:
+                envelope = json.loads(record.get("output", ""))
+                common = common_session_status(envelope["data"][0])
+                if common is not None:
+                    output = json.dumps({"type": "s", "data": [json.dumps(common)]})
+            except (ValueError, KeyError, IndexError, TypeError):
+                pass
+            record = dict(record, output=output)
+        normalized[key] = record
+    return normalized
+
+
+def agreement_block(prefix, release="0.0.2"):
     """4D's converged Platform/Session1/Platform read, reused verbatim from
-    guest-reboot-post-probe.sh with only its record prefix changed."""
+    guest-reboot-post-probe.sh with only its record prefix changed (and, from
+    Session1 schema 0.4, the comparison restricted to common fields)."""
     source = (HERE / "guest-reboot-post-probe.sh").read_text()
     if source.count(AGREEMENT_START) != 1 or source.count(AGREEMENT_END) != 1:
         raise RuntimeError("4D agreement block markers are missing or ambiguous")
     start = source.index(AGREEMENT_START)
     end = source.index(AGREEMENT_END) + len(AGREEMENT_END)
-    return source[start:end].replace("post_agree_", prefix)
+    block = source[start:end].replace("post_agree_", prefix)
+    if RELEASES[release]["session_schema"] == "0.4":
+        if block.count(GUEST_EXACT_AGREEMENT) != 1:
+            raise RuntimeError("4D agreement comparison is missing or ambiguous")
+        block = block.replace(GUEST_EXACT_AGREEMENT, GUEST_COMMON_AGREEMENT)
+    return block
 
 
 def compose_release_0_0_2_probe(probe):
+    return compose_release_probe(probe, "0.0.2")
+
+
+def compose_release_probe(probe, release):
     replacements = (
         ('chmod 0700 "$state_dir"\n',
          'chmod 0700 "$state_dir"\n'
          'cat /proc/sys/kernel/random/boot_id >> "$state_dir/boot-sequence"\n'),
         ("    collect seed_corectl corectl status --json\n",
-         "    collect seed_corectl corectl status --json\n" + agreement_block("seed_agree_")),
+         "    collect seed_corectl corectl status --json\n" + agreement_block("seed_agree_", release)),
         ("    collect candidate_corectl corectl status --json\n",
-         "    collect candidate_corectl corectl status --json\n" + agreement_block("candidate_agree_")),
+         "    collect candidate_corectl corectl status --json\n" + agreement_block("candidate_agree_", release)),
         ("collect after_rollback_corectl corectl status --json\n",
-         "collect after_rollback_corectl corectl status --json\n" + agreement_block("after_rollback_agree_")),
+         "collect after_rollback_corectl corectl status --json\n" + agreement_block("after_rollback_agree_", release)),
         # Both reboots use StartReboot. SIGTERM is ignored so corectl's exit
         # status can be recorded if the probe survives the start of shutdown.
         ("    record activation_reboot_requested 'systemctl reboot'\n    systemctl reboot\n",
@@ -382,13 +452,19 @@ def compose_release_0_0_2_probe(probe):
     text = probe.decode()
     for old, new in replacements:
         if text.count(old) != 1:
-            raise RuntimeError(f"0.0.2 probe anchor missing or ambiguous: {old.strip()}")
+            raise RuntimeError(f"{release} probe anchor missing or ambiguous: {old.strip()}")
         text = text.replace(old, new)
     return text.encode()
 
 
 def evaluate_release_0_0_2(evidence):
-    """3F checks with 0.0.2 expectations; the 3F AVC allowlist is unchanged."""
+    return evaluate_release(evidence, "0.0.2")
+
+
+def evaluate_release(evidence, release):
+    """3F checks with release expectations; the 3F AVC allowlist is unchanged."""
+    tag = release.replace(".", "_")
+    api = RELEASES[release]["api"]
     boot_qcow2 = load_boot_qcow2()
 
     def ok(key):
@@ -401,10 +477,10 @@ def evaluate_release_0_0_2(evidence):
     checks.pop("candidate_schema_0_2_idle_states", None)
     try:
         statuses = {suffix: json.loads(text(f"{suffix}_corectl")) for suffix in STATUS_SUFFIXES}
-        checks["release_0_0_2_status_all_boots"] = all(
+        checks[f"release_{tag}_status_all_boots"] = all(
             ok(f"{suffix}_corectl")
             and status["schema_version"] == "0.3"
-            and status["platform_api_version"] == "0.2"
+            and status["platform_api_version"] == api
             for suffix, status in statuses.items()
         )
         candidate = statuses["candidate"]
@@ -413,15 +489,15 @@ def evaluate_release_0_0_2(evidence):
             and candidate["update"]["state"] == "idle"
             and candidate["rollback"]["state"] == "idle"
         )
-        checks["release_0_0_2_identity_all_boots"] = all(
-            status["version"] == RELEASE_VERSION
-            and status["booted"]["image_reference"] == RELEASE_IMAGE_REFERENCE
+        checks[f"release_{tag}_identity_all_boots"] = all(
+            status["version"] == release
+            and status["booted"]["image_reference"] == image_reference(release)
             for status in statuses.values()
         )
     except (KeyError, TypeError, ValueError):
-        checks["release_0_0_2_status_all_boots"] = False
+        checks[f"release_{tag}_status_all_boots"] = False
         checks["candidate_schema_0_3_idle_states"] = False
-        checks["release_0_0_2_identity_all_boots"] = False
+        checks[f"release_{tag}_identity_all_boots"] = False
     checks["one_activation_and_one_rollback_reboot"] = (
         text("activation_reboot_requested")
         == text("rollback_reboot_requested")
@@ -452,6 +528,8 @@ def evaluate_release_0_0_2(evidence):
             for key, value in evidence.items()
             if key.startswith(prefix)
         }
+        if RELEASES[release]["session_schema"] == "0.4":
+            mapped = normalize_session_records(mapped)
         checks[f"{suffix}_platform_session_agree"], details["session_agreement"][suffix] = (
             boot_qcow2.session_agreement(mapped)
         )
@@ -480,16 +558,24 @@ def main():
         action="store_true",
         help="4E: schema 0.3, API 0.2, corectl reboot, and converged Platform/Session1 reads",
     )
+    parser.add_argument(
+        "--release-0-0-3",
+        action="store_true",
+        help="0.0.3 RC: 4E lifecycle with API 0.3; Platform and Session1 schema 0.4 agree on common fields",
+    )
     args = parser.parse_args()
+    if args.release_0_0_2 and args.release_0_0_3:
+        parser.error("choose at most one release mode")
+    release = "0.0.2" if args.release_0_0_2 else "0.0.3" if args.release_0_0_3 else None
     disk = args.disk.resolve(strict=True)
     output = pathlib.Path(__file__).resolve().parents[2] / "image/build/output"
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
-    prefix = "phase4e-acceptance" if args.release_0_0_2 else "phase3f-acceptance"
+    prefix = RELEASES[release]["prefix"] if release else "phase3f-acceptance"
     run = output / f"{prefix}-{stamp}"
     run.mkdir(parents=True)
     probe = pathlib.Path(__file__).with_name("guest-lifecycle-probe.sh").read_bytes()
-    if args.release_0_0_2:
-        probe = compose_release_0_0_2_probe(probe)
+    if release:
+        probe = compose_release_probe(probe, release)
     (run / "probe.sh").write_bytes(probe)
     overlay = run / "complete-lifecycle.qcow2"
     subprocess.run(
@@ -514,7 +600,7 @@ def main():
     )
     (run / "qemu-command.json").write_text(json.dumps(command, indent=2) + "\n")
     report = {
-        "phase": "4E" if args.release_0_0_2 else "3F",
+        "phase": RELEASES[release]["phase"] if release else "3F",
         "result": "FAIL",
         "output": str(run),
         "disk": str(disk),
@@ -538,7 +624,7 @@ def main():
                 "skopeo",
                 "inspect",
                 "--tls-verify=false",
-                RELEASE_REGISTRY_TARGET if args.release_0_0_2 else DEFAULT_REGISTRY_TARGET,
+                registry_target(release) if release else DEFAULT_REGISTRY_TARGET,
             ],
             stdout=target,
             check=True,
@@ -557,9 +643,11 @@ def main():
     (run / "evidence.json").write_text(
         json.dumps(evidence, indent=2, sort_keys=True) + "\n"
     )
-    if args.release_0_0_2:
-        report["release"] = "0.0.2"
-        report["checks"], report["release_0_0_2"] = evaluate_release_0_0_2(evidence)
+    if release:
+        report["release"] = release
+        report["checks"], report["release_" + release.replace(".", "_")] = evaluate_release(
+            evidence, release
+        )
     else:
         report["checks"] = evaluate(evidence)
     report["checks"].update(

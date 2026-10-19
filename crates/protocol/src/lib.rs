@@ -185,7 +185,7 @@ pub enum HealthState {
     Degraded,
 }
 
-#[derive(Debug, zbus::DBusError)]
+#[derive(Debug, Clone, zbus::DBusError)]
 #[zbus(prefix = "org.signallayer.Platform1.Error")]
 pub enum PlatformError {
     BackendUnavailable(String),

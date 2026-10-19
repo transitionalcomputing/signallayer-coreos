@@ -10,63 +10,71 @@ platform capabilities; flavors own applications and the user experience.
 
 ## Developer Preview
 
-**SignalLayer CoreOS 0.0.1 is a Developer Preview, not a production-ready
+**SignalLayer CoreOS 0.0.3 is a Developer Preview, not a production-ready
 release.** The validated platform is x86_64 QEMU/KVM with OVMF UEFI. Secure
 Boot, physical hardware, and other architectures were not validated.
 
 The release implements an OCI-native bootc system image, a bootable qcow2,
-read-only platform status, update staging, explicit-reboot activation, and
-manual rollback selection. It does not provide an installer, login/password/SSH
-provisioning, a production update-registry configuration, automatic reboot, or
-automatic rollback.
+read-only platform status, fixed update/reboot/rollback operations, a trusted
+local appliance console, local authentication and LAN-only read-only remote
+management. It does not provide an installer, Linux login/SSH provisioning, a
+production update-registry configuration, remote machine mutation, automatic
+reboot, or automatic rollback.
 
-## Download 0.0.1
+## Download 0.0.3
 
-The [v0.0.1 GitHub Release](https://github.com/transitionalcomputing/signallayer-coreos/releases/tag/v0.0.1)
+The [v0.0.3 GitHub Release](https://github.com/transitionalcomputing/signallayer-coreos/releases/tag/v0.0.3)
 contains the published artifacts:
 
 | Artifact | Purpose |
 | --- | --- |
-| [`signallayer-coreos-0.0.1-x86_64.qcow2`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.1/signallayer-coreos-0.0.1-x86_64.qcow2) | Bootable x86_64 evaluation disk for QEMU/KVM with OVMF UEFI |
-| [`signallayer-coreos-0.0.1-x86_64.oci.tar`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.1/signallayer-coreos-0.0.1-x86_64.oci.tar) | OCI archive containing the bootc system image |
-| [`SHA256SUMS`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.1/SHA256SUMS) | SHA-256 integrity values for release files |
-| [`PROVENANCE.md`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.1/PROVENANCE.md) | Source, builder, artifact identity, and final validation record |
+| [`signallayer-coreos-0.0.3-x86_64.qcow2`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.3/signallayer-coreos-0.0.3-x86_64.qcow2) | Bootable x86_64 evaluation disk for QEMU/KVM with OVMF UEFI |
+| [`signallayer-coreos-0.0.3-x86_64.oci.tar`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.3/signallayer-coreos-0.0.3-x86_64.oci.tar) | OCI archive containing the bootc system image |
+| [`SHA256SUMS`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.3/SHA256SUMS) | SHA-256 integrity values for release files |
+| [`PROVENANCE.md`](https://github.com/transitionalcomputing/signallayer-coreos/releases/download/v0.0.3/PROVENANCE.md) | Source, builder, artifact identity, and final validation record |
 
 Release artifacts are not cryptographically signed. Verify the downloaded
 qcow2 or OCI archive against `SHA256SUMS`, then see
-[Evaluate 0.0.1](docs/evaluating-0.0.1.md) for the intentionally limited public
-evaluation workflow.
+[the 0.0.3 release notes](docs/releases/0.0.3.md) for the validated boundary and
+known limitations.
 
-## Implemented in 0.0.1
+## Implemented in 0.0.3
 
 - OCI-native bootc system image and bootable x86_64 qcow2.
 - UEFI boot under QEMU/KVM into systemd with NetworkManager networking.
 - Immutable, read-only system root with composefs enabled.
-- Confined `sl-platformd` and `corectl status`, using Platform API version 0.1
-  and status schema 0.2.
+- Confined Platform API 0.3 and `corectl`, with Platform status schema 0.3 and
+  Session1 schema 0.4.
 - Root-only `corectl update` staging through a fixed systemd worker.
-- Explicit operator reboot into the staged deployment.
+- Root-only explicit operator reboot into the staged deployment.
 - Root-only `corectl rollback` selection of the retained deployment, followed
   by an explicit operator reboot.
 - A complete fresh A -> staged B -> booted B -> offline rollback -> exact A
   lifecycle validated under genuine KVM.
+- A trusted, unprivileged appliance console on `tty1` and `ttyS0`, replacing
+  generic login prompts without exposing a shell or general command execution.
+- Unprivileged local authentication, one-time pairing, password recovery and
+  remote-management enrollment lifecycle.
+- Authenticated, LAN-only, read-only HTTPS status with bundled web assets,
+  self-signed TLS identity and fail-closed listener invalidation.
 
 The platform boundary is `corectl` -> system D-Bus -> confined `sl-platformd`
 -> fixed systemd workers -> bootc. Mutation requests accept no caller-controlled
 command, unit name, or bootc argument.
 
-The qcow2 retains `localhost/signallayer-coreos:0.0.1` as its bootc origin.
+The qcow2 retains `localhost/signallayer-coreos:0.0.3` as its bootc origin.
 Lifecycle validation used a local development registry fixture; public registry
 origin configuration, TLS, and authentication were not validated. See the
-[0.0.1 release notes](docs/releases/0.0.1.md) for the complete release boundary.
+[0.0.3 release notes](docs/releases/0.0.3.md) for the complete release boundary.
 
 ## Documentation
 
 | Start with | Description |
 | --- | --- |
-| [Evaluate 0.0.1](docs/evaluating-0.0.1.md) | Choose, verify, and minimally boot the published Developer Preview artifacts |
-| [0.0.1 release notes](docs/releases/0.0.1.md) | Validated capabilities, artifact identities, and limitations |
-| [0.0.1 provenance](docs/releases/0.0.1-provenance.md) | Final source, build, artifact, and validation identities |
+| [0.0.3 release notes](docs/releases/0.0.3.md) | Validated capabilities, artifact identities, acceptance results and limitations |
+| [0.0.3 provenance](docs/releases/0.0.3-provenance.md) | Final source, build, artifact and validation identities |
+| [0.0.3 remote-management contract](docs/remote-management-0.0.3.md) | Frozen authority, authentication, network-exposure and deferred-hardening boundary |
+| [0.0.3 local console](docs/local-console-0.0.3.md) | Trusted-console authority, TTY ownership and failure behavior |
 
 Deeper technical documentation:
 
