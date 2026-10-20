@@ -29,6 +29,45 @@ def checksum(path):
     return digest.hexdigest()
 
 
+def capture_stable_framebuffer(qmp, path, attempts=6, delay=0.25):
+    """Prime QEMU's display surface and retain two matching screendumps."""
+    previous = None
+    for _ in range(attempts):
+        qmp.command("screendump", {"filename": str(path)})
+        current = checksum(path)
+        if current == previous:
+            return current
+        previous = current
+        time.sleep(delay)
+    return None
+
+
+def graphical_response_observed(ready, before_input, after_input):
+    """Require a complete, changed frame after the deliberate invalid input."""
+    if not all(path.exists() and path.stat().st_size for path in
+               (ready, before_input, after_input)):
+        return False
+    after = checksum(after_input)
+    return after not in {checksum(ready), checksum(before_input)}
+
+
+def console_lifecycle_serial(serial):
+    """Return output while the appliance console is running and its end state."""
+    ui_offset = serial.find("SignalLayer CoreOS")
+    if ui_offset < 0:
+        return "", False
+    stopped = set()
+    relevant = []
+    units = ("sl-console@tty1.service", "sl-console@ttyS0.service")
+    for line in serial[ui_offset:].splitlines(keepends=True):
+        relevant.append(line)
+        if "Stopped" in line:
+            stopped.update(unit for unit in units if unit in line)
+        if len(stopped) == len(units):
+            break
+    return "".join(relevant), len(stopped) == len(units)
+
+
 def records(path):
     found = {}
     if path.exists():
@@ -149,7 +188,7 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
         return evidence.get(key, {}).get("exit_code") == 0
 
     ui_offset = serial.find("SignalLayer CoreOS")
-    post_ui_serial = serial[ui_offset:] if ui_offset >= 0 else ""
+    lifecycle_serial, lifecycle_complete = console_lifecycle_serial(serial)
     audit_console_patterns = (
         "kauditd_printk_skb", "invalid_bootcinstall_testlabel_t",
         "selinux_err", "invalid_context", "avc:", " audit[", " audit:",
@@ -184,8 +223,9 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
         "auditd_log_retained": ok("auditd_log_after_status")
         and "invalid_bootcinstall_testlabel_t" in value("auditd_log_after_status")
         and 'name="objects"' in value("auditd_log_after_status"),
-        "audit_not_on_serial": ui_offset >= 0
-        and not any(pattern in post_ui_serial.lower() for pattern in audit_console_patterns),
+        "audit_not_on_serial": ui_offset >= 0 and lifecycle_complete
+        and not any(pattern in lifecycle_serial.lower() for pattern in audit_console_patterns),
+        "console_lifecycle_complete": lifecycle_complete,
         "serial_ui_rendered": ui_offset >= 0,
         "notice_hidden_from_serial": "SL_KERN_NOTICE_HIDDEN" not in serial,
         "warnings_and_errors_visible": "SL_KERN_WARNING_VISIBLE" in serial
@@ -1490,6 +1530,7 @@ StandardError={output}
             handles.append((run / name).open("wb"))
         process = subprocess.Popen(command, stdout=handles[0], stderr=handles[1])
         console_captures = set()
+        stable_screenshots = {}
         console_input_sent = False
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
@@ -1505,32 +1546,22 @@ StandardError={output}
                     ("audit_stimulus_complete", "tty1-after-audit.ppm"),
                 ):
                     if evidence_key in evidence and evidence_key not in console_captures:
-                        qmp.command("screendump", {"filename": str(run / filename)})
+                        stable_screenshots[filename] = capture_stable_framebuffer(
+                            qmp, run / filename) is not None
                         console_captures.add(evidence_key)
                 if "sentinels_emitted" in evidence and "sentinels_emitted" not in console_captures:
                     time.sleep(1)
-                    qmp.command("screendump", {"filename": str(run / "tty1-sentinels.ppm")})
+                    stable_screenshots["tty1-sentinels.ppm"] = capture_stable_framebuffer(
+                        qmp, run / "tty1-sentinels.ppm") is not None
+                    qmp.command("send-key", {"keys": [{"type": "qcode", "data": "x"}]})
                     qmp.command("send-key", {"keys": [{"type": "qcode", "data": "ret"}]})
                     console_input_sent = True
                     time.sleep(5)
-                    qmp.command("screendump", {"filename": str(run / "tty1-after-input.ppm")})
+                    stable_screenshots["tty1-after-input.ppm"] = capture_stable_framebuffer(
+                        qmp, run / "tty1-after-input.ppm") is not None
                     console_captures.add("sentinels_emitted")
             if ("post_complete" if args.phase4d else "complete") in evidence:
-                if args.console_audit:
-                    serial = (run / "serial.log").read_text(errors="replace")
-                    auth_hash = checksum(Path(__file__).resolve().parents[2] / "image/platform/org.signallayer.Auth1.conf")
-                    platform_hash = checksum(Path(__file__).resolve().parents[2] / "image/platform/org.signallayer.Platform1.conf")
-                    report["checks"] = evaluate_console_audit(
-                        evidence, serial, auth_hash, platform_hash)
-                    screenshots = {}
-                    for filename in ("tty1-ready.ppm", "tty1-after-audit.ppm",
-                                     "tty1-sentinels.ppm", "tty1-after-input.ppm"):
-                        path = run / filename
-                        screenshots[filename] = checksum(path) if path.exists() else None
-                    report["screenshots"] = screenshots
-                    report["checks"]["framebuffer_evidence_captured"] = all(screenshots.values())
-                    report["checks"]["graphical_input_delivered"] = console_input_sent
-                else:
+                if not args.console_audit:
                     report["checks"] = evaluate(evidence, expected_release, expected_manifest)
                 if args.phase3a:
                     report["checks"].update(evaluate_platform(
@@ -1575,6 +1606,36 @@ StandardError={output}
             report["guest_powered_down"] = False
             qmp.command("quit")
             process.wait(timeout=10)
+        if args.console_audit:
+            serial = (run / "serial.log").read_text(errors="replace")
+            auth_hash = checksum(Path(__file__).resolve().parents[2] /
+                                 "image/platform/org.signallayer.Auth1.conf")
+            platform_hash = checksum(Path(__file__).resolve().parents[2] /
+                                     "image/platform/org.signallayer.Platform1.conf")
+            report["checks"] = evaluate_console_audit(
+                evidence, serial, auth_hash, platform_hash)
+            report["checks"]["clean_shutdown"] = report["guest_powered_down"]
+            screenshot_paths = {
+                filename: run / filename for filename in (
+                    "tty1-ready.ppm", "tty1-after-audit.ppm",
+                    "tty1-sentinels.ppm", "tty1-after-input.ppm")
+            }
+            report["screenshots"] = {
+                filename: checksum(path) if path.exists() else None
+                for filename, path in screenshot_paths.items()
+            }
+            report["checks"]["framebuffer_evidence_captured"] = (
+                all(report["screenshots"].values())
+                and all(stable_screenshots.get(filename, False)
+                        for filename in screenshot_paths)
+            )
+            report["checks"]["graphical_input_command_sent"] = console_input_sent
+            report["checks"]["graphical_response_observed"] = (
+                console_input_sent and graphical_response_observed(
+                    screenshot_paths["tty1-ready.ppm"],
+                    screenshot_paths["tty1-after-audit.ppm"],
+                    screenshot_paths["tty1-after-input.ppm"])
+            )
         report["result"] = "PASS" if all(report["checks"].values()) else "FAIL"
     except (OSError, ValueError, KeyError, TypeError, RuntimeError, tarfile.TarError, subprocess.SubprocessError) as error:
         report["error"] = str(error)

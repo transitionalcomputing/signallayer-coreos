@@ -1,6 +1,7 @@
 """Focused tests for the 0.0.3.1 console/audit evidence evaluator."""
 import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -59,7 +60,9 @@ def fixture():
     }
     for index in range(1, 6):
         evidence[f"session_status_{index}"] = record("status")
-    serial = "SignalLayer CoreOS\nSL_KERN_WARNING_VISIBLE\nSL_KERN_ERROR_VISIBLE\n"
+    serial = ("SignalLayer CoreOS\nSL_KERN_WARNING_VISIBLE\nSL_KERN_ERROR_VISIBLE\n"
+              "Stopped sl-console@tty1.service\n"
+              "Stopped sl-console@ttyS0.service\n")
     return evidence, serial
 
 
@@ -72,14 +75,32 @@ class ConsoleAuditEvaluatorTests(unittest.TestCase):
 
     def test_audit_on_serial_fails_isolation(self):
         evidence, serial = fixture()
-        serial += 'avc: denied { write } comm="bootc"\n'
+        serial = serial.replace("Stopped sl-console@tty1.service",
+                                'avc: denied { write } comm="bootc"\n'
+                                "Stopped sl-console@tty1.service")
         checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
         self.assertFalse(checks["audit_not_on_serial"])
 
     def test_callback_suppression_after_ui_fails_isolation(self):
         evidence, serial = fixture()
+        serial = serial.replace("Stopped sl-console@tty1.service",
+                                "kauditd_printk_skb: 23 callbacks suppressed\n"
+                                "Stopped sl-console@tty1.service")
+        checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
+        self.assertFalse(checks["audit_not_on_serial"])
+
+    def test_shutdown_audit_after_console_stop_does_not_fail_isolation(self):
+        evidence, serial = fixture()
         serial += "kauditd_printk_skb: 23 callbacks suppressed\n"
         checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
+        self.assertTrue(checks["console_lifecycle_complete"])
+        self.assertTrue(checks["audit_not_on_serial"])
+
+    def test_missing_console_stop_boundary_fails_isolation(self):
+        evidence, serial = fixture()
+        serial = serial.replace("Stopped sl-console@ttyS0.service\n", "")
+        checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
+        self.assertFalse(checks["console_lifecycle_complete"])
         self.assertFalse(checks["audit_not_on_serial"])
 
     def test_audit_before_ui_does_not_fail_isolation(self):
@@ -87,6 +108,46 @@ class ConsoleAuditEvaluatorTests(unittest.TestCase):
         serial = "kauditd_printk_skb: 3 callbacks suppressed\n" + serial
         checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
         self.assertTrue(checks["audit_not_on_serial"])
+
+    def test_identical_frame_after_input_is_not_a_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("ready", "before", "after")]
+            paths[0].write_bytes(b"full menu")
+            paths[1].write_bytes(b"fragment")
+            paths[2].write_bytes(b"fragment")
+            self.assertFalse(boot.graphical_response_observed(*paths))
+
+    def test_distinct_invalid_input_frame_is_a_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("ready", "before", "after")]
+            paths[0].write_bytes(b"full menu")
+            paths[1].write_bytes(b"fragment")
+            paths[2].write_bytes(b"unknown selection")
+            self.assertTrue(boot.graphical_response_observed(*paths))
+
+    def test_screendump_waits_for_two_matching_frames(self):
+        class FakeQmp:
+            def __init__(self):
+                self.frames = iter((b"partial", b"full", b"full"))
+                self.calls = 0
+
+            def command(self, name, arguments):
+                self.calls += 1
+                Path(arguments["filename"]).write_bytes(next(self.frames))
+
+        with tempfile.TemporaryDirectory() as directory:
+            qmp = FakeQmp()
+            path = Path(directory) / "frame.ppm"
+            result = boot.capture_stable_framebuffer(qmp, path, delay=0)
+            self.assertEqual(result, boot.checksum(path))
+            self.assertEqual(qmp.calls, 3)
+            self.assertEqual(path.read_bytes(), b"full")
+
+    def test_console_evaluation_occurs_after_powerdown(self):
+        source = (HERE / "boot-qcow2.py").read_text()
+        main = source[source.index("def main()") :]
+        self.assertLess(main.index('qmp.command("system_powerdown")'),
+                        main.rindex("evaluate_console_audit("))
 
     def test_missing_persistent_audit_fails(self):
         evidence, serial = fixture()
