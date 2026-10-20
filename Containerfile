@@ -44,7 +44,12 @@ ARG BUILD_ID=unknown
 # Keep the kernel audit unicast path connected. Without auditd, kauditd falls
 # back to printk; its generic rate-limit summaries are KERN_WARNING and can
 # overwrite the appliance consoles even when notice records are filtered.
-RUN dnf -y install --setopt=install_weak_deps=False audit && dnf clean all
+# Remove only transaction-generated caches, logs, and runtime state; the
+# immutable image neither needs nor owns their build-time contents.
+RUN dnf -y install --setopt=install_weak_deps=False audit && \
+    dnf clean all && \
+    rm -rf -- /run/dnf /var/cache/libdnf5 /var/lib/dnf/repos && \
+    rm -f -- /var/log/dnf5.log /var/cache/ldconfig/aux-cache
 
 LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
