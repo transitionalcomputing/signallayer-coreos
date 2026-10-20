@@ -139,6 +139,84 @@ def evaluate(evidence, expected_release, expected_manifest):
     return checks
 
 
+
+def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_hash):
+    """Evaluate the focused 0.0.3.1 console/audit regression."""
+    def value(key):
+        return evidence.get(key, {}).get("output", "").strip()
+
+    def ok(key):
+        return evidence.get(key, {}).get("exit_code") == 0
+
+    checks = {
+        "probe_complete": ok("complete"),
+        "kernel_argument_effective": ok("cmdline") and "loglevel=5" in value("cmdline").split(),
+        "console_routes_preserved": ok("cmdline") and "console=tty0" in value("cmdline").split()
+        and "console=ttyS0,115200n8" in value("cmdline").split(),
+        "console_loglevel_five": ok("kernel_printk") and value("kernel_printk").split()[0] == "5",
+        "selinux_enforcing": all(ok(key) and value(key) == "Enforcing"
+                                  for key in ("selinux_before", "selinux_after")),
+        "system_healthy": all(ok(key) and value(key) == "running"
+                              for key in ("system_state_before", "system_state_after"))
+        and all(ok(key) and not value(key)
+                for key in ("failed_units_before", "failed_units_after")),
+        "persistent_audit_enabled": ok("persistent_journal") and ok("journald_config")
+        and "Storage=persistent" in value("journald_config")
+        and "ForwardToConsole=yes" not in value("journald_config"),
+        "status_refreshes_succeeded": all(ok(f"session_status_{index}")
+                                           for index in range(1, 6)),
+        "audit_probe_retained": ok("audit_events_after_status")
+        and "invalid_bootcinstall_testlabel_t" in value("audit_events_after_status")
+        and 'scontext=system_u:system_r:sl_platformd_t:s0' in value("audit_events_after_status")
+        and 'name="objects"' in value("audit_events_after_status")
+        and "denied  { write }" in value("audit_events_after_status"),
+        "audit_not_on_serial": "invalid_bootcinstall_testlabel_t" not in serial
+        and not any("avc:" in line.lower() and "denied" in line.lower()
+                    for line in serial.splitlines()),
+        "serial_ui_rendered": "SignalLayer CoreOS" in serial,
+        "notice_hidden_from_serial": "SL_KERN_NOTICE_HIDDEN" not in serial,
+        "warnings_and_errors_visible": "SL_KERN_WARNING_VISIBLE" in serial
+        and "SL_KERN_ERROR_VISIBLE" in serial,
+        "sentinels_retained_in_journal": ok("sentinel_journal")
+        and all(name in value("sentinel_journal") for name in (
+            "SL_KERN_NOTICE_HIDDEN", "SL_KERN_WARNING_VISIBLE", "SL_KERN_ERROR_VISIBLE")),
+        "auth_policy_unchanged": ok("auth_policy")
+        and value("auth_policy").split()[0] == auth_policy_hash,
+        "platform_policy_unchanged": ok("platform_policy")
+        and value("platform_policy").split()[0] == platform_policy_hash,
+    }
+    units = value("console_units")
+    checks["console_units_unchanged"] = ok("console_units") and all(
+        units.count(item) == count for item, count in {
+            "ActiveState=active": 2, "SubState=running": 2,
+            "User=sl-console": 2, "Group=sl-console": 2,
+            "StandardInput=tty-force": 2, "StandardOutput=tty": 2,
+            "StandardError=journal": 2, "CapabilityBoundingSet=": 2,
+            "AmbientCapabilities=": 2, "NoNewPrivileges=yes": 2,
+        }.items()) and all(path in units for path in ("TTYPath=/dev/tty1", "TTYPath=/dev/ttyS0"))
+    processes = value("console_processes").splitlines()
+    checks["console_processes_confined"] = ok("console_processes") and len(processes) == 2 \
+        and all("system_u:system_r:sl_console_t:s0" in line and "/usr/bin/sl-console" in line
+                for line in processes)
+    caps = value("console_capabilities")
+    checks["console_no_effective_capabilities"] = ok("console_capabilities") \
+        and caps.count("CapEff:\t0000000000000000") == 2
+    try:
+        mounts = {}
+        def visit(items):
+            for item in items:
+                mounts[item["target"]] = item
+                visit(item.get("children", []))
+        visit(json.loads(value("mounts"))["filesystems"])
+        checks["immutable_mounts"] = all("ro" in mounts[path]["options"].split(",")
+                                         for path in ("/", "/sysroot"))
+    except (ValueError, KeyError, TypeError):
+        checks["immutable_mounts"] = False
+    checks["immutable_writes_rejected"] = all(
+        not ok(key) and "Read-only file system" in value(key)
+        for key in ("root_write", "usr_write"))
+    return checks
+
 def evaluate_phase5e(evidence, expected_release):
     def text(key):
         return evidence.get(key, {}).get("output", "").strip()
@@ -1189,8 +1267,11 @@ class QMP:
             log.write(json.dumps(message) + "\n")
         return message
 
-    def command(self, name):
-        self.stream.write(json.dumps({"execute": name, "id": name}).encode() + b"\n")
+    def command(self, name, arguments=None):
+        request = {"execute": name, "id": name}
+        if arguments is not None:
+            request["arguments"] = arguments
+        self.stream.write(json.dumps(request).encode() + b"\n")
         while True:
             message = self.read()
             if message.get("id") == name:
@@ -1212,6 +1293,7 @@ def main():
     parser.add_argument("--phase4c", action="store_true", help="Retain Phase 4B checks and validate status schema 0.3 management facts")
     parser.add_argument("--phase4d", action="store_true", help="Retain Phase 4C checks, Platform API 0.2, and one real in-guest reboot")
     parser.add_argument("--phase5e", action="store_true", help="Validate the integrated CoreOS 0.0.3 appliance runtime")
+    parser.add_argument("--console-audit", action="store_true", help="Run the focused 0.0.3.1 visible-console audit regression")
     parser.add_argument("--policy-tools-image", default="localhost/slit-policy-tools:phase3b", help="Native setools build-stage image for analyzing the guest's loaded policy")
     parser.add_argument("--source-release", type=Path)
     parser.add_argument("--source-image", type=Path)
@@ -1233,8 +1315,10 @@ def main():
         args.phase3a = True
     output = Path(__file__).resolve().parents[2] / "image/build/output"
     output.mkdir(parents=True, exist_ok=True)
-    run = Path(tempfile.mkdtemp(prefix="phase5e-" if args.phase5e else "phase4d-" if args.phase4d else "phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-", dir=output))
-    report = {"phase": "5E" if args.phase5e else "4D" if args.phase4d else "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B", "result": "FAIL", "output": str(run), "checks": {}}
+    phase = "0.0.3.1-console-audit" if args.console_audit else "5E" if args.phase5e else "4D" if args.phase4d else "4C" if args.phase4c else "4B" if args.phase4b else "3B" if args.phase3b else "3A" if args.phase3a else "2B"
+    prefix = "console-audit-" if args.console_audit else "phase5e-" if args.phase5e else "phase4d-" if args.phase4d else "phase4c-" if args.phase4c else "phase4b-" if args.phase4b else "phase3b-" if args.phase3b else "phase3a-" if args.phase3a else "phase2b-"
+    run = Path(tempfile.mkdtemp(prefix=prefix, dir=output))
+    report = {"phase": phase, "result": "FAIL", "output": str(run), "checks": {}}
     process = None
     qmp = None
     disk_hash = None
@@ -1282,7 +1366,12 @@ def main():
         shutil.copyfile(args.ovmf_vars, run / "OVMF_VARS.fd")
         overlay = run / "boot.qcow2"
         subprocess.run(["qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", str(disk), str(overlay)], check=True)
-        probe = Path(__file__).with_name("guest-probe.sh").read_text()
+        if args.console_audit:
+            console_probe = Path(__file__).with_name("guest-console-audit-regression.sh")
+            probe = console_probe.read_text()
+            report["console_audit_probe_sha256"] = checksum(console_probe)
+        else:
+            probe = Path(__file__).with_name("guest-probe.sh").read_text()
         marker = "printf 'complete\\t0\\tZG9uZQ==\\n' >&3"
         if args.phase3a:
             extension = Path(__file__).with_name("guest-platform-probe.sh")
@@ -1351,9 +1440,9 @@ After=multi-user.target NetworkManager.service
 Type=simple
 ImportCredential=slprobe.sh
 ExecStart=/usr/bin/bash %d/slprobe.sh
-StandardOutput=journal+console
-StandardError=journal+console
-"""
+StandardOutput={output}
+StandardError={output}
+""".format(output="journal" if args.console_audit else "journal+console")
         credentials = {
             "systemd.extra-unit.slprobe.service": unit,
             "systemd.unit-dropin.multi-user.target": "[Unit]\nWants=slprobe.service\n",
@@ -1387,6 +1476,8 @@ StandardError=journal+console
         for name in ("qemu.stdout", "qemu.stderr"):
             handles.append((run / name).open("wb"))
         process = subprocess.Popen(command, stdout=handles[0], stderr=handles[1])
+        console_captures = set()
+        console_input_sent = False
         deadline = time.monotonic() + args.timeout
         while time.monotonic() < deadline:
             if process.poll() is not None:
@@ -1395,8 +1486,39 @@ StandardError=journal+console
                 qmp = QMP(run / "qmp.sock", run / "qmp.jsonl")
                 report["qmp_boot_status"] = qmp.command("query-status")
             evidence = records(run / "guest-evidence.tsv")
+            if args.console_audit and qmp is not None:
+                for evidence_key, filename in (
+                    ("console_ready", "tty1-ready.ppm"),
+                    ("audit_stimulus_complete", "tty1-after-audit.ppm"),
+                ):
+                    if evidence_key in evidence and evidence_key not in console_captures:
+                        qmp.command("screendump", {"filename": str(run / filename)})
+                        console_captures.add(evidence_key)
+                if "sentinels_emitted" in evidence and "sentinels_emitted" not in console_captures:
+                    time.sleep(1)
+                    qmp.command("screendump", {"filename": str(run / "tty1-sentinels.ppm")})
+                    qmp.command("send-key", {"keys": [{"type": "qcode", "data": "ret"}]})
+                    console_input_sent = True
+                    time.sleep(5)
+                    qmp.command("screendump", {"filename": str(run / "tty1-after-input.ppm")})
+                    console_captures.add("sentinels_emitted")
             if ("post_complete" if args.phase4d else "complete") in evidence:
-                report["checks"] = evaluate(evidence, expected_release, expected_manifest)
+                if args.console_audit:
+                    serial = (run / "serial.log").read_text(errors="replace")
+                    auth_hash = checksum(Path(__file__).resolve().parents[2] / "image/platform/org.signallayer.Auth1.conf")
+                    platform_hash = checksum(Path(__file__).resolve().parents[2] / "image/platform/org.signallayer.Platform1.conf")
+                    report["checks"] = evaluate_console_audit(
+                        evidence, serial, auth_hash, platform_hash)
+                    screenshots = {}
+                    for filename in ("tty1-ready.ppm", "tty1-after-audit.ppm",
+                                     "tty1-sentinels.ppm", "tty1-after-input.ppm"):
+                        path = run / filename
+                        screenshots[filename] = checksum(path) if path.exists() else None
+                    report["screenshots"] = screenshots
+                    report["checks"]["framebuffer_evidence_captured"] = all(screenshots.values())
+                    report["checks"]["graphical_input_delivered"] = console_input_sent
+                else:
+                    report["checks"] = evaluate(evidence, expected_release, expected_manifest)
                 if args.phase3a:
                     report["checks"].update(evaluate_platform(
                         evidence, expected_release, "0.3" if args.phase4c else "0.2"))
