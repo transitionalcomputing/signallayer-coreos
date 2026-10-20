@@ -34,7 +34,8 @@ write_probe() {
 for (( i=0; i<60; i++ )); do
     [[ $(systemctl is-active multi-user.target 2>/dev/null) == active ]] && \
       [[ $(systemctl is-active sl-console@tty1.service 2>/dev/null) == active ]] && \
-      [[ $(systemctl is-active sl-console@ttyS0.service 2>/dev/null) == active ]] && break
+      [[ $(systemctl is-active sl-console@ttyS0.service 2>/dev/null) == active ]] && \
+      [[ $(systemctl is-active auditd.service 2>/dev/null) == active ]] && break
     sleep 1
 done
 sleep 8
@@ -50,6 +51,8 @@ collect console_processes ps --no-headers -o pid,user,tty,label,args -C sl-conso
 collect console_capabilities sh -c 'for p in $(pgrep -x sl-console); do printf "%s " "$p"; grep -E "^Cap(Inh|Prm|Eff|Bnd|Amb):" "/proc/$p/status" | tr "\n" " "; echo; done'
 collect journald_config systemd-analyze cat-config systemd/journald.conf
 collect persistent_journal test -d /var/log/journal
+collect auditd_state systemctl is-active auditd.service
+collect audit_status auditctl -s
 mark console_ready
 sleep 5
 
@@ -59,6 +62,7 @@ for i in 1 2 3 4 5; do
 done
 sleep 2
 collect audit_events_after_status journalctl --boot --no-pager --output=short-monotonic _TRANSPORT=audit
+collect auditd_log_after_status cat /var/log/audit/audit.log
 mark audit_stimulus_complete
 sleep 5
 

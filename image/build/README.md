@@ -78,8 +78,11 @@ and fixed random seed define repeatable inputs, not byte-identical disk files.
 
 `qcow2.toml` requests GPT, a minimum 32 GiB disk and the existing graphical and
 serial consoles. It sets `loglevel=5` so kernel warnings and errors remain visible
-without routing notice-level audit traffic over the appliance UI. It adds no
-software, account, password, SSH configuration or service. Access credentials
+without routing notice-level audit traffic over the appliance UI. The OCI image
+runs Fedora's audit daemon so the kernel has its intended audit unicast consumer;
+this prevents the no-daemon printk fallback while persistent journal audit
+collection remains available. The disk blueprint adds no software, account,
+password, SSH configuration or service. Access credentials
 remain unprovisioned; this is console output configuration for a development
 disk, not a login or boot acceptance claim. The OCI image is both the payload
 and default buildroot. Image Builder/bootc performs installation, partitioning,

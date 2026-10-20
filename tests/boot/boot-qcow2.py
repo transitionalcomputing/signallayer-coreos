@@ -148,6 +148,13 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
     def ok(key):
         return evidence.get(key, {}).get("exit_code") == 0
 
+    ui_offset = serial.find("SignalLayer CoreOS")
+    post_ui_serial = serial[ui_offset:] if ui_offset >= 0 else ""
+    audit_console_patterns = (
+        "kauditd_printk_skb", "invalid_bootcinstall_testlabel_t",
+        "selinux_err", "invalid_context", "avc:", " audit[", " audit:",
+    )
+
     checks = {
         "probe_complete": ok("complete"),
         "kernel_argument_effective": ok("cmdline") and "loglevel=5" in value("cmdline").split(),
@@ -163,6 +170,10 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
         "persistent_audit_enabled": ok("persistent_journal") and ok("journald_config")
         and "Storage=persistent" in value("journald_config")
         and "ForwardToConsole=yes" not in value("journald_config"),
+        "audit_daemon_active": ok("auditd_state") and value("auditd_state") == "active"
+        and ok("audit_status") and "enabled 1" in value("audit_status")
+        and any(line.startswith("pid ") and line != "pid 0"
+                for line in value("audit_status").splitlines()),
         "status_refreshes_succeeded": all(ok(f"session_status_{index}")
                                            for index in range(1, 6)),
         "audit_probe_retained": ok("audit_events_after_status")
@@ -170,10 +181,12 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
         and 'scontext=system_u:system_r:sl_platformd_t:s0' in value("audit_events_after_status")
         and 'name="objects"' in value("audit_events_after_status")
         and "denied  { write }" in value("audit_events_after_status"),
-        "audit_not_on_serial": "invalid_bootcinstall_testlabel_t" not in serial
-        and not any("avc:" in line.lower() and "denied" in line.lower()
-                    for line in serial.splitlines()),
-        "serial_ui_rendered": "SignalLayer CoreOS" in serial,
+        "auditd_log_retained": ok("auditd_log_after_status")
+        and "invalid_bootcinstall_testlabel_t" in value("auditd_log_after_status")
+        and 'name="objects"' in value("auditd_log_after_status"),
+        "audit_not_on_serial": ui_offset >= 0
+        and not any(pattern in post_ui_serial.lower() for pattern in audit_console_patterns),
+        "serial_ui_rendered": ui_offset >= 0,
         "notice_hidden_from_serial": "SL_KERN_NOTICE_HIDDEN" not in serial,
         "warnings_and_errors_visible": "SL_KERN_WARNING_VISIBLE" in serial
         and "SL_KERN_ERROR_VISIBLE" in serial,

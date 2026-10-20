@@ -41,6 +41,11 @@ FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c
 ARG SOURCE_REVISION=unknown
 ARG BUILD_ID=unknown
 
+# Keep the kernel audit unicast path connected. Without auditd, kauditd falls
+# back to printk; its generic rate-limit summaries are KERN_WARNING and can
+# overwrite the appliance consoles even when notice records are filtered.
+RUN dnf -y install --setopt=install_weak_deps=False audit && dnf clean all
+
 LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
       org.opencontainers.image.version="0.0.3" \
@@ -273,6 +278,10 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
           /usr/share/selinux/devel/include/distributed \
           /usr/share/selinux/devel/include /usr/share/selinux/devel
 RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
+    test -e /usr/lib/systemd/system/auditd.service && \
+    { test -L /usr/lib/systemd/system/multi-user.target.wants/auditd.service || \
+      ln -s ../auditd.service /usr/lib/systemd/system/multi-user.target.wants/auditd.service; } && \
+    test "$(readlink /usr/lib/systemd/system/multi-user.target.wants/auditd.service)" = ../auditd.service && \
     ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && \
     ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && \
     ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \
