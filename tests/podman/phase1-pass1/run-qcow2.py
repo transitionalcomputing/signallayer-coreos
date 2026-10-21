@@ -128,7 +128,7 @@ def _key_values(evidence, key):
 def _audit_messages(evidence):
     record = _record(evidence, "audit")
     output = record["output"].strip()
-    if record["exit_code"] == 1 and output == "-- No entries --":
+    if record["exit_code"] == 1 and output in {"", "-- No entries --"}:
         return True, []
     if record["exit_code"] != 0 or not output:
         return False, []

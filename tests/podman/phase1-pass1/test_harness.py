@@ -243,9 +243,13 @@ class HarnessTests(unittest.TestCase):
         self.assertIn("evidence_commands_valid", result["failed"])
 
     def test_empty_avc_query_is_valid_evidence(self):
-        result = RUNNER.evaluate(good_report(), GOOD_SERIAL)
-        self.assertTrue(result["checks"]["journal_avc_evidence_valid"])
-        self.assertTrue(result["checks"]["evidence_commands_valid"])
+        for output in ("", "-- No entries --"):
+            with self.subTest(output=output):
+                report = good_report()
+                report["evidence"]["audit"] = rec(output, 1)
+                result = RUNNER.evaluate(report, GOOD_SERIAL)
+                self.assertTrue(result["checks"]["journal_avc_evidence_valid"])
+                self.assertTrue(result["checks"]["evidence_commands_valid"])
 
     def test_avc_query_failure_and_malformed_results_are_rejected(self):
         cases = ((1, "Failed to open journal"), (0, ""), (0, "{"), (0, '{"MESSAGE":42}'))
@@ -256,6 +260,12 @@ class HarnessTests(unittest.TestCase):
                 result = RUNNER.evaluate(report, GOOD_SERIAL)
                 self.assertFalse(result["checks"]["journal_avc_evidence_valid"])
                 self.assertFalse(result["checks"]["evidence_commands_valid"])
+
+        report = good_report()
+        del report["evidence"]["audit"]
+        result = RUNNER.evaluate(report, GOOD_SERIAL)
+        self.assertFalse(result["checks"]["journal_avc_evidence_valid"])
+        self.assertFalse(result["checks"]["evidence_commands_valid"])
 
     def test_structured_related_avc_remains_a_failure(self):
         report = good_report()

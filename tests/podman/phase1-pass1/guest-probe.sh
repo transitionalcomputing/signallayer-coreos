@@ -47,7 +47,8 @@ socket_kernel_state() {
 }
 
 container_socket_metadata() {
-    local pid=$1 path=$2 view=/proc/$pid/root$path
+    local pid=$1 path=$2 view
+    view="/proc/$pid/root$path"
     if [[ -e $view || -L $view ]]; then
         stat -c $'exists=1\ntype=%F\nmode=%a\nuid=%u\ngid=%g\nselinux=%C' -- "$view"
     else
