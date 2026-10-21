@@ -8,6 +8,20 @@ SignalLayer is developed with AI agents and a product owner with extensive infra
 
 Priority: explicit task requirements and security invariants first, then existing repository contracts and release procedures, then this document. In case of conflict, STOP and request a decision rather than silently redefining the goal.
 
+## CoreOS architectural invariants
+
+**SignalLayer CoreOS: Purposefully Boring. Exceptionally Reliable.**
+
+**When everything else fails, CoreOS stands.**
+
+**CoreOS provides the capabilities. SignalLayer Roles consume them.**
+
+- CoreOS owns only the minimal trusted platform: boot, security boundaries, hardware/platform interfaces, update and rollback, lifecycle primitives, and an independent recovery path.
+- CloudOS, ServerOS, JumpOS and future roles consume defined CoreOS capabilities. Role-specific applications, interfaces, and business logic do not become CoreOS responsibilities merely because CoreOS can host them.
+- Failure, compromise, crash or removal of a role must not, by design, disable CoreOS recovery, silently weaken its security boundaries, or make its essential lifecycle management dependent on that role.
+- New CoreOS functionality must justify why it cannot safely live in a role. Favor narrow, stable contracts; isolated services; predictable failure behavior; and testable recovery.
+- Validate these invariants through negative tests: failed/stopped role, unavailable management plane, interrupted update and rollback, and isolated workload failure. Report any currently untested scenario as UNPROVEN, never as a guaranteed capability.
+
 ## Roles
 
 - Engineering lead (ChatGPT): translate goals into bounded acceptance criteria; identify cross-component dependencies and architecture consequences; challenge scope expansion and determine the next engineering gate from evidence. Cannot substitute confidence for verification.
