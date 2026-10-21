@@ -191,7 +191,7 @@ class ConsoleAuditEvaluatorTests(unittest.TestCase):
         self.assertIn("install --setopt=install_weak_deps=False audit", containerfile)
         self.assertIn("multi-user.target.wants/auditd.service", containerfile)
 
-    def test_release_pipeline_identity_is_consistently_0_0_3_1(self):
+    def test_cargo_and_os_release_identities_are_intentionally_distinct(self):
         root = HERE.parents[1]
         containerfile = (root / "Containerfile").read_text()
         cargo = (root / "Cargo.toml").read_text()
@@ -200,14 +200,17 @@ class ConsoleAuditEvaluatorTests(unittest.TestCase):
         inspector = (root / "image/build/inspect-qcow2.sh").read_text()
         readme = (root / "image/build/README.md").read_text()
 
-        self.assertIn('version = "0.0.3.1"', cargo)
+        # Cargo accepts three-part SemVer; the public OS maintenance release
+        # retains its independently versioned four-part identity.
+        self.assertIn('version = "0.0.3"', cargo)
+        self.assertNotIn('version = "0.0.3.1"', cargo)
         for package in (
             "corectl", "sl-authd", "sl-console", "sl-network-observer",
             "sl-platform-client", "sl-platformd", "sl-protocol",
             "sl-remote-state", "sl-remote-worker", "sl-remoted", "sl-sessiond",
         ):
             self.assertRegex(
-                lock, rf'name = "{package}"\nversion = "0\.0\.3\.1"')
+                lock, rf'name = "{package}"\nversion = "0\.0\.3"')
         self.assertIn('org.opencontainers.image.version="0.0.3.1"', containerfile)
         self.assertIn("'VERSION=\"0.0.3.1\"'", containerfile)
         self.assertIn(
