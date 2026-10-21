@@ -3,12 +3,14 @@
 set -Eeuo pipefail
 
 build_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd -- "$build_dir/../.." && pwd)
 builder='ghcr.io/osbuild/image-builder-cli@sha256:adde8da071d78b17db2e6bb2df1aab4e01dd141efe7b7f9f68d5b51e590502d5'
 source_ref=${1:-localhost/signallayer-coreos:0.0.3.1}
 if (( $# > 1 )); then
     echo "Usage: $0 [local CoreOS OCI reference]" >&2
     exit 2
 fi
+python3 "$repo_root/tools/release-preflight" 0.0.3.1 --root "$repo_root"
 mkdir -p "$build_dir/output"
 run_dir=$(mktemp -d "$build_dir/output/coreos-0.0.3.1-x86_64.XXXXXXXX")
 trap 'result=$?; if (( result != 0 )); then echo "Disk build failed (exit $result); see $run_dir/build-report.txt"; fi' EXIT

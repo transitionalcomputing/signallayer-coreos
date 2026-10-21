@@ -1,10 +1,6 @@
-# Native Rust tooling is confined to build stages, using the same pinned Fedora base.
-FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS platform-tools
-RUN dnf -y install --setopt=install_weak_deps=False cargo gcc rustfmt && dnf clean all
+# Reject inconsistent release identity before installing build tools or compiling.
+FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS release-preflight
 WORKDIR /build
-ENV CARGO_HOME=/build/target/cargo-home
-
-FROM platform-tools AS platform-build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY platformd ./platformd
@@ -15,6 +11,22 @@ COPY authd ./authd
 COPY remote-worker ./remote-worker
 COPY remoted ./remoted
 COPY console ./console
+COPY Containerfile ./Containerfile
+COPY image/build ./image/build
+COPY docs/releases ./docs/releases
+COPY tools/release-preflight ./tools/release-preflight
+RUN python3 tools/release-preflight 0.0.3.1
+
+# Native Rust tooling is confined to build stages, using the same pinned Fedora base.
+FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS platform-tools
+RUN dnf -y install --setopt=install_weak_deps=False cargo gcc rustfmt && dnf clean all
+WORKDIR /build
+ENV CARGO_HOME=/build/target/cargo-home
+
+FROM platform-tools AS platform-build
+COPY --from=release-preflight /build /build
+# Repeat with Cargo present so Cargo's own parser validates the workspace.
+RUN python3 tools/release-preflight 0.0.3.1
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 RUN ! grep -rEq 'Start(Update|Rollback|Reboot)|Command::new|std::process|systemctl|/bin/(sh|bash)' console/src && \
     test "$(grep -oE '"(EnableRemoteManagement|DisableRemoteManagement|ReenrollRemoteManagement|GetRemoteManagementEnrollment)"' console/src/lib.rs | sort -u | tr '\n' ' ')" = '"DisableRemoteManagement" "EnableRemoteManagement" "GetRemoteManagementEnrollment" "ReenrollRemoteManagement" '
