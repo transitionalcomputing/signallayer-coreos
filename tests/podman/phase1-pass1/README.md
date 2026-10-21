@@ -7,6 +7,11 @@ tests. `run-qcow2.py` boots an overlay with genuine KVM and preserves evidence.
 It evaluates strict, complete evidence only after QEMU exits. Missing, malformed,
 duplicate, truncated, or failed required records make the run fail. Every
 maintained assertion has an offline negative control in `test_harness.py`.
+An empty structured AVC query is valid only when `journalctl` returns its exact
+`-- No entries --` result; retrieval errors and malformed JSON fail. The guest
+also records the authoritative rootless API path's metadata, kernel Unix-socket
+table entry, same-identity API connection result, and container-root view on
+both boots without enabling or reconfiguring the socket.
 
 Re-evaluate a preserved completed run without booting a VM:
 

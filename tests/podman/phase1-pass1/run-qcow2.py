@@ -23,6 +23,8 @@ DENIAL_KEYS = {
     "attack_privileged_state",
     "attack_boot_state",
     "attack_systemctl_after_reboot",
+    "rootless_socket_host_api",
+    "rootless_socket_host_api_after",
 }
 
 POSITIVE_KEYS = {
@@ -36,7 +38,10 @@ POSITIVE_KEYS = {
     "container_cgroup", "fixture_log", "hostile_user_config", "boot_id_before",
     "boot_id_after", "service_after_reboot", "service_enabled", "unit_after_reboot",
     "failed_units", "selinux_after", "rootless_info_after",
-    "container_inspect_after", "fixture_log_after", "journal", "audit", "complete",
+    "container_inspect_after", "fixture_log_after", "journal", "complete",
+    "rootless_socket_metadata", "rootless_socket_metadata_after",
+    "rootless_socket_kernel", "rootless_socket_kernel_after",
+    "rootless_socket_container_view", "rootless_socket_container_view_after",
 }
 
 EXPECTED_BASE_ORIGIN = "localhost/sl-phase1-base:pass1"
@@ -104,6 +109,40 @@ def _json_output(evidence, key):
     if output[min(starts) + end:].strip():
         return None
     return value
+
+
+def _key_values(evidence, key):
+    if not _ok(evidence, key):
+        return None
+    result = {}
+    for line in _record(evidence, key)["output"].splitlines():
+        if "=" not in line:
+            return None
+        name, value = line.split("=", 1)
+        if not name or name in result:
+            return None
+        result[name] = value
+    return result or None
+
+
+def _audit_messages(evidence):
+    record = _record(evidence, "audit")
+    output = record["output"].strip()
+    if record["exit_code"] == 1 and output == "-- No entries --":
+        return True, []
+    if record["exit_code"] != 0 or not output:
+        return False, []
+    messages = []
+    for line in output.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            return False, []
+        message = entry.get("MESSAGE") if isinstance(entry, dict) else None
+        if not isinstance(message, str):
+            return False, []
+        messages.append(message)
+    return True, messages
 
 
 def _inspect(evidence, key):
@@ -178,6 +217,42 @@ def evaluate(report, serial_text):
             and command[-1].endswith("@" + digest)
         )
 
+    def metadata_complete(value):
+        if value == {"exists": "0"}:
+            return True
+        required = {"exists", "type", "mode", "uid", "gid", "selinux"}
+        return (
+            isinstance(value, dict)
+            and set(value) == required
+            and value["exists"] == "1"
+            and all(value[name] for name in ("type", "mode", "uid", "gid", "selinux"))
+            and value["mode"].isdigit()
+            and value["uid"].isdigit()
+            and value["gid"].isdigit()
+        )
+
+    def kernel_state_complete(value):
+        if value == {"present": "0"}:
+            return True
+        return (
+            isinstance(value, dict)
+            and value.get("present") == "1"
+            and any(name.startswith("entry") and entry for name, entry in value.items())
+        )
+
+    def api_observation_complete(key):
+        record = _record(evidence, key)
+        if record["exit_code"] == 0:
+            return _json_output(evidence, key) is not None
+        output = record["output"].lower()
+        return (
+            isinstance(record["exit_code"], int)
+            and record["exit_code"] > 0
+            and "/run/sl-management/podman/podman.sock" in output
+            and any(message in output for message in ("connect", "dial unix", "no such file", "connection refused"))
+            and "command not found" not in output
+        )
+
     provenance = _text(evidence, "fixture_provenance")
     match = re.search(r"^fixture_manifest=(sha256:[0-9a-f]{64})$", provenance, re.MULTILINE)
     digest = match.group(1) if match else ""
@@ -187,8 +262,13 @@ def evaluate(report, serial_text):
     unit_before = _text(evidence, "unit_before_reboot")
     unit_after = _text(evidence, "unit_after_reboot")
     journal = _text(evidence, "journal")
+    audit_valid, audit_messages = _audit_messages(evidence)
+    socket_metadata = [_key_values(evidence, key) for key in ("rootless_socket_metadata", "rootless_socket_metadata_after")]
+    socket_kernel = [_key_values(evidence, key) for key in ("rootless_socket_kernel", "rootless_socket_kernel_after")]
+    socket_container = [_key_values(evidence, key) for key in ("rootless_socket_container_view", "rootless_socket_container_view_after")]
 
-    required_commands = all(_ok(evidence, key) for key in POSITIVE_KEYS)
+    socket_api_valid = all(api_observation_complete(key) for key in ("rootless_socket_host_api", "rootless_socket_host_api_after"))
+    required_commands = all(_ok(evidence, key) for key in POSITIVE_KEYS) and audit_valid and socket_api_valid
     denied_commands = all(_record(evidence, key)["exit_code"] not in (None, 0) for key in DENIAL_KEYS)
     expected_negative = (
         _record(evidence, "login_state")["exit_code"] not in (None, 0)
@@ -210,11 +290,13 @@ def evaluate(report, serial_text):
         "PrivateTmp=yes",
     )
     avcs = [line.lower() for line in serial_text.splitlines() if "avc:" in line.lower() and "denied" in line.lower()]
+    avcs.extend(message.lower() for message in audit_messages if "avc:" in message.lower() and "denied" in message.lower())
     related = ("sl-management", "sl-phase1", "container_t", 'comm="podman"', 'comm="crun"', 'comm="conmon"')
     checks = {
         "qemu_clean_exit": report.get("qemu_exit_code") == 0,
         "probe_complete": _ok(evidence, "complete") and _text(evidence, "complete") == "pass1 probe complete" and "failure" not in evidence,
         "evidence_commands_valid": required_commands and denied_commands and expected_negative and system_state_valid,
+        "journal_avc_evidence_valid": audit_valid,
         "genuine_kvm": (
             report.get("qemu_exit_code") == 0
             and "q35,accel=kvm" in command
@@ -260,11 +342,18 @@ def evaluate(report, serial_text):
         ),
         "reboot_restart": _ok(evidence, "boot_id_before") and _ok(evidence, "boot_id_after") and _text(evidence, "boot_id_before") != _text(evidence, "boot_id_after") and _text(evidence, "service_after_reboot") == "active" and _text(evidence, "service_enabled") == "enabled" and inspect_after.get("State", {}).get("Running") is True,
         "no_login_or_user_manager": expected_negative and "/usr/sbin/nologin" in passwd and _text(evidence, "user_manager") == "inactive",
-        "host_rootless_socket_absent": all(
-            value.get("host", {}).get("remoteSocket", {}).get("path") == "/run/sl-management/podman/podman.sock"
-            and value.get("host", {}).get("remoteSocket", {}).get("exists") is False
-            for value in (info, info_after)
-        ) and _record(evidence, "attack_rootless_socket")["exit_code"] not in (None, 0),
+        "rootless_socket_diagnostics_complete": (
+            all(metadata_complete(value) for value in socket_metadata + socket_container)
+            and all(kernel_state_complete(value) for value in socket_kernel)
+            and socket_api_valid
+        ),
+        "host_rootless_socket_absent": (
+            all(value == {"exists": "0"} for value in socket_metadata)
+            and all(value == {"present": "0"} for value in socket_kernel)
+            and all(_record(evidence, key)["exit_code"] not in (None, 0) for key in ("rootless_socket_host_api", "rootless_socket_host_api_after"))
+            and _record(evidence, "attack_rootless_socket")["exit_code"] not in (None, 0)
+        ),
+        "container_rootless_socket_inaccessible": all(value == {"exists": "0"} for value in socket_container),
         "authority_attacks_denied": denied_commands,
         "no_failed_units": _ok(evidence, "failed_units") and not _text(evidence, "failed_units") and system_state_valid,
         "no_related_avc": bool(serial_text) and not any(any(token in line for token in related) for line in avcs),
