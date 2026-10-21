@@ -41,9 +41,19 @@ FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c
 ARG SOURCE_REVISION=unknown
 ARG BUILD_ID=unknown
 
+# Keep the kernel audit unicast path connected. Without auditd, kauditd falls
+# back to printk; its generic rate-limit summaries are KERN_WARNING and can
+# overwrite the appliance consoles even when notice records are filtered.
+# Remove only transaction-generated caches, logs, and runtime state; the
+# immutable image neither needs nor owns their build-time contents.
+RUN dnf -y install --setopt=install_weak_deps=False audit && \
+    dnf clean all && \
+    rm -rf -- /run/dnf /var/cache/libdnf5 /var/lib/dnf/repos && \
+    rm -f -- /var/log/dnf5.log /var/cache/ldconfig/aux-cache
+
 LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
-      org.opencontainers.image.version="0.0.3" \
+      org.opencontainers.image.version="0.0.3.1" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.opencontainers.image.source="https://github.com/transitionalcomputing/signallayer-coreos"
 
@@ -61,7 +71,7 @@ RUN set -eu; \
     chmod 0644 /usr/lib/signallayer/openssl.cnf; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
-        'VERSION="0.0.3"' \
+        'VERSION="0.0.3.1"' \
         'PLATFORM_API_VERSION="0.3"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \
@@ -273,6 +283,10 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
           /usr/share/selinux/devel/include/distributed \
           /usr/share/selinux/devel/include /usr/share/selinux/devel
 RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
+    test -e /usr/lib/systemd/system/auditd.service && \
+    { test -L /usr/lib/systemd/system/multi-user.target.wants/auditd.service || \
+      ln -s ../auditd.service /usr/lib/systemd/system/multi-user.target.wants/auditd.service; } && \
+    test "$(readlink /usr/lib/systemd/system/multi-user.target.wants/auditd.service)" = ../auditd.service && \
     ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && \
     ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && \
     ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \

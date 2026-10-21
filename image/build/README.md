@@ -1,4 +1,4 @@
-# CoreOS 0.0.3 development disk
+# CoreOS 0.0.3.1 development disk
 
 > **Developer Preview registry limitation:** the validated v0.0.1 qcow2 uses
 > `localhost/signallayer-coreos:0.0.1` as its bootc origin. Lifecycle tests
@@ -33,8 +33,8 @@ Build the OCI image from the current Containerfile into **rootful** storage:
 ```bash
 sudo podman build --platform linux/amd64 \
   --build-arg SOURCE_REVISION="$(git rev-parse HEAD)" \
-  --build-arg BUILD_ID="0.0.3-$(git rev-parse --short=12 HEAD)-local" \
-  -f Containerfile -t localhost/signallayer-coreos:0.0.3 .
+  --build-arg BUILD_ID="0.0.3.1-$(git rev-parse --short=12 HEAD)-local" \
+  -f Containerfile -t localhost/signallayer-coreos:0.0.3.1 .
 sudo bash image/build/build-qcow2.sh
 ```
 
@@ -55,7 +55,7 @@ into the builder's disposable store. It never shares the host storage with
 the nested Podman instance.
 
 Each run creates an ignored directory under `image/build/output/` containing
-`signallayer-coreos-0.0.3-x86_64.qcow2`, the input OCI archive, copied blueprint,
+`signallayer-coreos-0.0.3.1-x86_64.qcow2`, the input OCI archive, copied blueprint,
 source image inspection and release/configuration, builder version, OSBuild
 manifest/log, checksums in `build-report.txt`, and offline inspection reports.
 For Phase 3B images, `prepare-boot-manifest.py` adds one standard OSBuild SELinux
@@ -76,8 +76,13 @@ A failed preflight or build retains its report; an old disk cannot be mistaken
 for a successful new run. The fixed builder, immutable input, copied blueprint
 and fixed random seed define repeatable inputs, not byte-identical disk files.
 
-`qcow2.toml` requests GPT, a minimum 32 GiB disk and a serial console. It adds
-no software, account, password, SSH configuration or service. Access credentials
+`qcow2.toml` requests GPT, a minimum 32 GiB disk and the existing graphical and
+serial consoles. It sets `loglevel=5` so kernel warnings and errors remain visible
+without routing notice-level audit traffic over the appliance UI. The OCI image
+runs Fedora's audit daemon so the kernel has its intended audit unicast consumer;
+this prevents the no-daemon printk fallback while persistent journal audit
+collection remains available. The disk blueprint adds no software, account,
+password, SSH configuration or service. Access credentials
 remain unprovisioned; this is console output configuration for a development
 disk, not a login or boot acceptance claim. The OCI image is both the payload
 and default buildroot. Image Builder/bootc performs installation, partitioning,
