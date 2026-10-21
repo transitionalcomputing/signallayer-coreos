@@ -1,10 +1,6 @@
-# Native Rust tooling is confined to build stages, using the same pinned Fedora base.
-FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS platform-tools
-RUN dnf -y install --setopt=install_weak_deps=False cargo gcc rustfmt && dnf clean all
+# Reject inconsistent release identity before installing build tools or compiling.
+FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS release-preflight
 WORKDIR /build
-ENV CARGO_HOME=/build/target/cargo-home
-
-FROM platform-tools AS platform-build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY platformd ./platformd
@@ -15,6 +11,22 @@ COPY authd ./authd
 COPY remote-worker ./remote-worker
 COPY remoted ./remoted
 COPY console ./console
+COPY Containerfile ./Containerfile
+COPY image/build ./image/build
+COPY docs/releases ./docs/releases
+COPY tools/release-preflight ./tools/release-preflight
+RUN python3 tools/release-preflight 0.0.3.1
+
+# Native Rust tooling is confined to build stages, using the same pinned Fedora base.
+FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS platform-tools
+RUN dnf -y install --setopt=install_weak_deps=False cargo gcc rustfmt && dnf clean all
+WORKDIR /build
+ENV CARGO_HOME=/build/target/cargo-home
+
+FROM platform-tools AS platform-build
+COPY --from=release-preflight /build /build
+# Repeat with Cargo present so Cargo's own parser validates the workspace.
+RUN python3 tools/release-preflight 0.0.3.1
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 RUN ! grep -rEq 'Start(Update|Rollback|Reboot)|Command::new|std::process|systemctl|/bin/(sh|bash)' console/src && \
     test "$(grep -oE '"(EnableRemoteManagement|DisableRemoteManagement|ReenrollRemoteManagement|GetRemoteManagementEnrollment)"' console/src/lib.rs | sort -u | tr '\n' ' ')" = '"DisableRemoteManagement" "EnableRemoteManagement" "GetRemoteManagementEnrollment" "ReenrollRemoteManagement" '
@@ -41,9 +53,19 @@ FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c
 ARG SOURCE_REVISION=unknown
 ARG BUILD_ID=unknown
 
+# Keep the kernel audit unicast path connected. Without auditd, kauditd falls
+# back to printk; its generic rate-limit summaries are KERN_WARNING and can
+# overwrite the appliance consoles even when notice records are filtered.
+# Remove only transaction-generated caches, logs, and runtime state; the
+# immutable image neither needs nor owns their build-time contents.
+RUN dnf -y install --setopt=install_weak_deps=False audit && \
+    dnf clean all && \
+    rm -rf -- /run/dnf /var/cache/libdnf5 /var/lib/dnf/repos && \
+    rm -f -- /var/log/dnf5.log /var/cache/ldconfig/aux-cache
+
 LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
-      org.opencontainers.image.version="0.0.3" \
+      org.opencontainers.image.version="0.0.3.1" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.opencontainers.image.source="https://github.com/transitionalcomputing/signallayer-coreos"
 
@@ -61,7 +83,7 @@ RUN set -eu; \
     chmod 0644 /usr/lib/signallayer/openssl.cnf; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
-        'VERSION="0.0.3"' \
+        'VERSION="0.0.3.1"' \
         'PLATFORM_API_VERSION="0.3"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \
@@ -273,6 +295,10 @@ RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && \
           /usr/share/selinux/devel/include/distributed \
           /usr/share/selinux/devel/include /usr/share/selinux/devel
 RUN install -d /usr/lib/systemd/system/multi-user.target.wants && \
+    test -e /usr/lib/systemd/system/auditd.service && \
+    { test -L /usr/lib/systemd/system/multi-user.target.wants/auditd.service || \
+      ln -s ../auditd.service /usr/lib/systemd/system/multi-user.target.wants/auditd.service; } && \
+    test "$(readlink /usr/lib/systemd/system/multi-user.target.wants/auditd.service)" = ../auditd.service && \
     ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && \
     ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && \
     ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && \

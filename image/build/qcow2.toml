@@ -5,4 +5,4 @@ type = "gpt"
 minsize = "32 GiB"
 
 [customizations.kernel]
-append = "console=tty0 console=ttyS0,115200n8"
+append = "console=tty0 console=ttyS0,115200n8 loglevel=5"
