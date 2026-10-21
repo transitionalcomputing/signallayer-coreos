@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Fail-fast validation of SignalLayer release identity surfaces."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+
+OS_VERSION_RE = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))?\Z")
+SEMVER_RE = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\Z"
+)
+
+
+class PreflightError(Exception):
+    pass
+
+
+def valid_semver(version: str) -> bool:
+    if not SEMVER_RE.fullmatch(version):
+        return False
+    core_and_pre = version.split("+", 1)[0]
+    if "-" not in core_and_pre:
+        return True
+    prerelease = core_and_pre.split("-", 1)[1]
+    return all(not (part.isdigit() and len(part) > 1 and part.startswith("0")) for part in prerelease.split("."))
+
+
+def load_toml(path: Path) -> dict:
+    try:
+        with path.open("rb") as stream:
+            return tomllib.load(stream)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise PreflightError(f"cannot parse {path.relative_to(path.parent.parent) if len(path.parents) > 1 else path}: {error}") from error
+
+
+def read_required(root: Path, relative: str) -> str:
+    path = root / relative
+    try:
+        return path.read_text()
+    except OSError as error:
+        raise PreflightError(f"missing required identity surface: {relative}") from error
+
+
+def single_match(text: str, pattern: str, surface: str) -> str:
+    matches = re.findall(pattern, text, flags=re.MULTILINE)
+    if len(matches) != 1:
+        raise PreflightError(f"{surface}: expected exactly one identity, found {len(matches)}")
+    return matches[0]
+
+
+def require_equal(actual: str, expected: str, surface: str) -> None:
+    if actual != expected:
+        raise PreflightError(f"{surface}: expected {expected!r}, found {actual!r}")
+
+
+def validate_cargo(root: Path) -> tuple[str, str]:
+    workspace_path = root / "Cargo.toml"
+    lock_path = root / "Cargo.lock"
+    workspace = load_toml(workspace_path)
+    lock = load_toml(lock_path)
+
+    try:
+        cargo_version = str(workspace["workspace"]["package"]["version"])
+        members = workspace["workspace"]["members"]
+    except (KeyError, TypeError) as error:
+        raise PreflightError("Cargo.toml: missing workspace.package.version or workspace.members") from error
+    if not valid_semver(cargo_version):
+        raise PreflightError(f"Cargo.toml: workspace version {cargo_version!r} is not valid SemVer")
+
+    expected: dict[str, str] = {}
+    for member in members:
+        manifest_path = root / member / "Cargo.toml"
+        manifest = load_toml(manifest_path)
+        try:
+            package = manifest["package"]
+            name = package["name"]
+            declared = package["version"]
+        except (KeyError, TypeError) as error:
+            raise PreflightError(f"{member}/Cargo.toml: missing package name or version") from error
+        version = cargo_version if declared == {"workspace": True} else str(declared)
+        if not valid_semver(version):
+            raise PreflightError(f"{member}/Cargo.toml: package version {version!r} is not valid SemVer")
+        expected[str(name)] = version
+
+    locked: dict[str, list[str]] = {}
+    for package in lock.get("package", []):
+        locked.setdefault(str(package.get("name")), []).append(str(package.get("version")))
+    for name, version in expected.items():
+        versions = locked.get(name, [])
+        if versions != [version]:
+            raise PreflightError(
+                f"Cargo.lock: workspace package {name!r} expected exactly once at {version!r}, found {versions!r}"
+            )
+
+    cargo = shutil.which("cargo")
+    if not cargo:
+        return cargo_version, "unavailable (structural TOML/lock checks passed)"
+    result = subprocess.run(
+        [cargo, "metadata", "--locked", "--offline", "--no-deps", "--format-version", "1"],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode:
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else f"exit {result.returncode}"
+        raise PreflightError(f"cargo metadata rejected the workspace: {detail}")
+    try:
+        json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise PreflightError("cargo metadata returned invalid JSON") from error
+    return cargo_version, "passed"
+
+
+def validate_containerfile(root: Path, planned: str) -> None:
+    text = read_required(root, "Containerfile")
+    oci = single_match(
+        text,
+        r'org\.opencontainers\.image\.version="([^"]+)"',
+        "Containerfile OCI version label",
+    )
+    embedded = single_match(
+        text,
+        r"^\s*'VERSION=\"([^\"]+)\"'\s*\\$",
+        "Containerfile embedded release VERSION",
+    )
+    require_equal(oci, planned, "Containerfile OCI version label")
+    require_equal(embedded, planned, "Containerfile embedded release VERSION")
+
+
+def validate_qcow2_surfaces(root: Path, planned: str) -> None:
+    builder = read_required(root, "image/build/build-qcow2.sh")
+    inspector = read_required(root, "image/build/inspect-qcow2.sh")
+    readme = read_required(root, "image/build/README.md")
+
+    checks = (
+        (builder, r"^source_ref=\$\{1:-localhost/signallayer-coreos:([^}]+)\}$", "qcow2 default source reference"),
+        (builder, r"output/coreos-([0-9.]+)-x86_64\.XXXXXXXX", "qcow2 output directory"),
+        (builder, r"org\.opencontainers\.image\.version.*\}\}\'\) == ([0-9.]+)", "qcow2 OCI label check"),
+        (builder, r"--output-name signallayer-coreos-([0-9.]+)-x86_64", "qcow2 artifact output name"),
+        (builder, r'disk="\$run_dir/signallayer-coreos-([0-9.]+)-x86_64\.qcow2"', "qcow2 final artifact path"),
+        (inspector, r"container-image-reference=.*localhost/signallayer-coreos:([0-9.]+)", "offline bootc origin check"),
+        (readme, r'--build-arg BUILD_ID="([0-9.]+)-\$\(git rev-parse', "documented build ID prefix"),
+        (readme, r"`signallayer-coreos-([0-9.]+)-x86_64\.qcow2`", "documented qcow2 artifact name"),
+    )
+    for text, pattern, surface in checks:
+        require_equal(single_match(text, pattern, surface), planned, surface)
+
+    refs = set(re.findall(r"localhost/signallayer-coreos:([0-9]+(?:\.[0-9]+){2,3})", builder))
+    if refs != {planned}:
+        raise PreflightError(f"qcow2 builder image references: expected only {planned!r}, found {sorted(refs)!r}")
+    artifacts = set(re.findall(r"signallayer-coreos-([0-9]+(?:\.[0-9]+){2,3})-x86_64", builder))
+    if artifacts != {planned}:
+        raise PreflightError(f"qcow2 builder artifact identities: expected only {planned!r}, found {sorted(artifacts)!r}")
+
+
+def validate_release_notes(root: Path, planned: str) -> None:
+    relative = f"docs/releases/{planned}.md"
+    notes = read_required(root, relative)
+    if not re.search(rf"^# .*\b{re.escape(planned)}\b", notes, flags=re.MULTILINE):
+        raise PreflightError(f"{relative}: heading does not identify release {planned}")
+
+
+def tag_state(root: Path, planned: str, require_new_tag: bool) -> str:
+    git = shutil.which("git")
+    if not git:
+        return "unavailable (source tree has no Git metadata)"
+    in_work_tree = subprocess.run(
+        [git, "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if not in_work_tree:
+        return "unavailable (source tree has no Git metadata)"
+    tag = f"v{planned}"
+    result = subprocess.run(
+        [git, "-C", str(root), "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{}}"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode:
+        return f"{tag} available"
+    target = result.stdout.strip()
+    if require_new_tag:
+        raise PreflightError(f"protected historical tag {tag} already exists at {target}; refusing new-tag authorization")
+    return f"protected historical tag {tag} exists at {target} (identity validation only)"
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("planned_os_version")
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--require-new-tag",
+        action="store_true",
+        help="also require that v<planned-os-version> does not exist; use only at an authorized tag-creation gate",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    planned = args.planned_os_version
+    root = args.root.resolve()
+    try:
+        if not OS_VERSION_RE.fullmatch(planned):
+            raise PreflightError(
+                f"planned OS version {planned!r} must be N.N.N or N.N.N.N with non-negative components"
+            )
+        cargo_version, cargo_metadata = validate_cargo(root)
+        validate_containerfile(root, planned)
+        validate_qcow2_surfaces(root, planned)
+        validate_release_notes(root, planned)
+        protected_tag = tag_state(root, planned, args.require_new_tag)
+    except PreflightError as error:
+        print(f"release-preflight: FAIL: {error}", file=sys.stderr)
+        return 1
+
+    print(f"release-preflight: PASS: OS {planned}; Cargo {cargo_version}")
+    print(f"cargo metadata: {cargo_metadata}")
+    print(f"tag protection: {protected_tag}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
