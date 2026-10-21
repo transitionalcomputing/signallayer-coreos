@@ -53,7 +53,7 @@ RUN dnf -y install --setopt=install_weak_deps=False audit && \
 
 LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
-      org.opencontainers.image.version="0.0.3" \
+      org.opencontainers.image.version="0.0.3.1" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
       org.opencontainers.image.source="https://github.com/transitionalcomputing/signallayer-coreos"
 
@@ -71,7 +71,7 @@ RUN set -eu; \
     chmod 0644 /usr/lib/signallayer/openssl.cnf; \
     printf '%s\n' \
         'NAME="SignalLayerIT CoreOS"' \
-        'VERSION="0.0.3"' \
+        'VERSION="0.0.3.1"' \
         'PLATFORM_API_VERSION="0.3"' \
         "SOURCE_REVISION=\"${SOURCE_REVISION}\"" \
         "BUILD_ID=\"${BUILD_ID}\"" \

@@ -193,9 +193,16 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
         "kauditd_printk_skb", "invalid_bootcinstall_testlabel_t",
         "selinux_err", "invalid_context", "avc:", " audit[", " audit:",
     )
+    release = dict(
+        line.split("=", 1) for line in value("release").splitlines() if "=" in line
+    )
 
     checks = {
         "probe_complete": ok("complete"),
+        "release_identity": ok("release")
+        and release.get("VERSION") == '"0.0.3.1"'
+        and release.get("SOURCE_REVISION", '"unknown"') != '"unknown"'
+        and release.get("BUILD_ID", '""').strip('"').startswith("0.0.3.1-"),
         "kernel_argument_effective": ok("cmdline") and "loglevel=5" in value("cmdline").split(),
         "console_routes_preserved": ok("cmdline") and "console=tty0" in value("cmdline").split()
         and "console=ttyS0,115200n8" in value("cmdline").split(),
@@ -238,6 +245,14 @@ def evaluate_console_audit(evidence, serial, auth_policy_hash, platform_policy_h
         "platform_policy_unchanged": ok("platform_policy")
         and value("platform_policy").split()[0] == platform_policy_hash,
     }
+    try:
+        booted_image = json.loads(value("bootc_status"))["status"]["booted"]["image"]
+        checks["bootc_origin_identity"] = ok("bootc_status") and (
+            booted_image["image"]["image"] == "localhost/signallayer-coreos:0.0.3.1"
+            and booted_image["version"] == "0.0.3.1"
+        )
+    except (ValueError, KeyError, TypeError):
+        checks["bootc_origin_identity"] = False
     units = value("console_units")
     checks["console_units_unchanged"] = ok("console_units") and all(
         units.count(item) == count for item, count in {

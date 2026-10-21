@@ -40,6 +40,7 @@ for (( i=0; i<60; i++ )); do
 done
 sleep 8
 collect release cat /usr/lib/signallayer/release
+collect bootc_status bootc status --json
 collect cmdline cat /proc/cmdline
 collect kernel_printk cat /proc/sys/kernel/printk
 collect bootc_version bootc --version

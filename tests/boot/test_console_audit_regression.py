@@ -32,6 +32,14 @@ def fixture():
              'scontext=system_u:system_r:sl_platformd_t:s0')
     evidence = {
         "complete": record("done"),
+        "release": record(
+            'NAME="SignalLayerIT CoreOS"\nVERSION="0.0.3.1"\n'
+            'PLATFORM_API_VERSION="0.3"\nSOURCE_REVISION="abc123"\n'
+            'BUILD_ID="0.0.3.1-abc123-candidate"\n'),
+        "bootc_status": record(json.dumps({"status": {"booted": {"image": {
+            "image": {"image": "localhost/signallayer-coreos:0.0.3.1"},
+            "version": "0.0.3.1",
+        }}}})),
         "cmdline": record("console=tty0 console=ttyS0,115200n8 loglevel=5"),
         "kernel_printk": record("5 4 1 7"),
         "selinux_before": record("Enforcing"), "selinux_after": record("Enforcing"),
@@ -80,6 +88,23 @@ class ConsoleAuditEvaluatorTests(unittest.TestCase):
                                 "Stopped sl-console@tty1.service")
         checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
         self.assertFalse(checks["audit_not_on_serial"])
+
+    def test_legacy_release_identity_fails(self):
+        evidence, serial = fixture()
+        evidence["release"] = record(
+            'NAME="SignalLayerIT CoreOS"\nVERSION="0.0.3"\n'
+            'SOURCE_REVISION="abc123"\nBUILD_ID="0.0.3-abc123-pass5"\n')
+        checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
+        self.assertFalse(checks["release_identity"])
+
+    def test_legacy_bootc_origin_fails(self):
+        evidence, serial = fixture()
+        evidence["bootc_status"] = record(json.dumps({"status": {"booted": {"image": {
+            "image": {"image": "localhost/signallayer-coreos:0.0.3"},
+            "version": "0.0.3",
+        }}}}))
+        checks = boot.evaluate_console_audit(evidence, serial, "authhash", "platformhash")
+        self.assertFalse(checks["bootc_origin_identity"])
 
     def test_callback_suppression_after_ui_fails_isolation(self):
         evidence, serial = fixture()
@@ -165,6 +190,32 @@ class ConsoleAuditEvaluatorTests(unittest.TestCase):
         containerfile = (HERE.parents[1] / "Containerfile").read_text()
         self.assertIn("install --setopt=install_weak_deps=False audit", containerfile)
         self.assertIn("multi-user.target.wants/auditd.service", containerfile)
+
+    def test_release_pipeline_identity_is_consistently_0_0_3_1(self):
+        root = HERE.parents[1]
+        containerfile = (root / "Containerfile").read_text()
+        cargo = (root / "Cargo.toml").read_text()
+        lock = (root / "Cargo.lock").read_text()
+        builder = (root / "image/build/build-qcow2.sh").read_text()
+        inspector = (root / "image/build/inspect-qcow2.sh").read_text()
+        readme = (root / "image/build/README.md").read_text()
+
+        self.assertIn('version = "0.0.3.1"', cargo)
+        for package in (
+            "corectl", "sl-authd", "sl-console", "sl-network-observer",
+            "sl-platform-client", "sl-platformd", "sl-protocol",
+            "sl-remote-state", "sl-remote-worker", "sl-remoted", "sl-sessiond",
+        ):
+            self.assertRegex(
+                lock, rf'name = "{package}"\nversion = "0\.0\.3\.1"')
+        self.assertIn('org.opencontainers.image.version="0.0.3.1"', containerfile)
+        self.assertIn("'VERSION=\"0.0.3.1\"'", containerfile)
+        self.assertIn(
+            'source_ref=${1:-localhost/signallayer-coreos:0.0.3.1}', builder)
+        self.assertIn("Source must be CoreOS 0.0.3.1.", builder)
+        self.assertIn("signallayer-coreos-0.0.3.1-x86_64.qcow2", builder)
+        self.assertIn("localhost/signallayer-coreos:0.0.3.1", inspector)
+        self.assertIn("signallayer-coreos-0.0.3.1-x86_64.qcow2", readme)
 
 
 if __name__ == "__main__":
