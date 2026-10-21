@@ -178,7 +178,7 @@ EOF
     record_sh attack_systemctl_start "runuser -u sl-management -- systemctl start $unit"
     record_sh attack_user_manager "runuser -u sl-management -- env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user start $unit"
     record_sh attack_rootful_socket "runuser -u sl-management -- test -S /run/podman/podman.sock"
-    record_sh attack_rootless_socket "runuser -u sl-management -- test -S /run/user/$uid/podman/podman.sock"
+    record_sh attack_rootless_socket "runuser -u sl-management -- test -S /run/sl-management/podman/podman.sock"
     record_sh attack_privileged_state "runuser -u sl-management -- sh -c 'printf attack > /etc/sl-phase1-attack'"
     record_sh attack_boot_state "runuser -u sl-management -- sh -c 'printf attack > /boot/sl-phase1-attack'"
 
