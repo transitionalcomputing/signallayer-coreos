@@ -179,11 +179,23 @@ class ReleasePreflightTests(unittest.TestCase):
         self.assertLess(second, compile_workspace)
 
         builder = (REPO / "image/build/build-qcow2.sh").read_text()
-        gate = builder.index('python3 "$repo_root/tools/release-preflight" 0.0.3.1')
+        gate = builder.index('python3 "$repo_root/tools/release-preflight" 0.0.3.1 --root "$repo_root"')
         output = builder.index('mkdir -p "$build_dir/output"')
         podman = builder.index("podman image inspect")
         self.assertLess(gate, output)
         self.assertLess(gate, podman)
+
+    def test_explicit_root_works_outside_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [str(PREFLIGHT), "0.0.3.1", "--root", str(REPO)],
+                cwd=directory,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("release-preflight: PASS", result.stdout)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ if (( $# > 1 )); then
     echo "Usage: $0 [local CoreOS OCI reference]" >&2
     exit 2
 fi
-python3 "$repo_root/tools/release-preflight" 0.0.3.1
+python3 "$repo_root/tools/release-preflight" 0.0.3.1 --root "$repo_root"
 mkdir -p "$build_dir/output"
 run_dir=$(mktemp -d "$build_dir/output/coreos-0.0.3.1-x86_64.XXXXXXXX")
 trap 'result=$?; if (( result != 0 )); then echo "Disk build failed (exit $result); see $run_dir/build-report.txt"; fi' EXIT
