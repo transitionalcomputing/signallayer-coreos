@@ -5,6 +5,7 @@ state=/var/lib/sl-phase1-pass1
 evidence=$state/evidence.tsv
 port=/dev/virtio-ports/org.signallayer.phase1
 unit=sl-management-fixture.service
+rootless_socket=/run/sl-management/podman/podman.sock
 mkdir -p "$state"
 
 record() {
@@ -26,6 +27,43 @@ record_sh() {
     set -e
     printf '%s\t%s\t%s\n' "$key" "$rc" "$(printf %s "$output" | base64 -w0)" >> "$evidence"
     return 0
+}
+
+socket_metadata() {
+    local path=$1
+    if [[ -e $path || -L $path ]]; then
+        stat -c $'exists=1\ntype=%F\nmode=%a\nuid=%u\ngid=%g\nselinux=%C' -- "$path"
+    else
+        printf 'exists=0\n'
+    fi
+}
+
+socket_kernel_state() {
+    local path=$1
+    awk -v path="$path" '
+        $8 == path { count++; print "entry" count "=" $0 }
+        END { print "present=" (count ? 1 : 0) }
+    ' /proc/net/unix
+}
+
+container_socket_metadata() {
+    local pid=$1 path=$2 view
+    view="/proc/$pid/root$path"
+    if [[ -e $view || -L $view ]]; then
+        stat -c $'exists=1\ntype=%F\nmode=%a\nuid=%u\ngid=%g\nselinux=%C' -- "$view"
+    else
+        printf 'exists=0\n'
+    fi
+}
+
+record_socket_diagnostics() {
+    local suffix=$1 pid=$2
+    record "rootless_socket_metadata$suffix" socket_metadata "$rootless_socket"
+    record "rootless_socket_kernel$suffix" socket_kernel_state "$rootless_socket"
+    record "rootless_socket_host_api$suffix" runuser -u sl-management -- env \
+        HOME=/var/lib/sl-management XDG_RUNTIME_DIR=/run/sl-management \
+        podman --remote --url "unix://$rootless_socket" info --format=json
+    record "rootless_socket_container_view$suffix" container_socket_metadata "$pid" "$rootless_socket"
 }
 
 finish() {
@@ -170,6 +208,7 @@ EOF
     record container_selinux cat "/proc/$container_pid/attr/current"
     record container_cgroup cat "/proc/$container_pid/cgroup"
     record fixture_log runuser -u sl-management -- env HOME=/var/lib/sl-management XDG_RUNTIME_DIR=/run/sl-management CONTAINERS_STORAGE_CONF=/etc/containers/storage-sl-management.conf CONTAINERS_CONF=/etc/containers/containers-sl-management.conf podman logs sl-management-fixture
+    record_socket_diagnostics "" "$container_pid"
 
     record_sh attack_unit_replace "runuser -u sl-management -- sh -c 'printf attack >> /etc/systemd/system/$unit'"
     record_sh attack_unit_dropin "runuser -u sl-management -- mkdir -p /etc/systemd/system/$unit.d"
@@ -208,8 +247,10 @@ record user_manager systemctl is-active "user@$(id -u sl-management).service"
 record selinux_after getenforce
 record rootless_info_after runuser -u sl-management -- env HOME=/var/lib/sl-management XDG_RUNTIME_DIR=/run/sl-management CONTAINERS_STORAGE_CONF=/etc/containers/storage-sl-management.conf CONTAINERS_CONF=/etc/containers/containers-sl-management.conf podman info --format=json
 record container_inspect_after runuser -u sl-management -- env HOME=/var/lib/sl-management XDG_RUNTIME_DIR=/run/sl-management CONTAINERS_STORAGE_CONF=/etc/containers/storage-sl-management.conf CONTAINERS_CONF=/etc/containers/containers-sl-management.conf podman inspect sl-management-fixture
+container_pid_after=$(runuser -u sl-management -- env HOME=/var/lib/sl-management XDG_RUNTIME_DIR=/run/sl-management CONTAINERS_STORAGE_CONF=/etc/containers/storage-sl-management.conf CONTAINERS_CONF=/etc/containers/containers-sl-management.conf podman inspect -f '{{.State.Pid}}' sl-management-fixture)
+record_socket_diagnostics _after "$container_pid_after"
 record fixture_log_after runuser -u sl-management -- env HOME=/var/lib/sl-management XDG_RUNTIME_DIR=/run/sl-management CONTAINERS_STORAGE_CONF=/etc/containers/storage-sl-management.conf CONTAINERS_CONF=/etc/containers/containers-sl-management.conf podman logs sl-management-fixture
 record attack_systemctl_after_reboot runuser -u sl-management -- systemctl restart "$unit"
 record journal journalctl -u "$unit" -b --no-pager
-record audit journalctl -k -b -g 'avc:.*denied' --no-pager
+record audit journalctl -k -b -g 'avc:.*denied' --no-pager --output=json
 finish

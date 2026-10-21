@@ -115,6 +115,13 @@ def good_report():
         "user_manager": rec("inactive", 3),
         "system_state": rec("starting", 1),
         "failed_units": rec(""),
+        "audit": rec("-- No entries --", 1),
+        "rootless_socket_metadata": rec("exists=0"),
+        "rootless_socket_metadata_after": rec("exists=0"),
+        "rootless_socket_kernel": rec("present=0"),
+        "rootless_socket_kernel_after": rec("present=0"),
+        "rootless_socket_container_view": rec("exists=0"),
+        "rootless_socket_container_view_after": rec("exists=0"),
         "pinned_origin": rec(json.dumps({
             "status": {"booted": {"image": {
                 "image": {"image": RUNNER.EXPECTED_BASE_ORIGIN},
@@ -135,6 +142,9 @@ def good_report():
         ),
     })
     evidence["unit_after_reboot"] = copy.deepcopy(evidence["unit_before_reboot"])
+    api_error = "cannot connect to /run/sl-management/podman/podman.sock: no such file or directory"
+    evidence["rootless_socket_host_api"] = rec(api_error, 1)
+    evidence["rootless_socket_host_api_after"] = rec(api_error, 1)
     return {
         "qemu_exit_code": 0,
         "command": [
@@ -161,6 +171,7 @@ class HarnessTests(unittest.TestCase):
             "qemu_clean_exit": lambda r: r.update(qemu_exit_code=1),
             "probe_complete": lambda r: r["evidence"]["complete"].update(output="truncated"),
             "evidence_commands_valid": lambda r: r["evidence"]["systemd"].update(exit_code=127),
+            "journal_avc_evidence_valid": lambda r: r["evidence"]["audit"].update(output="journal failed"),
             "genuine_kvm": lambda r: r.update(command=["qemu-system-x86_64", "-machine", "q35,accel=tcg"]),
             "pinned_base": lambda r: r["evidence"]["pinned_origin"].update(output="{}"),
             "pid1_systemd": lambda r: r["evidence"]["pid1"].update(output="bash"),
@@ -187,7 +198,9 @@ class HarnessTests(unittest.TestCase):
             "container_constraints": lambda r: r["evidence"]["container_inspect"].update(output=json.dumps([{**inspect()[0], "HostConfig": {**inspect()[0]["HostConfig"], "ReadonlyRootfs": False}}])),
             "reboot_restart": lambda r: r["evidence"]["boot_id_after"].update(output="boot-one"),
             "no_login_or_user_manager": lambda r: r["evidence"]["user_manager"].update(exit_code=0, output="active"),
-            "host_rootless_socket_absent": lambda r: r["evidence"]["rootless_info"].update(output=json.dumps({**info(), "host": {**info()["host"], "remoteSocket": {"path": "/run/sl-management/podman/podman.sock", "exists": True}}})),
+            "rootless_socket_diagnostics_complete": lambda r: r["evidence"]["rootless_socket_metadata"].update(output="exists=1"),
+            "host_rootless_socket_absent": lambda r: r["evidence"]["rootless_socket_metadata"].update(output="exists=1\ntype=socket\nmode=600\nuid=992\ngid=995\nselinux=container_runtime_t"),
+            "container_rootless_socket_inaccessible": lambda r: r["evidence"]["rootless_socket_container_view"].update(output="exists=1\ntype=socket\nmode=600\nuid=0\ngid=0\nselinux=container_runtime_t"),
             "authority_attacks_denied": lambda r: r["evidence"]["attack_systemctl_stop"].update(exit_code=0, output=""),
             "no_failed_units": lambda r: r["evidence"]["failed_units"].update(output="broken.service failed"),
         }
@@ -228,6 +241,47 @@ class HarnessTests(unittest.TestCase):
         result = RUNNER.evaluate(report, GOOD_SERIAL)
         self.assertFalse(result["all_passed"])
         self.assertIn("evidence_commands_valid", result["failed"])
+
+    def test_empty_avc_query_is_valid_evidence(self):
+        for output in ("", "-- No entries --"):
+            with self.subTest(output=output):
+                report = good_report()
+                report["evidence"]["audit"] = rec(output, 1)
+                result = RUNNER.evaluate(report, GOOD_SERIAL)
+                self.assertTrue(result["checks"]["journal_avc_evidence_valid"])
+                self.assertTrue(result["checks"]["evidence_commands_valid"])
+
+    def test_avc_query_failure_and_malformed_results_are_rejected(self):
+        cases = ((1, "Failed to open journal"), (0, ""), (0, "{"), (0, '{"MESSAGE":42}'))
+        for exit_code, output in cases:
+            with self.subTest(exit_code=exit_code, output=output):
+                report = good_report()
+                report["evidence"]["audit"] = rec(output, exit_code)
+                result = RUNNER.evaluate(report, GOOD_SERIAL)
+                self.assertFalse(result["checks"]["journal_avc_evidence_valid"])
+                self.assertFalse(result["checks"]["evidence_commands_valid"])
+
+        report = good_report()
+        del report["evidence"]["audit"]
+        result = RUNNER.evaluate(report, GOOD_SERIAL)
+        self.assertFalse(result["checks"]["journal_avc_evidence_valid"])
+        self.assertFalse(result["checks"]["evidence_commands_valid"])
+
+    def test_structured_related_avc_remains_a_failure(self):
+        report = good_report()
+        report["evidence"]["audit"] = rec(json.dumps({
+            "MESSAGE": 'avc: denied { read } comm="podman" scontext=container_t',
+        }))
+        result = RUNNER.evaluate(report, GOOD_SERIAL)
+        self.assertTrue(result["checks"]["journal_avc_evidence_valid"])
+        self.assertFalse(result["checks"]["no_related_avc"])
+
+    def test_socket_api_tool_failure_is_not_connectivity_evidence(self):
+        report = good_report()
+        report["evidence"]["rootless_socket_host_api"] = rec("podman: command not found", 127)
+        result = RUNNER.evaluate(report, GOOD_SERIAL)
+        self.assertFalse(result["checks"]["rootless_socket_diagnostics_complete"])
+        self.assertFalse(result["checks"]["evidence_commands_valid"])
 
     def test_missing_or_truncated_json_cannot_pass(self):
         for output in ("", "{", '{"host":'):
