@@ -18,6 +18,84 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 DEFAULT_BASELINE = Path("config/coreos-source-inventory.json")
 UNIT_SUFFIXES = (".service", ".socket", ".timer", ".path", ".target", ".mount")
+PROTECTED_RUNTIME_PREFIXES = (
+    "/usr/bin/",
+    "/usr/libexec/signallayer/",
+    "/usr/lib/signallayer/",
+    "/usr/lib/systemd/system/",
+    "/etc/systemd/system/",
+    "/usr/share/dbus-1/",
+    "/etc/dbus-1/",
+    "/usr/lib/sysusers.d/",
+    "/etc/sysusers.d/",
+    "/usr/lib/tmpfiles.d/",
+    "/usr/share/selinux/",
+    "/etc/selinux/",
+)
+PACKAGE_MANAGERS = ("dnf", "dnf5", "microdnf", "yum", "apt", "apt-get", "apk", "rpm", "rpm-ostree")
+MUTATING_COMMANDS = {
+    "bash",
+    "cat",
+    "chmod",
+    "chown",
+    "chcon",
+    "cp",
+    "dd",
+    "echo",
+    "install",
+    "ln",
+    "mkdir",
+    "mv",
+    "perl",
+    "printf",
+    "python",
+    "python3",
+    "rm",
+    "rmdir",
+    "sed",
+    "semanage",
+    "semodule",
+    "sh",
+    "tee",
+    "touch",
+    "truncate",
+}
+SUPPORTED_RUN_COMMANDS = {
+    "}",
+    "awk",
+    "case",
+    "chmod",
+    "dnf",
+    "esac",
+    "exit",
+    "find",
+    "grep",
+    "install",
+    "ln",
+    "printf",
+    "rm",
+    "rmdir",
+    "sed",
+    "semodule",
+    "set",
+    "systemctl",
+    "test",
+    "tr",
+}
+REVIEWED_COPY_EXCEPTIONS = {
+    "/usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf": {
+        "source": "image/platform/udisks2-polkit.conf",
+        "sha256": "7798a6fe37e70c0e442b0ff84813662d5285624aaf3b4dc275c0e3542dfe0172",
+    },
+    "/usr/lib/tmpfiles.d/sl-bootc-runtime.conf": {
+        "source": "image/platform/sl-bootc-runtime.conf",
+        "sha256": "b9b288a3286cb030fe0541df86cc6429f3a0c2c65afb3f1d6c56811b12aedf62",
+    },
+    "/usr/share/selinux/packages/sl_platformd.pp": {
+        "source": "/policy/sl_platformd.pp",
+        "from": "--from=policy-build",
+    },
+}
 
 
 class InventoryError(Exception):
@@ -56,21 +134,70 @@ def logical_lines(text: str) -> list[str]:
     return result
 
 
-def copy_mappings(root: Path, containerfile: str) -> list[dict[str, str]]:
+def parse_copy(root: Path, line: str) -> dict[str, str]:
+    body = line.removeprefix("COPY ").strip()
+    if body.startswith("["):
+        raise InventoryError(f"unsupported runtime COPY JSON form: {line}")
+    try:
+        tokens = shlex.split(line)
+    except ValueError as error:
+        raise InventoryError(f"cannot parse runtime COPY instruction: {line}: {error}") from error
+    flags = [token for token in tokens[1:] if token.startswith("--")]
+    if len(flags) > 1 or any(not token.startswith("--from=") or not token.removeprefix("--from=") for token in flags):
+        raise InventoryError(f"unsupported runtime COPY flag or form: {line}")
+    values = [token for token in tokens[1:] if not token.startswith("--")]
+    if len(values) != 2:
+        raise InventoryError(f"runtime COPY must have exactly one source and one destination: {line}")
+    source, destination = values
+    if not destination.startswith("/") or any(character in destination for character in "*?["):
+        raise InventoryError(f"unsupported runtime COPY destination: {line}")
+    from_stage = bool(flags)
+    if (
+        source == "-"
+        or source.startswith(("http://", "https://", "git://", "ssh://"))
+        or any(character in source for character in "*?[")
+        or (not from_stage and (source.startswith("/") or ".." in Path(source).parts))
+    ):
+        raise InventoryError(f"unsupported runtime COPY source: {line}")
+    supported_destination = (
+        destination.startswith("/usr/bin/")
+        or destination.startswith("/usr/libexec/signallayer/")
+        or destination.startswith("/usr/lib/sysusers.d/")
+        or destination.startswith("/usr/share/dbus-1/system.d/")
+        or destination.startswith("/usr/share/dbus-1/system-services/")
+        or (
+            destination.startswith("/usr/lib/systemd/system/")
+            and (
+                destination.endswith(UNIT_SUFFIXES)
+                or destination == "/usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf"
+            )
+        )
+        or destination == "/usr/lib/tmpfiles.d/sl-bootc-runtime.conf"
+        or destination == "/usr/share/selinux/packages/sl_platformd.pp"
+    )
+    if not supported_destination:
+        raise InventoryError(f"unsupported runtime COPY destination outside the reviewed grammar: {line}")
+    source_path = root / source
+    if not from_stage and not source_path.is_file():
+        raise InventoryError(f"runtime COPY source is not a maintained file: {line}")
+    if destination in REVIEWED_COPY_EXCEPTIONS:
+        expected = REVIEWED_COPY_EXCEPTIONS[destination]
+        if source != expected["source"] or ("from" in expected and flags != [expected["from"]]):
+            raise InventoryError(f"runtime COPY does not match the reviewed fixed input: {line}")
+        if "sha256" in expected and digest(source_path) != expected["sha256"]:
+            raise InventoryError(f"reviewed runtime COPY input changed without inventory approval: {source}")
+    record = {"source": source, "destination": destination}
+    if source_path.is_file():
+        record["sha256"] = digest(source_path)
+    return record
+
+
+def copy_mappings(root: Path, stage: str) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
-    for line in logical_lines(containerfile):
+    for line in logical_lines(stage):
         if not line.startswith("COPY "):
             continue
-        tokens = shlex.split(line)
-        values = [token for token in tokens[1:] if not token.startswith("--")]
-        if len(values) != 2:
-            continue
-        source, destination = values
-        source_path = root / source
-        record = {"source": source, "destination": destination}
-        if source_path.is_file():
-            record["sha256"] = digest(source_path)
-        records.append(record)
+        records.append(parse_copy(root, line))
     return records
 
 
@@ -90,6 +217,98 @@ def runtime_packages(stage: str) -> list[str]:
             if not token.startswith("-") and "$" not in token:
                 packages.add(token)
     return sorted(packages)
+
+
+def command_segments(body: str) -> list[str]:
+    return [segment.strip() for segment in re.split(r"\s*(?:&&|\|\||;)\s*", body) if segment.strip()]
+
+
+def command_name(segment: str) -> str:
+    candidate = segment.lstrip("{(! ")
+    if candidate.startswith("command "):
+        candidate = candidate.removeprefix("command ").lstrip()
+    return candidate.split(maxsplit=1)[0] if candidate else ""
+
+
+def validate_package_commands(line: str) -> None:
+    body = line.removeprefix("RUN ")
+    manager_pattern = r"(?:^|[;&|]\s*)(?:command\s+)?(" + "|".join(re.escape(name) for name in PACKAGE_MANAGERS) + r")\b"
+    managers = re.findall(manager_pattern, body)
+    if not managers:
+        return
+    approved = re.fullmatch(
+        r"dnf -y install --setopt=install_weak_deps=False "
+        r"([A-Za-z0-9_.+:-]+(?: [A-Za-z0-9_.+:-]+)*) && dnf clean all(?: && .+)?",
+        body,
+    )
+    if managers != ["dnf", "dnf"] or approved is None:
+        raise InventoryError(f"unsupported runtime package operation: {line}")
+
+
+def allowed_runtime_mutation(segment: str) -> bool:
+    normalized = segment.lstrip("{ ")
+    if normalized in {
+        "install -d -m 0755 /usr/lib/signallayer",
+        "install -d -m 0755 /usr/lib/signallayer/openssl.d",
+        "install -m 0644 /etc/pki/tls/openssl.d/pkcs11-provider.conf /usr/lib/signallayer/openssl.d/",
+        "chmod 0644 /usr/lib/signallayer/openssl.cnf",
+        "semodule -n -i /usr/share/selinux/packages/sl_platformd.pp",
+        "install -d /usr/lib/systemd/system/multi-user.target.wants",
+        "install -d /etc/systemd/system",
+        "rm -rf -- /run/dnf /var/cache/libdnf5 /var/lib/dnf/repos",
+        "rm -f -- /var/log/dnf5.log /var/cache/ldconfig/aux-cache",
+        "rm -f /usr/bin/semodule_expand /usr/bin/semodule_link /usr/bin/semodule_package /usr/bin/semodule_unpackage /usr/share/selinux/devel/include/services/container.if /usr/share/selinux/devel/include/distributed/passt.if",
+        "rmdir /usr/share/selinux/devel/include/services /usr/share/selinux/devel/include/distributed /usr/share/selinux/devel/include /usr/share/selinux/devel",
+    }:
+        return True
+    if normalized.startswith("sed ") and normalized.endswith("> /usr/lib/signallayer/openssl.cnf"):
+        return True
+    if normalized.startswith("printf ") and normalized.endswith("> /usr/lib/signallayer/release"):
+        return True
+    if re.fullmatch(r"ln -s \S+ /(?:usr/lib|etc)/systemd/system/\S+\}?", normalized):
+        return True
+    return False
+
+
+def allowed_runtime_reference(segment: str) -> bool:
+    normalized = segment.lstrip("{ ")
+    if normalized.startswith(("test ", "[ ", "grep ", "awk ", "tr ", "readlink ", "! ")):
+        return True
+    return allowed_runtime_mutation(segment)
+
+
+def validate_run_instruction(line: str) -> None:
+    validate_package_commands(line)
+    body = line.removeprefix("RUN ")
+    if re.search(r"(?:^|[;&|]\s*)(?:useradd|groupadd|usermod|groupmod|systemd-sysusers)\b", body):
+        raise InventoryError(f"unsupported runtime identity operation: {line}")
+    for match in re.finditer(r"(?:^|[;&|]\s*)systemctl\s+(\S+)", body):
+        if match.group(1) not in {"enable", "disable", "mask", "unmask", "preset"}:
+            raise InventoryError(f"unsupported runtime systemd activation operation: {line}")
+    for segment in command_segments(body):
+        name = command_name(segment)
+        if name in MUTATING_COMMANDS and not allowed_runtime_mutation(segment):
+            raise InventoryError(f"unsupported runtime mutation command: {segment}")
+        if name not in SUPPORTED_RUN_COMMANDS:
+            raise InventoryError(f"unsupported runtime command: {segment}")
+        if not any(prefix in segment for prefix in PROTECTED_RUNTIME_PREFIXES):
+            continue
+        if not allowed_runtime_reference(segment):
+            raise InventoryError(f"unsupported operation touching a protected runtime surface: {segment}")
+
+
+def validate_runtime_grammar(root: Path, stage: str) -> None:
+    supported_instructions = {"ARG", "LABEL", "RUN", "COPY"}
+    for line in logical_lines(stage):
+        instruction = line.split(maxsplit=1)[0]
+        if instruction == "ADD":
+            raise InventoryError(f"ADD is not supported in the runtime stage: {line}")
+        if instruction not in supported_instructions:
+            raise InventoryError(f"unsupported runtime-stage instruction: {line}")
+        if instruction == "COPY":
+            parse_copy(root, line)
+        elif instruction == "RUN":
+            validate_run_instruction(line)
 
 
 def installed_files(root: Path, mappings: list[dict[str, str]], prefix: str) -> dict[str, dict[str, str]]:
@@ -187,7 +406,8 @@ def source_commit(root: Path) -> str:
 def collect(root: Path) -> dict[str, object]:
     containerfile = read(root / "Containerfile")
     base, stage = final_stage(containerfile)
-    mappings = copy_mappings(root, containerfile)
+    validate_runtime_grammar(root, stage)
+    mappings = copy_mappings(root, stage)
     units = {
         path: value
         for path, value in installed_files(root, mappings, "/usr/lib/systemd/system/").items()
@@ -299,7 +519,10 @@ def main(argv: list[str] | None = None) -> int:
             "installed_artifact_inventory": "unproven",
         }
     except InventoryError as error:
-        print(f"coreos-inventory: ERROR: {error}", file=sys.stderr)
+        if args.format == "json":
+            print(json.dumps({"status": "error", "error": str(error)}, indent=2, sort_keys=True))
+        else:
+            print(f"coreos-inventory: ERROR: {error}", file=sys.stderr)
         return 2
 
     if args.format == "json":

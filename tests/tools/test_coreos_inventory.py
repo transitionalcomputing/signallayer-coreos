@@ -49,7 +49,7 @@ def fixture(root: Path) -> None:
         """
         FROM build.example/unused AS build
         FROM quay.example/coreos@sha256:111
-        RUN dnf -y install --setopt=install_weak_deps=False audit && dnf clean all
+        RUN dnf -y install --setopt=install_weak_deps=False audit podman && dnf clean all
         COPY --from=build /build/sl-app /usr/bin/sl-app
         COPY image/platform/sl-app.service /usr/lib/systemd/system/sl-app.service
         COPY image/platform/sl-app.sysusers /usr/lib/sysusers.d/sl-app.conf
@@ -90,6 +90,13 @@ class CoreOSInventoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn(needle, result.stdout)
 
+    def assert_grammar_rejection(self, instruction: str, needle: str) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text() + instruction + "\n")
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn(needle, result.stderr)
+
     def test_matching_inventory_passes_and_json_is_machine_readable(self) -> None:
         result = self.run_tool("--format", "json")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -100,24 +107,24 @@ class CoreOSInventoryTests(unittest.TestCase):
 
     def test_added_runtime_package_fails(self) -> None:
         path = self.root / "Containerfile"
-        path.write_text(path.read_text().replace("install --setopt=install_weak_deps=False audit", "install --setopt=install_weak_deps=False audit podman"))
+        path.write_text(path.read_text().replace("install --setopt=install_weak_deps=False audit podman", "install --setopt=install_weak_deps=False audit podman skopeo"))
         self.assert_change("added: runtime_packages_declared[]")
 
     def test_failing_json_names_the_changed_surface(self) -> None:
         path = self.root / "Containerfile"
-        path.write_text(path.read_text().replace(" audit &&", " audit podman &&"))
+        path.write_text(path.read_text().replace(" audit podman &&", " audit podman skopeo &&"))
         result = self.run_tool("--format", "json")
         self.assertEqual(result.returncode, 1)
         parsed = json.loads(result.stdout)
         self.assertEqual(parsed["status"], "fail")
         self.assertIn(
-            {"kind": "added", "path": "runtime_packages_declared[]", "actual": "podman"},
+            {"kind": "added", "path": "runtime_packages_declared[]", "actual": "skopeo"},
             parsed["differences"],
         )
 
     def test_removed_runtime_package_fails(self) -> None:
         path = self.root / "Containerfile"
-        path.write_text(path.read_text().replace(" audit &&", " &&"))
+        path.write_text(path.read_text().replace(" audit podman &&", " audit &&"))
         self.assert_change("removed: runtime_packages_declared[]")
 
     def test_added_systemd_service_fails(self) -> None:
@@ -156,6 +163,86 @@ class CoreOSInventoryTests(unittest.TestCase):
         path = self.root / "image/platform/selinux/sl_app.te"
         path.write_text(path.read_text() + "allow domain self:process signal;\n")
         self.assert_change("changed: selinux_policy_inputs.image/platform/selinux/sl_app.te")
+
+    def test_alternate_dnf_install_syntax_is_rejected(self) -> None:
+        self.assert_grammar_rejection("RUN dnf install -y podman", "unsupported runtime package operation")
+
+    def test_package_removal_is_rejected(self) -> None:
+        self.assert_grammar_rejection("RUN dnf -y remove audit", "unsupported runtime package operation")
+
+    def test_unsupported_package_manager_is_rejected(self) -> None:
+        self.assert_grammar_rejection("RUN microdnf install podman", "unsupported runtime package operation")
+
+    def test_add_runtime_file_is_rejected(self) -> None:
+        self.assert_grammar_rejection(
+            "ADD image/platform/sl-app.service /usr/lib/systemd/system/sl-added.service",
+            "ADD is not supported",
+        )
+
+    def test_unsupported_copy_forms_are_rejected(self) -> None:
+        instructions = {
+            "JSON": 'COPY ["image/platform/sl-app.service", "/usr/lib/systemd/system/sl-json.service"]',
+            "multiple sources": "COPY image/platform/sl-app.service image/platform/sl-app.sysusers /usr/lib/systemd/system/",
+            "unsupported flag": "COPY --chown=root:root image/platform/sl-app.service /usr/lib/systemd/system/sl-app.service",
+            "unknown destination": "COPY image/platform/sl-app.service /etc/profile.d/sl-app.sh",
+        }
+        original = (self.root / "Containerfile").read_text()
+        for label, instruction in instructions.items():
+            with self.subTest(form=label):
+                (self.root / "Containerfile").write_text(original + instruction + "\n")
+                result = self.run_tool()
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("runtime COPY", result.stderr)
+
+    def test_shell_generated_systemd_unit_is_rejected(self) -> None:
+        self.assert_grammar_rejection(
+            "RUN printf '[Service]\\nExecStart=/usr/bin/true\\n' > /usr/lib/systemd/system/sl-generated.service",
+            "unsupported runtime mutation command",
+        )
+
+    def test_direct_writes_to_protected_policy_surfaces_are_rejected(self) -> None:
+        instructions = {
+            "D-Bus": "RUN touch /usr/share/dbus-1/system.d/untracked.conf",
+            "sysusers": "RUN touch /usr/lib/sysusers.d/untracked.conf",
+            "SELinux": "RUN touch /usr/share/selinux/packages/untracked.pp",
+        }
+        original = (self.root / "Containerfile").read_text()
+        for label, instruction in instructions.items():
+            with self.subTest(surface=label):
+                (self.root / "Containerfile").write_text(original + instruction + "\n")
+                result = self.run_tool()
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("unsupported runtime mutation command", result.stderr)
+
+    def test_previously_untracked_runtime_mutation_is_rejected(self) -> None:
+        self.assert_grammar_rejection(
+            "RUN touch /usr/bin/untracked-runtime",
+            "unsupported runtime mutation command",
+        )
+
+    def test_indirect_runtime_mutation_is_rejected(self) -> None:
+        self.assert_grammar_rejection(
+            'RUN touch "$RUNTIME_DESTINATION"',
+            "unsupported runtime mutation command",
+        )
+
+    def test_parser_error_is_machine_readable(self) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text() + "ADD payload /usr/bin/untracked\n")
+        result = self.run_tool("--format", "json")
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        parsed = json.loads(result.stdout)
+        self.assertEqual(parsed["status"], "error")
+        self.assertIn("ADD is not supported", parsed["error"])
+
+    def test_candidate_generation_cannot_bypass_runtime_parser(self) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text() + "RUN touch /usr/bin/untracked-runtime\n")
+        candidate = self.root / "unapproved.json"
+        result = self.run_tool("--candidate-output", str(candidate))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("unsupported runtime mutation command", result.stderr)
+        self.assertFalse(candidate.exists())
 
     def test_candidate_cannot_overwrite_baseline(self) -> None:
         result = self.run_tool("--candidate-output", str(self.baseline))

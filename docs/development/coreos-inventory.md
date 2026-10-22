@@ -29,6 +29,18 @@ The tool reports additions, removals, and changed values in human-readable
 form. `--format json` returns the same result for automation. Any difference
 exits nonzero and names the changed surface.
 
+The runtime-stage parser is deliberately narrow and fail closed. It accepts
+the reviewed package-install command, single-source shell-form `COPY`
+instructions to known inventory destinations, the existing release/policy
+setup commands, and systemd activation forms represented in the inventory.
+`ADD`, alternate package-manager syntax, package removal, JSON or multi-source
+`COPY`, unknown destinations, unrecognized mutation commands, and direct or
+shell-generated writes to protected systemd, D-Bus, sysusers, SELinux and
+CoreOS executable locations are errors. New syntax requires an explicit parser
+and negative-control update before it can enter an accepted build. The few
+reviewed runtime `COPY` exceptions outside the ordinary inventory destinations
+are bound to their exact source/stage and, for maintained files, source digest.
+
 This is a **source-declared** inventory. It cannot enumerate transitive RPM
 packages inherited from the pinned base or resolved by DNF, generated units,
 loaded SELinux policy, or the final installed artifact without building and
@@ -75,8 +87,13 @@ an existing candidate, and rejects any baseline not explicitly marked
 Release-bound OCI builds use:
 
 ```bash
-tools/build-release-oci <planned-os-version> [podman build arguments...]
+tools/build-release-oci <planned-os-version> [--tag <image-reference>]
 ```
+
+The wrapper owns the absolute repository context, its `Containerfile`, and the
+two release-intent build arguments. Arbitrary Podman options and positional
+contexts are intentionally unsupported. Callers that previously supplied `.`
+must omit it; the wrapper now supplies the validated repository root itself.
 
 Release-bound disk builds use:
 

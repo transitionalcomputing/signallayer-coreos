@@ -4,15 +4,25 @@ set -Eeuo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 if (( $# == 0 )); then
-    echo "Usage: $0 <planned-os-version> [podman build arguments...]" >&2
+    echo "Usage: $0 <planned-os-version> [--tag <image-reference>]" >&2
     exit 2
 fi
 planned_os_version=$1
 shift
-for argument in "$@"; do
-    case "$argument" in
-        *RELEASE_INTENT*|*PLANNED_OS_VERSION*)
-            echo "Release intent arguments are owned by $0 and may not be overridden." >&2
+tag_arguments=()
+while (( $# > 0 )); do
+    case "$1" in
+        -t|--tag)
+            if (( $# < 2 )) || [[ -z $2 || $2 == -* ]]; then
+                echo "$1 requires a nonempty image reference." >&2
+                exit 2
+            fi
+            tag_arguments+=(--tag "$2")
+            shift 2
+            ;;
+        *)
+            echo "Unsupported release build argument: $1" >&2
+            echo "Usage: $0 <planned-os-version> [--tag <image-reference>]" >&2
             exit 2
             ;;
     esac
@@ -21,6 +31,8 @@ python3 "$repo_root/tools/coreos-inventory" --root "$repo_root"
 python3 "$repo_root/tools/release-preflight" "$planned_os_version" --root "$repo_root"
 command -v podman >/dev/null || { echo "Missing required tool: podman" >&2; exit 1; }
 exec podman build \
+    --file "$repo_root/Containerfile" \
     --build-arg RELEASE_INTENT=release \
     --build-arg "PLANNED_OS_VERSION=$planned_os_version" \
-    "$@"
+    "${tag_arguments[@]}" \
+    "$repo_root"

@@ -247,7 +247,7 @@ class ReleasePreflightTests(unittest.TestCase):
             fake.chmod(0o755)
             environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
             result = subprocess.run(
-                [str(RELEASE_OCI), "0.0.4", "."],
+                [str(RELEASE_OCI), "0.0.4"],
                 cwd=REPO,
                 env=environment,
                 text=True,
@@ -266,7 +266,7 @@ class ReleasePreflightTests(unittest.TestCase):
             fake.chmod(0o755)
             environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
             result = subprocess.run(
-                [str(RELEASE_OCI), "0.0.3.1", "."],
+                [str(RELEASE_OCI), "0.0.3.1", "--tag", "localhost/signallayer-coreos:0.0.3.1"],
                 cwd=REPO,
                 env=environment,
                 text=True,
@@ -275,9 +275,53 @@ class ReleasePreflightTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             arguments = log.read_text().splitlines()
-            self.assertEqual(arguments[0], "build")
-            self.assertIn("RELEASE_INTENT=release", arguments)
-            self.assertIn("PLANNED_OS_VERSION=0.0.3.1", arguments)
+            self.assertEqual(
+                arguments,
+                [
+                    "build",
+                    "--file",
+                    str(REPO / "Containerfile"),
+                    "--build-arg",
+                    "RELEASE_INTENT=release",
+                    "--build-arg",
+                    "PLANNED_OS_VERSION=0.0.3.1",
+                    "--tag",
+                    "localhost/signallayer-coreos:0.0.3.1",
+                    str(REPO),
+                ],
+            )
+
+    def test_release_wrapper_rejects_build_input_bypasses_before_podman(self) -> None:
+        attempts = {
+            "short alternate file": ["-f", "Alternatefile"],
+            "long alternate file": ["--file=Alternatefile"],
+            "alternate context": ["/tmp/alternate-context"],
+            "dot context": ["."],
+            "remote context": ["https://example.invalid/context.tar"],
+            "git context": ["git://example.invalid/repository"],
+            "stdin context": ["-"],
+            "controlled build arg": ["--build-arg", "RELEASE_INTENT=developer"],
+            "controlled build arg equals": ["--build-arg=PLANNED_OS_VERSION=0.0.4"],
+            "ambiguous option": ["--pull=always"],
+        }
+        for label, arguments in attempts.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                invoked = Path(directory) / "podman.invoked"
+                fake = Path(directory) / "podman"
+                fake.write_text(f'#!/bin/sh\ntouch "{invoked}"\nexit 99\n')
+                fake.chmod(0o755)
+                environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
+                result = subprocess.run(
+                    [str(RELEASE_OCI), "0.0.3.1", *arguments],
+                    cwd=REPO,
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("Unsupported release build argument", result.stderr)
+                self.assertFalse(invoked.exists(), f"Podman ran for {label}")
 
     def test_qcow2_release_intent_requires_version_before_any_build(self) -> None:
         result = subprocess.run(

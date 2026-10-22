@@ -62,7 +62,8 @@ Approval must name the specific proposed change and its tradeoffs; a broad autho
 ## Build and acceptance: fail early, test the right thing
 
 - Run inexpensive static checks and focused unit tests first; expensive image builds begin only after prerequisites are met.
-- Release-bound OCI work uses `tools/build-release-oci <planned-version> ...`,
+- Release-bound OCI work uses
+  `tools/build-release-oci <planned-version> [--tag <image-reference>]`,
   which runs `tools/release-preflight <planned-version>` on the host before
   invoking Podman and passes the same independent intent into the first
   container stage. Release-bound qcow2 work uses
