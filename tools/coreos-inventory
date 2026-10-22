@@ -17,71 +17,10 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 DEFAULT_BASELINE = Path("config/coreos-source-inventory.json")
+DEFAULT_BUILD_CONTRACT = Path("config/coreos-build-contract.json")
 UNIT_SUFFIXES = (".service", ".socket", ".timer", ".path", ".target", ".mount")
-PROTECTED_RUNTIME_PREFIXES = (
-    "/usr/bin/",
-    "/usr/libexec/signallayer/",
-    "/usr/lib/signallayer/",
-    "/usr/lib/systemd/system/",
-    "/etc/systemd/system/",
-    "/usr/share/dbus-1/",
-    "/etc/dbus-1/",
-    "/usr/lib/sysusers.d/",
-    "/etc/sysusers.d/",
-    "/usr/lib/tmpfiles.d/",
-    "/usr/share/selinux/",
-    "/etc/selinux/",
-)
-PACKAGE_MANAGERS = ("dnf", "dnf5", "microdnf", "yum", "apt", "apt-get", "apk", "rpm", "rpm-ostree")
-MUTATING_COMMANDS = {
-    "bash",
-    "cat",
-    "chmod",
-    "chown",
-    "chcon",
-    "cp",
-    "dd",
-    "echo",
-    "install",
-    "ln",
-    "mkdir",
-    "mv",
-    "perl",
-    "printf",
-    "python",
-    "python3",
-    "rm",
-    "rmdir",
-    "sed",
-    "semanage",
-    "semodule",
-    "sh",
-    "tee",
-    "touch",
-    "truncate",
-}
-SUPPORTED_RUN_COMMANDS = {
-    "}",
-    "awk",
-    "case",
-    "chmod",
-    "dnf",
-    "esac",
-    "exit",
-    "find",
-    "grep",
-    "install",
-    "ln",
-    "printf",
-    "rm",
-    "rmdir",
-    "sed",
-    "semodule",
-    "set",
-    "systemctl",
-    "test",
-    "tr",
-}
+SUPPORTED_INSTRUCTIONS = {"ARG", "COPY", "ENV", "FROM", "LABEL", "RUN", "WORKDIR"}
+BASELINE_RELATIVE = Path("config/coreos-source-inventory.json")
 REVIEWED_COPY_EXCEPTIONS = {
     "/usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf": {
         "source": "image/platform/udisks2-polkit.conf",
@@ -117,46 +56,111 @@ def digest(path: Path) -> str:
 
 
 def logical_lines(text: str) -> list[str]:
+    """Return the exact project-supported logical Containerfile instructions."""
     result: list[str] = []
-    current = ""
-    for raw in text.splitlines():
+    pieces: list[str] = []
+    for number, raw in enumerate(text.splitlines(), 1):
         stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
+        if not pieces and (not stripped or stripped.startswith("#")):
             continue
-        current = f"{current} {stripped}".strip()
-        if current.endswith("\\"):
-            current = current[:-1].rstrip()
-        else:
-            result.append(current)
-            current = ""
-    if current:
-        result.append(current)
+        if pieces and (not stripped or stripped.startswith("#")):
+            raise InventoryError(f"unsupported blank/comment in continued instruction at line {number}")
+        continued = stripped.endswith("\\")
+        piece = stripped[:-1].rstrip() if continued else stripped
+        if not piece:
+            raise InventoryError(f"malformed continuation at line {number}")
+        pieces.append(piece)
+        if continued:
+            continue
+        line = " ".join(pieces)
+        match = re.match(r"([A-Za-z]+)(?:\s+|$)", line)
+        if not match:
+            raise InventoryError(f"cannot classify Containerfile instruction: {line}")
+        keyword = match.group(1)
+        if keyword != keyword.upper():
+            raise InventoryError(f"unsupported instruction casing: {keyword}")
+        if keyword not in SUPPORTED_INSTRUCTIONS:
+            raise InventoryError(f"unsupported Containerfile instruction: {line}")
+        result.append(line)
+        pieces = []
+    if pieces:
+        raise InventoryError("malformed dangling Containerfile continuation")
     return result
 
 
-def parse_copy(root: Path, line: str) -> dict[str, str]:
+def parse_copy_tokens(line: str) -> tuple[str | None, list[str]]:
     body = line.removeprefix("COPY ").strip()
     if body.startswith("["):
-        raise InventoryError(f"unsupported runtime COPY JSON form: {line}")
+        raise InventoryError(f"unsupported COPY JSON form: {line}")
     try:
         tokens = shlex.split(line)
     except ValueError as error:
-        raise InventoryError(f"cannot parse runtime COPY instruction: {line}: {error}") from error
+        raise InventoryError(f"cannot parse COPY instruction: {line}: {error}") from error
     flags = [token for token in tokens[1:] if token.startswith("--")]
     if len(flags) > 1 or any(not token.startswith("--from=") or not token.removeprefix("--from=") for token in flags):
-        raise InventoryError(f"unsupported runtime COPY flag or form: {line}")
+        raise InventoryError(f"unsupported COPY flag or form: {line}")
     values = [token for token in tokens[1:] if not token.startswith("--")]
+    if len(values) < 2:
+        raise InventoryError(f"COPY must have at least one source and one destination: {line}")
+    return (flags[0].removeprefix("--from=") if flags else None), values
+
+
+def parse_stages(text: str) -> tuple[list[str], list[dict[str, object]]]:
+    globals_: list[str] = []
+    stages: list[dict[str, object]] = []
+    aliases: set[str] = set()
+    for line in logical_lines(text):
+        keyword = line.split(maxsplit=1)[0]
+        if keyword == "FROM":
+            try:
+                tokens = shlex.split(line)
+            except ValueError as error:
+                raise InventoryError(f"cannot parse FROM instruction: {line}: {error}") from error
+            if len(tokens) == 2:
+                base, alias = tokens[1], None
+            elif len(tokens) == 4 and tokens[2] == "AS":
+                base, alias = tokens[1], tokens[3]
+            else:
+                raise InventoryError(f"unsupported FROM syntax: {line}")
+            if alias:
+                if alias in aliases:
+                    raise InventoryError(f"duplicate or ambiguous stage alias: {alias}")
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", alias):
+                    raise InventoryError(f"unsupported stage alias: {alias}")
+                aliases.add(alias)
+            stages.append({"base": base, "alias": alias, "instructions": []})
+            continue
+        if not stages:
+            if keyword != "ARG":
+                raise InventoryError(f"only ARG is supported before the first FROM: {line}")
+            globals_.append(line)
+            continue
+        if keyword == "COPY":
+            from_stage, _ = parse_copy_tokens(line)
+            if from_stage is not None and from_stage not in aliases:
+                raise InventoryError(f"COPY references unknown or external stage {from_stage!r}: {line}")
+        instructions = stages[-1]["instructions"]
+        assert isinstance(instructions, list)
+        instructions.append(line)
+    if not stages:
+        raise InventoryError("Containerfile has no FROM instruction")
+    return globals_, stages
+
+
+def parse_copy(root: Path, line: str, approved_stages: set[str]) -> dict[str, str]:
+    from_stage, values = parse_copy_tokens(line)
     if len(values) != 2:
         raise InventoryError(f"runtime COPY must have exactly one source and one destination: {line}")
     source, destination = values
     if not destination.startswith("/") or any(character in destination for character in "*?["):
         raise InventoryError(f"unsupported runtime COPY destination: {line}")
-    from_stage = bool(flags)
+    if from_stage is not None and from_stage not in approved_stages:
+        raise InventoryError(f"runtime COPY references unknown or external stage {from_stage!r}: {line}")
     if (
         source == "-"
         or source.startswith(("http://", "https://", "git://", "ssh://"))
         or any(character in source for character in "*?[")
-        or (not from_stage and (source.startswith("/") or ".." in Path(source).parts))
+        or (from_stage is None and (source.startswith("/") or ".." in Path(source).parts))
     ):
         raise InventoryError(f"unsupported runtime COPY source: {line}")
     supported_destination = (
@@ -178,11 +182,12 @@ def parse_copy(root: Path, line: str) -> dict[str, str]:
     if not supported_destination:
         raise InventoryError(f"unsupported runtime COPY destination outside the reviewed grammar: {line}")
     source_path = root / source
-    if not from_stage and not source_path.is_file():
+    if from_stage is None and not source_path.is_file():
         raise InventoryError(f"runtime COPY source is not a maintained file: {line}")
     if destination in REVIEWED_COPY_EXCEPTIONS:
         expected = REVIEWED_COPY_EXCEPTIONS[destination]
-        if source != expected["source"] or ("from" in expected and flags != [expected["from"]]):
+        expected_from = expected.get("from", "").removeprefix("--from=") or None
+        if source != expected["source"] or expected_from != from_stage:
             raise InventoryError(f"runtime COPY does not match the reviewed fixed input: {line}")
         if "sha256" in expected and digest(source_path) != expected["sha256"]:
             raise InventoryError(f"reviewed runtime COPY input changed without inventory approval: {source}")
@@ -192,26 +197,19 @@ def parse_copy(root: Path, line: str) -> dict[str, str]:
     return record
 
 
-def copy_mappings(root: Path, stage: str) -> list[dict[str, str]]:
+def copy_mappings(root: Path, stage: dict[str, object], approved_stages: set[str]) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
-    for line in logical_lines(stage):
+    for line in stage["instructions"]:
+        assert isinstance(line, str)
         if not line.startswith("COPY "):
             continue
-        records.append(parse_copy(root, line))
+        records.append(parse_copy(root, line, approved_stages))
     return records
 
 
-def final_stage(containerfile: str) -> tuple[str, str]:
-    matches = list(re.finditer(r"^FROM\s+(\S+).*$", containerfile, re.MULTILINE))
-    if not matches:
-        raise InventoryError("Containerfile has no FROM instruction")
-    start = matches[-1]
-    return start.group(1), containerfile[start.end() :]
-
-
-def runtime_packages(stage: str) -> list[str]:
+def runtime_packages(stage: dict[str, object]) -> list[str]:
     packages: set[str] = set()
-    joined = "\n".join(logical_lines(stage))
+    joined = "\n".join(str(line) for line in stage["instructions"])
     for match in re.finditer(r"\bdnf\s+-y\s+install\s+(.*?)(?:\s*&&|\s*;|$)", joined):
         for token in shlex.split(match.group(1)):
             if not token.startswith("-") and "$" not in token:
@@ -219,96 +217,60 @@ def runtime_packages(stage: str) -> list[str]:
     return sorted(packages)
 
 
-def command_segments(body: str) -> list[str]:
-    return [segment.strip() for segment in re.split(r"\s*(?:&&|\|\||;)\s*", body) if segment.strip()]
 
 
-def command_name(segment: str) -> str:
-    candidate = segment.lstrip("{(! ")
-    if candidate.startswith("command "):
-        candidate = candidate.removeprefix("command ").lstrip()
-    return candidate.split(maxsplit=1)[0] if candidate else ""
+def build_context_inputs(root: Path, stages: list[dict[str, object]]) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for stage in stages:
+        for line in stage["instructions"]:
+            assert isinstance(line, str)
+            if not line.startswith("COPY "):
+                continue
+            from_stage, values = parse_copy_tokens(line)
+            if from_stage is not None:
+                continue
+            for source in values[:-1]:
+                if source.startswith(("/", "http://", "https://", "git://", "ssh://")) or any(
+                    character in source for character in "*?["
+                ) or ".." in Path(source).parts:
+                    raise InventoryError(f"unsupported build-context COPY source: {line}")
+                path = root / source
+                candidates = [path] if path.is_file() else sorted(path.rglob("*")) if path.is_dir() else []
+                if not candidates:
+                    raise InventoryError(f"missing build-context COPY source: {source}")
+                for candidate in candidates:
+                    if not candidate.is_file():
+                        continue
+                    relative = candidate.relative_to(root)
+                    if relative in {BASELINE_RELATIVE, DEFAULT_BUILD_CONTRACT}:
+                        continue
+                    files[str(relative)] = digest(candidate)
+    return dict(sorted(files.items()))
 
 
-def validate_package_commands(line: str) -> None:
-    body = line.removeprefix("RUN ")
-    manager_pattern = r"(?:^|[;&|]\s*)(?:command\s+)?(" + "|".join(re.escape(name) for name in PACKAGE_MANAGERS) + r")\b"
-    managers = re.findall(manager_pattern, body)
-    if not managers:
-        return
-    approved = re.fullmatch(
-        r"dnf -y install --setopt=install_weak_deps=False "
-        r"([A-Za-z0-9_.+:-]+(?: [A-Za-z0-9_.+:-]+)*) && dnf clean all(?: && .+)?",
-        body,
-    )
-    if managers != ["dnf", "dnf"] or approved is None:
-        raise InventoryError(f"unsupported runtime package operation: {line}")
-
-
-def allowed_runtime_mutation(segment: str) -> bool:
-    normalized = segment.lstrip("{ ")
-    if normalized in {
-        "install -d -m 0755 /usr/lib/signallayer",
-        "install -d -m 0755 /usr/lib/signallayer/openssl.d",
-        "install -m 0644 /etc/pki/tls/openssl.d/pkcs11-provider.conf /usr/lib/signallayer/openssl.d/",
-        "chmod 0644 /usr/lib/signallayer/openssl.cnf",
-        "semodule -n -i /usr/share/selinux/packages/sl_platformd.pp",
-        "install -d /usr/lib/systemd/system/multi-user.target.wants",
-        "install -d /etc/systemd/system",
-        "rm -rf -- /run/dnf /var/cache/libdnf5 /var/lib/dnf/repos",
-        "rm -f -- /var/log/dnf5.log /var/cache/ldconfig/aux-cache",
-        "rm -f /usr/bin/semodule_expand /usr/bin/semodule_link /usr/bin/semodule_package /usr/bin/semodule_unpackage /usr/share/selinux/devel/include/services/container.if /usr/share/selinux/devel/include/distributed/passt.if",
-        "rmdir /usr/share/selinux/devel/include/services /usr/share/selinux/devel/include/distributed /usr/share/selinux/devel/include /usr/share/selinux/devel",
-    }:
-        return True
-    if normalized.startswith("sed ") and normalized.endswith("> /usr/lib/signallayer/openssl.cnf"):
-        return True
-    if normalized.startswith("printf ") and normalized.endswith("> /usr/lib/signallayer/release"):
-        return True
-    if re.fullmatch(r"ln -s \S+ /(?:usr/lib|etc)/systemd/system/\S+\}?", normalized):
-        return True
-    return False
-
-
-def allowed_runtime_reference(segment: str) -> bool:
-    normalized = segment.lstrip("{ ")
-    if normalized.startswith(("test ", "[ ", "grep ", "awk ", "tr ", "readlink ", "! ")):
-        return True
-    return allowed_runtime_mutation(segment)
-
-
-def validate_run_instruction(line: str) -> None:
-    validate_package_commands(line)
-    body = line.removeprefix("RUN ")
-    if re.search(r"(?:^|[;&|]\s*)(?:useradd|groupadd|usermod|groupmod|systemd-sysusers)\b", body):
-        raise InventoryError(f"unsupported runtime identity operation: {line}")
-    for match in re.finditer(r"(?:^|[;&|]\s*)systemctl\s+(\S+)", body):
-        if match.group(1) not in {"enable", "disable", "mask", "unmask", "preset"}:
-            raise InventoryError(f"unsupported runtime systemd activation operation: {line}")
-    for segment in command_segments(body):
-        name = command_name(segment)
-        if name in MUTATING_COMMANDS and not allowed_runtime_mutation(segment):
-            raise InventoryError(f"unsupported runtime mutation command: {segment}")
-        if name not in SUPPORTED_RUN_COMMANDS:
-            raise InventoryError(f"unsupported runtime command: {segment}")
-        if not any(prefix in segment for prefix in PROTECTED_RUNTIME_PREFIXES):
-            continue
-        if not allowed_runtime_reference(segment):
-            raise InventoryError(f"unsupported operation touching a protected runtime surface: {segment}")
-
-
-def validate_runtime_grammar(root: Path, stage: str) -> None:
-    supported_instructions = {"ARG", "LABEL", "RUN", "COPY"}
-    for line in logical_lines(stage):
-        instruction = line.split(maxsplit=1)[0]
-        if instruction == "ADD":
-            raise InventoryError(f"ADD is not supported in the runtime stage: {line}")
-        if instruction not in supported_instructions:
-            raise InventoryError(f"unsupported runtime-stage instruction: {line}")
-        if instruction == "COPY":
-            parse_copy(root, line)
-        elif instruction == "RUN":
-            validate_run_instruction(line)
+def build_contract(root: Path) -> dict[str, object]:
+    globals_, stages = parse_stages(read(root / "Containerfile"))
+    copies: list[dict[str, object]] = []
+    for index, stage in enumerate(stages):
+        for line in stage["instructions"]:
+            assert isinstance(line, str)
+            if not line.startswith("COPY "):
+                continue
+            from_stage, values = parse_copy_tokens(line)
+            copies.append(
+                {
+                    "stage": stage["alias"] if stage["alias"] is not None else f"final:{index}",
+                    "from": from_stage,
+                    "sources": values[:-1],
+                    "destination": values[-1],
+                }
+            )
+    return {
+        "global_instructions": globals_,
+        "stages": stages,
+        "copy_provenance": copies,
+        "build_context_inputs": build_context_inputs(root, stages),
+    }
 
 
 def installed_files(root: Path, mappings: list[dict[str, str]], prefix: str) -> dict[str, dict[str, str]]:
@@ -383,9 +345,10 @@ def selinux_inputs(root: Path) -> dict[str, str]:
     }
 
 
-def systemd_operations(stage: str) -> list[str]:
+def systemd_operations(stage: dict[str, object]) -> list[str]:
     operations: set[str] = set()
-    for line in logical_lines(stage):
+    for line in stage["instructions"]:
+        assert isinstance(line, str)
         for match in re.finditer(r"\bsystemctl\s+(?:enable|disable|mask|unmask|preset)\s+([^;&]+)", line):
             operations.add(" ".join(match.group(0).split()))
         for match in re.finditer(r"\bln\s+-s\s+(\S+)\s+(\S*systemd/system/\S+)", line):
@@ -405,9 +368,10 @@ def source_commit(root: Path) -> str:
 
 def collect(root: Path) -> dict[str, object]:
     containerfile = read(root / "Containerfile")
-    base, stage = final_stage(containerfile)
-    validate_runtime_grammar(root, stage)
-    mappings = copy_mappings(root, stage)
+    globals_, stages = parse_stages(containerfile)
+    stage_names = {str(stage["alias"]) for stage in stages if stage["alias"] is not None}
+    runtime = stages[-1]
+    mappings = copy_mappings(root, runtime, stage_names)
     units = {
         path: value
         for path, value in installed_files(root, mappings, "/usr/lib/systemd/system/").items()
@@ -423,10 +387,10 @@ def collect(root: Path) -> dict[str, object]:
         **installed_files(root, mappings, "/usr/libexec/signallayer/"),
     }
     return {
-        "runtime_base_image": base,
-        "runtime_packages_declared": runtime_packages(stage),
+        "runtime_base_image": runtime["base"],
+        "runtime_packages_declared": runtime_packages(runtime),
         "systemd_units": units,
-        "systemd_operations": systemd_operations(stage),
+        "systemd_operations": systemd_operations(runtime),
         "dbus_files": dict(sorted(dbus.items())),
         "dbus_policy_rules": dbus_rules(root, dbus),
         "sysusers_files": dict(sorted(sysusers.items())),
@@ -479,8 +443,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--build-contract", type=Path)
     parser.add_argument("--format", choices=("human", "json"), default="human")
     parser.add_argument("--candidate-output", type=Path)
+    parser.add_argument("--contract-candidate-output", type=Path)
     return parser.parse_args(argv)
 
 
@@ -488,7 +454,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     root = args.root.resolve()
     baseline = (args.baseline or root / DEFAULT_BASELINE).resolve()
+    contract_path = (args.build_contract or root / DEFAULT_BUILD_CONTRACT).resolve()
     try:
+        if args.candidate_output and args.contract_candidate_output:
+            raise InventoryError("inventory and build-contract candidates must be generated separately")
+        if args.contract_candidate_output:
+            output = args.contract_candidate_output.resolve()
+            if output == contract_path:
+                raise InventoryError("refusing to overwrite the reviewed build contract")
+            if output.exists():
+                raise InventoryError(f"refusing to overwrite existing candidate output: {output}")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "recorded_from": source_commit(root),
+                        "scope": "exact Containerfile instructions, COPY provenance, and maintained build-context inputs",
+                        "contract": build_contract(root),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+            print(f"coreos-inventory: wrote build-contract candidate to {output}")
+            return 0
         if args.candidate_output:
             output = args.candidate_output.resolve()
             if output == baseline:
@@ -508,8 +499,18 @@ def main(argv: list[str] | None = None) -> int:
             raise InventoryError("unsupported baseline schema")
         if accepted.get("approval_status") != "accepted":
             raise InventoryError("baseline is not explicitly marked accepted")
+        try:
+            reviewed_contract = json.loads(read(contract_path))
+        except json.JSONDecodeError as error:
+            raise InventoryError(f"invalid build contract JSON: {error}") from error
+        if reviewed_contract.get("schema_version") != 1 or not isinstance(reviewed_contract.get("contract"), dict):
+            raise InventoryError("unsupported or malformed build contract")
         actual = collect(root)
         differences = compare(accepted.get("inventory", {}), actual)
+        contract_differences = compare(reviewed_contract["contract"], build_contract(root))
+        for difference in contract_differences:
+            difference["path"] = f"build_contract.{difference['path']}"
+        differences = contract_differences + differences
         result = {
             "status": "pass" if not differences else "fail",
             "baseline": str(baseline.relative_to(root)) if baseline.is_relative_to(root) else str(baseline),

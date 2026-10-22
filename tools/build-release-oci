@@ -1,38 +1,82 @@
 #!/usr/bin/env bash
-# Explicit release-intent entry point. Developer builds may invoke Podman directly.
+# Controlled release-intent entry point. Direct Podman builds remain developer builds.
 set -Eeuo pipefail
 
-repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-if (( $# == 0 )); then
-    echo "Usage: $0 <planned-os-version> [--tag <image-reference>]" >&2
-    exit 2
-fi
+repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+usage="Usage: $0 <planned-os-version> --tag <image-reference> --evidence <record.json>"
+(( $# > 0 )) || { echo "$usage" >&2; exit 2; }
 planned_os_version=$1
 shift
-tag_arguments=()
+image_reference=
+evidence_record=
 while (( $# > 0 )); do
     case "$1" in
         -t|--tag)
-            if (( $# < 2 )) || [[ -z $2 || $2 == -* ]]; then
-                echo "$1 requires a nonempty image reference." >&2
-                exit 2
-            fi
-            tag_arguments+=(--tag "$2")
+            (( $# >= 2 )) && [[ -n $2 && $2 != -* ]] || { echo "$1 requires a nonempty image reference." >&2; exit 2; }
+            [[ -z $image_reference ]] || { echo "Duplicate release image reference." >&2; exit 2; }
+            image_reference=$2
+            shift 2
+            ;;
+        --evidence)
+            (( $# >= 2 )) && [[ -n $2 && $2 != -* ]] || { echo "$1 requires a nonempty record path." >&2; exit 2; }
+            [[ -z $evidence_record ]] || { echo "Duplicate release evidence path." >&2; exit 2; }
+            evidence_record=$2
             shift 2
             ;;
         *)
             echo "Unsupported release build argument: $1" >&2
-            echo "Usage: $0 <planned-os-version> [--tag <image-reference>]" >&2
+            echo "$usage" >&2
             exit 2
             ;;
     esac
 done
+[[ -n $image_reference && -n $evidence_record ]] || { echo "$usage" >&2; exit 2; }
+[[ ! -e $evidence_record ]] || { echo "Refusing to overwrite release evidence: $evidence_record" >&2; exit 1; }
+
 python3 "$repo_root/tools/coreos-inventory" --root "$repo_root"
 python3 "$repo_root/tools/release-preflight" "$planned_os_version" --root "$repo_root"
+git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "Release build requires a Git repository." >&2; exit 1; }
+git_root=$(cd -- "$(git -C "$repo_root" rev-parse --show-toplevel)" && pwd -P)
+[[ $git_root == "$repo_root" ]] || { echo "Release build root does not match the Git worktree." >&2; exit 1; }
+source_revision=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || { echo "Release source commit is invalid." >&2; exit 1; }
+[[ $source_revision =~ ^[0-9a-f]{40}$ ]] || { echo "Release source commit is invalid." >&2; exit 1; }
+if [[ -n $(git -C "$repo_root" status --porcelain=v1 --untracked-files=all) ]]; then
+    echo "Release build requires a clean tree with no tracked, staged, or untracked build-context inputs." >&2
+    exit 1
+fi
+build_id="${planned_os_version}-${source_revision:0:12}-release"
 command -v podman >/dev/null || { echo "Missing required tool: podman" >&2; exit 1; }
-exec podman build \
+
+temporary=$(mktemp -d)
+trap 'rm -rf -- "$temporary"' EXIT
+iidfile="$temporary/image-id"
+inspection="$temporary/inspection.json"
+podman build \
+    --iidfile "$iidfile" \
     --file "$repo_root/Containerfile" \
     --build-arg RELEASE_INTENT=release \
     --build-arg "PLANNED_OS_VERSION=$planned_os_version" \
-    "${tag_arguments[@]}" \
+    --build-arg "SOURCE_REVISION=$source_revision" \
+    --build-arg "BUILD_ID=$build_id" \
+    --tag "$image_reference" \
     "$repo_root"
+
+image_id=$(cat "$iidfile")
+[[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Podman returned an invalid immutable image ID." >&2; exit 1; }
+podman image inspect "$image_id" > "$inspection"
+tag_id=$(podman image inspect "$image_reference" --format '{{.Id}}')
+[[ $tag_id == "$image_id" ]] || { echo "Mutable tag no longer resolves to the built immutable image ID." >&2; exit 1; }
+containerfile_sha256=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo_root/Containerfile")
+wrapper_sha256=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$repo_root/tools/build-release-oci")
+podman_version=$(podman --version)
+python3 "$repo_root/tools/release-evidence" create \
+    --inspection "$inspection" \
+    --output "$evidence_record" \
+    --planned-version "$planned_os_version" \
+    --source-commit "$source_revision" \
+    --build-id "$build_id" \
+    --image-reference "$image_reference" \
+    --containerfile-sha256 "$containerfile_sha256" \
+    --wrapper-sha256 "$wrapper_sha256" \
+    --podman-version "$podman_version"
+printf 'Release OCI image ID: %s\nRelease evidence: %s\n' "$image_id" "$evidence_record"

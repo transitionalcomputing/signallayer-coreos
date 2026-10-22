@@ -2,28 +2,35 @@
 # Run on native x86_64 Linux with rootful Podman; never starts a VM.
 set -Eeuo pipefail
 
-build_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-repo_root=$(cd -- "$build_dir/../.." && pwd)
+build_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+repo_root=$(cd -- "$build_dir/../.." && pwd -P)
 builder='ghcr.io/osbuild/image-builder-cli@sha256:adde8da071d78b17db2e6bb2df1aab4e01dd141efe7b7f9f68d5b51e590502d5'
 planned_os_version=0.0.3.1
+release_intent=false
+release_evidence=
+usage="Usage: $0 [--release-intent <planned-os-version> --release-evidence <record.json>] [local CoreOS OCI reference]"
+if [[ ${1:-} == --release-intent=* || ${1:-} == --release-evidence=* ]]; then
+    echo "Equals-form release arguments are unsupported." >&2
+    echo "$usage" >&2
+    exit 2
+fi
 if [[ ${1:-} == --release-intent ]]; then
-    [[ -n ${2:-} ]] || { echo "Usage: $0 [--release-intent <planned-os-version>] [local CoreOS OCI reference]" >&2; exit 2; }
+    [[ -n ${2:-} && ${2:-} != -* ]] || { echo "$usage" >&2; exit 2; }
+    [[ ${3:-} == --release-evidence && -n ${4:-} && ${4:-} != -* ]] || { echo "$usage" >&2; exit 2; }
+    release_intent=true
     planned_os_version=$2
-    shift 2
+    release_evidence=$4
+    shift 4
 fi
 source_ref=${1:-localhost/signallayer-coreos:0.0.3.1}
-if (( $# > 1 )); then
-    echo "Usage: $0 [--release-intent <planned-os-version>] [local CoreOS OCI reference]" >&2
+if (( $# > 1 )) || [[ $source_ref == --* ]]; then
+    echo "$usage" >&2
     exit 2
 fi
 python3 "$repo_root/tools/coreos-inventory" --root "$repo_root"
 python3 "$repo_root/tools/release-preflight" "$planned_os_version" --root "$repo_root"
-mkdir -p "$build_dir/output"
-run_dir=$(mktemp -d "$build_dir/output/coreos-0.0.3.1-x86_64.XXXXXXXX")
-trap 'result=$?; if (( result != 0 )); then echo "Disk build failed (exit $result); see $run_dir/build-report.txt"; fi' EXIT
-main() {
-    printf 'Builder: %s\nSource reference: %s\nHost: %s\n' "$builder" "$source_ref" "$(uname -sm)"
 
+preflight_source() {
     if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
         echo 'Requires native x86_64 Linux (for example Fedora 44), rootful Podman, loop devices and privileged filesystem mounts. macOS/arm64 emulation is not supported by this entry point.'
         exit 1
@@ -36,12 +43,40 @@ main() {
         command -v "$tool" >/dev/null || { echo "Missing required tool: $tool"; exit 1; }
     done
     [[ $(podman info --format '{{.Host.Arch}}') == amd64 ]] || { echo 'Podman must use native amd64 Linux.'; exit 1; }
+    if $release_intent; then
+        git_root=$(cd -- "$(git -C "$repo_root" rev-parse --show-toplevel 2>/dev/null)" && pwd -P) || { echo 'Release disk build requires the repository worktree.'; exit 1; }
+        [[ $git_root == "$repo_root" ]] || { echo 'Release disk build requires the repository worktree.'; exit 1; }
+        source_revision=$(git -C "$repo_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || { echo 'Release source commit is invalid.'; exit 1; }
+        [[ $source_revision =~ ^[0-9a-f]{40}$ ]] || { echo 'Release source commit is invalid.'; exit 1; }
+        [[ -z $(git -C "$repo_root" status --porcelain=v1 --untracked-files=all) ]] || { echo 'Release disk build requires a clean tree.'; exit 1; }
+    fi
     source_id=$(podman image inspect "$source_ref" --format '{{.Id}}')
-    podman image inspect "$source_id" > "$run_dir/source-image.json"
     [[ $(podman image inspect "$source_id" --format '{{.Os}}/{{.Architecture}}') == linux/amd64 ]] || { echo 'Source must be linux/amd64.'; exit 1; }
     [[ $(podman image inspect "$source_id" --format '{{index .Labels "containers.bootc"}}') == 1 ]] || { echo 'Source must be a bootc image.'; exit 1; }
-    [[ $(podman image inspect "$source_id" --format '{{index .Labels "org.opencontainers.image.version"}}') == 0.0.3.1 ]] || { echo 'Source must be CoreOS 0.0.3.1.'; exit 1; }
+    [[ $(podman image inspect "$source_id" --format '{{index .Labels "org.opencontainers.image.version"}}') == "$planned_os_version" ]] || { echo "Source must be CoreOS $planned_os_version."; exit 1; }
     [[ $(podman image inspect "$source_id" --format '{{index .Labels "org.opencontainers.image.title"}}') == 'SignalLayerIT CoreOS' ]] || { echo 'Source must be SignalLayerIT CoreOS.'; exit 1; }
+    if $release_intent; then
+        inspection=$(mktemp)
+        trap 'rm -f -- "$inspection"' RETURN
+        podman image inspect "$source_id" > "$inspection"
+        python3 "$repo_root/tools/release-evidence" verify \
+            --inspection "$inspection" \
+            --record "$release_evidence" \
+            --planned-version "$planned_os_version" \
+            --source-commit "$source_revision" \
+            --image-reference "$source_ref"
+        rm -f -- "$inspection"
+        trap - RETURN
+    fi
+}
+preflight_source
+
+mkdir -p "$build_dir/output"
+run_dir=$(mktemp -d "$build_dir/output/coreos-0.0.3.1-x86_64.XXXXXXXX")
+trap 'result=$?; if (( result != 0 )); then echo "Disk build failed (exit $result); see $run_dir/build-report.txt"; fi' EXIT
+main() {
+    printf 'Builder: %s\nSource reference: %s\nHost: %s\n' "$builder" "$source_ref" "$(uname -sm)"
+    podman image inspect "$source_id" > "$run_dir/source-image.json"
     printf 'Immutable local source ID: %s\n' "$source_id"
 
     # Export by immutable ID. The tool container gets its own disposable Podman

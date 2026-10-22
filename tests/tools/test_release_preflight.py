@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,12 +16,78 @@ PREFLIGHT = REPO / "tools/release-preflight"
 RELEASE_OCI = REPO / "tools/build-release-oci"
 
 
+def clean_release_repo(parent: Path) -> Path:
+    root = parent / "repo"
+    shutil.copytree(
+        REPO,
+        root,
+        ignore=shutil.ignore_patterns(".git", "target", "output", "__pycache__"),
+    )
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"],
+        check=True,
+    )
+    return root
+
+
+def fake_podman(path: Path, state: Path, log: Path) -> None:
+    write(
+        path,
+        f"""
+        #!/usr/bin/env python3
+        import json, os, pathlib, sys
+        args = sys.argv[1:]
+        state_path = pathlib.Path({str(state)!r})
+        log_path = pathlib.Path({str(log)!r})
+        image_id = "sha256:" + "1" * 64
+        if args == ["--version"]:
+            print("podman version fixture")
+            raise SystemExit(0)
+        if args and args[0] == "build":
+            log_path.write_text("\\n".join(args) + "\\n")
+            values = {{}}
+            for index, item in enumerate(args):
+                if item == "--build-arg":
+                    key, value = args[index + 1].split("=", 1)
+                    values[key] = value
+            pathlib.Path(args[args.index("--iidfile") + 1]).write_text(image_id + "\\n")
+            state_path.write_text(json.dumps([{{
+                "Id": image_id,
+                "Digest": "sha256:" + "2" * 64,
+                "RepoDigests": ["example@sha256:" + "2" * 64],
+                "Config": {{"Labels": {{
+                    "containers.bootc": "1",
+                    "org.opencontainers.image.title": "SignalLayerIT CoreOS",
+                    "org.opencontainers.image.version": values["PLANNED_OS_VERSION"],
+                    "org.opencontainers.image.revision": values["SOURCE_REVISION"],
+                    "org.signallayer.image.build-id": values["BUILD_ID"],
+                }}}},
+            }}]))
+            raise SystemExit(0)
+        if args[:2] == ["image", "inspect"]:
+            if os.environ.get("FAKE_INSPECT_FAIL") == "1" and "--format" not in args:
+                raise SystemExit(96)
+            data = json.loads(state_path.read_text())
+            if "--format" in args:
+                print(os.environ.get("FAKE_TAG_ID", data[0]["Id"]))
+            else:
+                print(json.dumps(data))
+            raise SystemExit(0)
+        raise SystemExit(97)
+        """,
+    )
+    path.chmod(0o755)
+
+
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(content).lstrip())
 
 
 def fixture(root: Path, os_version: str = "0.0.3.1", cargo_version: str = "0.0.3") -> None:
+    write(root / "config/coreos-build-contract.json", "{}\n")
     write(
         root / "Cargo.toml",
         f"""
@@ -55,8 +123,10 @@ def fixture(root: Path, os_version: str = "0.0.3.1", cargo_version: str = "0.0.3
     write(
         root / "Containerfile",
         f"""
+        ARG BUILD_ID=unknown
         FROM scratch
         LABEL org.opencontainers.image.version="{os_version}"
+        LABEL org.signallayer.image.build-id="${{BUILD_ID}}"
         RUN printf '%s\\n' \\
             'VERSION="{os_version}"' \\
             > /usr/lib/signallayer/release
@@ -65,9 +135,10 @@ def fixture(root: Path, os_version: str = "0.0.3.1", cargo_version: str = "0.0.3
     write(
         root / "image/build/build-qcow2.sh",
         f"""
+        planned_os_version={os_version}
         source_ref=${{1:-localhost/signallayer-coreos:{os_version}}}
         run_dir=$(mktemp -d "$build_dir/output/coreos-{os_version}-x86_64.XXXXXXXX")
-        [[ $(podman image inspect "$source_id" --format '{{{{index .Labels "org.opencontainers.image.version"}}}}') == {os_version} ]]
+        [[ $(podman image inspect "$source_id" --format '{{{{index .Labels "org.opencontainers.image.version"}}}}') == "$planned_os_version" ]]
         podman tag "$source_id" localhost/signallayer-coreos:{os_version}
         image-builder build --bootc-ref localhost/signallayer-coreos:{os_version} \\
           --output-name signallayer-coreos-{os_version}-x86_64
@@ -169,6 +240,18 @@ class ReleasePreflightTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing required identity surface", result.stderr)
 
+    def test_current_contract_requires_build_id_label(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture(root)
+            containerfile = root / "Containerfile"
+            containerfile.write_text(
+                containerfile.read_text().replace('LABEL org.signallayer.image.build-id="${BUILD_ID}"\n', "")
+            )
+            result = self.run_preflight(root, "0.0.3.1")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Containerfile OCI build ID label", result.stderr)
+
     def test_mismatched_qcow2_identity_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -226,9 +309,11 @@ class ReleasePreflightTests(unittest.TestCase):
         wrapper = RELEASE_OCI.read_text()
         wrapper_inventory = wrapper.index('python3 "$repo_root/tools/coreos-inventory" --root "$repo_root"')
         wrapper_gate = wrapper.index('python3 "$repo_root/tools/release-preflight" "$planned_os_version"')
-        wrapper_podman = wrapper.index("exec podman build")
+        wrapper_podman = wrapper.index("podman build")
         self.assertLess(wrapper_inventory, wrapper_gate)
         self.assertLess(wrapper_gate, wrapper_podman)
+        self.assertNotIn("exec podman build", wrapper)
+        self.assertIn("release-evidence\" create", wrapper)
 
     def test_release_intent_requires_planned_version_before_podman(self) -> None:
         result = subprocess.run(
@@ -247,7 +332,14 @@ class ReleasePreflightTests(unittest.TestCase):
             fake.chmod(0o755)
             environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
             result = subprocess.run(
-                [str(RELEASE_OCI), "0.0.4"],
+                [
+                    str(RELEASE_OCI),
+                    "0.0.4",
+                    "--tag",
+                    "localhost/signallayer-coreos:0.0.4",
+                    "--evidence",
+                    str(Path(directory) / "evidence.json"),
+                ],
                 cwd=REPO,
                 env=environment,
                 text=True,
@@ -260,14 +352,24 @@ class ReleasePreflightTests(unittest.TestCase):
 
     def test_matching_release_intent_reaches_podman_with_owned_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            log = Path(directory) / "podman.args"
-            fake = Path(directory) / "podman"
-            fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{log}"\n')
-            fake.chmod(0o755)
+            directory_path = Path(directory)
+            root = clean_release_repo(directory_path)
+            log = directory_path / "podman.args"
+            state = directory_path / "podman.state"
+            fake = directory_path / "podman"
+            fake_podman(fake, state, log)
+            evidence = directory_path / "evidence.json"
             environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
             result = subprocess.run(
-                [str(RELEASE_OCI), "0.0.3.1", "--tag", "localhost/signallayer-coreos:0.0.3.1"],
-                cwd=REPO,
+                [
+                    str(root / "tools/build-release-oci"),
+                    "0.0.3.1",
+                    "--tag",
+                    "localhost/signallayer-coreos:0.0.3.1",
+                    "--evidence",
+                    str(evidence),
+                ],
+                cwd=root,
                 env=environment,
                 text=True,
                 stdout=subprocess.PIPE,
@@ -275,21 +377,16 @@ class ReleasePreflightTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             arguments = log.read_text().splitlines()
-            self.assertEqual(
-                arguments,
-                [
-                    "build",
-                    "--file",
-                    str(REPO / "Containerfile"),
-                    "--build-arg",
-                    "RELEASE_INTENT=release",
-                    "--build-arg",
-                    "PLANNED_OS_VERSION=0.0.3.1",
-                    "--tag",
-                    "localhost/signallayer-coreos:0.0.3.1",
-                    str(REPO),
-                ],
-            )
+            self.assertEqual(arguments[0], "build")
+            self.assertIn(str(root.resolve() / "Containerfile"), arguments)
+            self.assertIn("RELEASE_INTENT=release", arguments)
+            self.assertIn("PLANNED_OS_VERSION=0.0.3.1", arguments)
+            self.assertIn("SOURCE_REVISION=" + subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip(), arguments)
+            self.assertTrue(any(item.startswith("BUILD_ID=0.0.3.1-") and item.endswith("-release") for item in arguments))
+            self.assertEqual(arguments[-1], str(root.resolve()))
+            record = json.loads(evidence.read_text())
+            self.assertEqual(record["image_id"], "sha256:" + "1" * 64)
+            self.assertTrue(record["release_intent"])
 
     def test_release_wrapper_rejects_build_input_bypasses_before_podman(self) -> None:
         attempts = {
@@ -323,6 +420,79 @@ class ReleasePreflightTests(unittest.TestCase):
                 self.assertIn("Unsupported release build argument", result.stderr)
                 self.assertFalse(invoked.exists(), f"Podman ran for {label}")
 
+    def test_release_wrapper_rejects_dirty_tracked_staged_and_untracked_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = clean_release_repo(Path(directory))
+            fake = Path(directory) / "podman"
+            invoked = Path(directory) / "podman.invoked"
+            fake.write_text(f'#!/bin/sh\ntouch "{invoked}"\nexit 99\n')
+            fake.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
+
+            def rejected() -> None:
+                result = subprocess.run(
+                    [
+                        str(root / "tools/build-release-oci"),
+                        "0.0.3.1",
+                        "--tag",
+                        "localhost/signallayer-coreos:0.0.3.1",
+                        "--evidence",
+                        str(Path(directory) / "evidence.json"),
+                    ],
+                    cwd=root,
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("clean tree", result.stderr)
+                self.assertFalse(invoked.exists())
+
+            readme = root / "README.md"
+            original = readme.read_text()
+            readme.write_text(original + "\ntracked dirty\n")
+            rejected()
+            readme.write_text(original)
+            subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+            readme.write_text(original + "\nstaged dirty\n")
+            subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+            rejected()
+            subprocess.run(["git", "-C", str(root), "reset", "-q", "HEAD", "--", "README.md"], check=True)
+            readme.write_text(original)
+            (root / "untracked-context-input").write_text("unexpected\n")
+            rejected()
+
+    def test_release_wrapper_rejects_tag_race_and_inspection_failure(self) -> None:
+        for label, override, message in (
+            ("tag race", {"FAKE_TAG_ID": "sha256:" + "9" * 64}, "Mutable tag"),
+            ("inspection failure", {"FAKE_INSPECT_FAIL": "1"}, ""),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = clean_release_repo(Path(directory))
+                fake = Path(directory) / "podman"
+                fake_podman(fake, Path(directory) / "state", Path(directory) / "log")
+                environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}", **override}
+                result = subprocess.run(
+                    [
+                        str(root / "tools/build-release-oci"),
+                        "0.0.3.1",
+                        "--tag",
+                        "localhost/signallayer-coreos:0.0.3.1",
+                        "--evidence",
+                        str(Path(directory) / "evidence.json"),
+                    ],
+                    cwd=root,
+                    env=environment,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                if message:
+                    self.assertIn(message, result.stderr)
+                self.assertFalse((Path(directory) / "evidence.json").exists())
+
     def test_qcow2_release_intent_requires_version_before_any_build(self) -> None:
         result = subprocess.run(
             ["bash", str(REPO / "image/build/build-qcow2.sh"), "--release-intent"],
@@ -332,6 +502,29 @@ class ReleasePreflightTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("--release-intent <planned-os-version>", result.stderr)
+
+    def test_qcow2_rejects_equals_release_intent_before_output(self) -> None:
+        output = REPO / "image/build/output"
+        before = sorted(output.iterdir()) if output.exists() else []
+        result = subprocess.run(
+            ["bash", str(REPO / "image/build/build-qcow2.sh"), "--release-intent=0.0.3.1"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Equals-form", result.stderr)
+        self.assertEqual(before, sorted(output.iterdir()) if output.exists() else [])
+
+    def test_qcow2_release_mode_requires_bound_evidence(self) -> None:
+        result = subprocess.run(
+            ["bash", str(REPO / "image/build/build-qcow2.sh"), "--release-intent", "0.0.3.1"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--release-evidence", result.stderr)
 
     def test_explicit_root_works_outside_repository(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

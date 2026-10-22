@@ -3,7 +3,8 @@
 Status: adopted engineering safeguard.
 
 `tools/coreos-inventory` compares the current source-declared CoreOS surface
-with the accepted baseline in `config/coreos-source-inventory.json`. The
+with the accepted baseline in `config/coreos-source-inventory.json`, and checks
+the exact build contract in `config/coreos-build-contract.json`. The inventory
 baseline was generated from `main` at
 `d1860e8ffa6a385beb3632ecdfc40e916eeaaf67` and then explicitly marked
 accepted for this safeguard change. Ordinary checks and build entry points
@@ -29,19 +30,23 @@ The tool reports additions, removals, and changed values in human-readable
 form. `--format json` returns the same result for automation. Any difference
 exits nonzero and names the changed surface.
 
-The runtime-stage parser is deliberately narrow and fail closed. It accepts
-the reviewed package-install command, single-source shell-form `COPY`
-instructions to known inventory destinations, the existing release/policy
-setup commands, and systemd activation forms represented in the inventory.
-`ADD`, alternate package-manager syntax, package removal, JSON or multi-source
-`COPY`, unknown destinations, unrecognized mutation commands, and direct or
-shell-generated writes to protected systemd, D-Bus, sysusers, SELinux and
-CoreOS executable locations are errors. New syntax requires an explicit parser
-and negative-control update before it can enter an accepted build. The few
-reviewed runtime `COPY` exceptions outside the ordinary inventory destinations
-are bound to their exact source/stage and, for maintained files, source digest.
+Within this documented source grammar, missing or changed declarations and
+instructions fail closed. That statement does not extend to installed or
+transitive artifact contents.
 
-This is a **source-declared** inventory. It cannot enumerate transitive RPM
+The Containerfile parser recognizes only the project's uppercase instruction
+grammar and constructs logical instructions before stage boundaries. The build
+contract records every complete instruction in every stage, the ordered and
+pinned `FROM` graph, every exact `COPY --from` provenance edge, and hashes of
+maintained build-context inputs. A changed, added, or removed runtime `RUN`
+therefore differs as a complete instruction; shell pipelines, substitutions,
+redirections, variables, globs, or extra commands cannot inherit approval from
+an accepted prefix. Unknown/external stages, alias collisions, malformed
+continuations, unsupported casing, and unknown instructions fail explicitly.
+The checker is deliberately not a general shell or Dockerfile parser.
+
+These are **source-declared** checks. They do not prove compiler output and
+cannot enumerate transitive RPM
 packages inherited from the pinned base or resolved by DNF, generated units,
 loaded SELinux policy, or the final installed artifact without building and
 inspecting an image. Those installed-artifact properties remain **UNPROVEN**
@@ -82,28 +87,56 @@ The tool refuses to write to the accepted baseline path, refuses to overwrite
 an existing candidate, and rejects any baseline not explicitly marked
 `accepted`. Generating a candidate does not approve it.
 
+An authorized Containerfile or copied-input change similarly generates a
+review candidate outside the committed contract:
+
+```bash
+tools/coreos-inventory --root . \
+  --contract-candidate-output /tmp/coreos-build-contract.candidate.json
+```
+
+Review the complete instruction, COPY provenance, and input-hash diff before
+replacing the committed contract. The product owner is the approval authority;
+the committed JSON files are evidence of that decision, not independent
+authorization. Repository writers can modify those files, so branch review
+remains part of the control.
+
 ## Independent release intent
 
 Release-bound OCI builds use:
 
 ```bash
-tools/build-release-oci <planned-os-version> [--tag <image-reference>]
+tools/build-release-oci <planned-os-version> \
+  --tag <image-reference> \
+  --evidence image/build/output/release-oci-evidence.json
 ```
 
-The wrapper owns the absolute repository context, its `Containerfile`, and the
-two release-intent build arguments. Arbitrary Podman options and positional
-contexts are intentionally unsupported. Callers that previously supplied `.`
-must omit it; the wrapper now supplies the validated repository root itself.
+The wrapper requires a clean Git tree, owns the absolute repository context,
+`Containerfile`, release arguments, source revision, deterministic build ID,
+and tag. It inspects the immutable output ID and required labels after Podman
+exits, checks that the tag still resolves to that ID, and only then writes a
+versioned JSON record containing source, immutable ID, available manifest
+identity, labels, builder version, and invocation identity. Arbitrary Podman
+options and positional contexts are unsupported.
 
 Release-bound disk builds use:
 
 ```bash
 image/build/build-qcow2.sh --release-intent <planned-os-version> \
+  --release-evidence image/build/output/release-oci-evidence.json \
   [local CoreOS OCI reference]
 ```
 
-The planned OS version comes from the invocation, independently of source
-identity strings. The host-side gate rejects missing, malformed, stale, or
-conflicting release identities before Podman or disk construction. Direct
-developer builds keep their established commands and current-tree identity,
-but are not release-intent invocations and cannot establish release approval.
+The disk gate requires the same clean source commit and compares the selected
+local image's immutable ID and labels with that record before creating an
+output directory. Mutable tags and self-declared public labels are insufficient
+on their own. Direct developer builds keep their established command and do not
+produce release evidence.
+
+This developer-preview provenance model trusts the local build host and the
+record stored on it. An administrator who can replace both the image and record
+can forge the pair; no signing key or external transparency or attestation
+service is introduced here. Installed-artifact inventory and transitive payload
+proof remain **UNPROVEN** and require post-build inspection and runtime
+acceptance. Human product-owner approval remains separate from every executable
+check.

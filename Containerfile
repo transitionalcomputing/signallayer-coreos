@@ -93,6 +93,7 @@ LABEL containers.bootc="1" \
       org.opencontainers.image.title="SignalLayerIT CoreOS" \
       org.opencontainers.image.version="0.0.3.1" \
       org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.signallayer.image.build-id="${BUILD_ID}" \
       org.opencontainers.image.source="https://github.com/transitionalcomputing/signallayer-coreos"
 
 # Status uses these public crypto files through a fixed OPENSSL_CONF. Preserve

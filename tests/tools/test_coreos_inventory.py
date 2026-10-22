@@ -48,12 +48,20 @@ def fixture(root: Path) -> None:
         root / "Containerfile",
         """
         FROM build.example/unused AS build
+        COPY app /src/app
+        RUN printf compiled > /build/sl-app
+        FROM build.example/policy AS policy-build
+        COPY image/platform/selinux /policy
+        RUN make -C /policy sl_platformd.pp
         FROM quay.example/coreos@sha256:111
         RUN dnf -y install --setopt=install_weak_deps=False audit podman && dnf clean all
         COPY --from=build /build/sl-app /usr/bin/sl-app
+        COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_platformd.pp
         COPY image/platform/sl-app.service /usr/lib/systemd/system/sl-app.service
         COPY image/platform/sl-app.sysusers /usr/lib/sysusers.d/sl-app.conf
         COPY image/platform/org.signallayer.App1.conf /usr/share/dbus-1/system.d/org.signallayer.App1.conf
+        RUN printf '%s' safe > /usr/lib/signallayer/release
+        RUN sed 's/a/b/' /tmp/input > /usr/lib/signallayer/config
         RUN ln -s ../sl-app.service /usr/lib/systemd/system/multi-user.target.wants/sl-app.service
         """,
     )
@@ -73,13 +81,38 @@ class CoreOSInventoryTests(unittest.TestCase):
         self.baseline = self.root / "baseline.json"
         self.baseline.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n")
         candidate.unlink()
+        self.contract = self.root / "contract.json"
+        result = subprocess.run(
+            [
+                str(INVENTORY),
+                "--root",
+                str(self.root),
+                "--baseline",
+                str(self.baseline),
+                "--contract-candidate-output",
+                str(self.contract),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
     def run_tool(self, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(INVENTORY), "--root", str(self.root), "--baseline", str(getattr(self, "baseline", self.root / "baseline.json")), *extra],
+            [
+                str(INVENTORY),
+                "--root",
+                str(self.root),
+                "--baseline",
+                str(getattr(self, "baseline", self.root / "baseline.json")),
+                "--build-contract",
+                str(getattr(self, "contract", self.root / "contract.json")),
+                *extra,
+            ],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -94,8 +127,8 @@ class CoreOSInventoryTests(unittest.TestCase):
         path = self.root / "Containerfile"
         path.write_text(path.read_text() + instruction + "\n")
         result = self.run_tool()
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn(needle, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("build_contract.stages[]", result.stdout)
 
     def test_matching_inventory_passes_and_json_is_machine_readable(self) -> None:
         result = self.run_tool("--format", "json")
@@ -174,10 +207,11 @@ class CoreOSInventoryTests(unittest.TestCase):
         self.assert_grammar_rejection("RUN microdnf install podman", "unsupported runtime package operation")
 
     def test_add_runtime_file_is_rejected(self) -> None:
-        self.assert_grammar_rejection(
-            "ADD image/platform/sl-app.service /usr/lib/systemd/system/sl-added.service",
-            "ADD is not supported",
-        )
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text() + "ADD image/platform/sl-app.service /usr/lib/systemd/system/sl-added.service\n")
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("unsupported Containerfile instruction", result.stderr)
 
     def test_unsupported_copy_forms_are_rejected(self) -> None:
         instructions = {
@@ -192,7 +226,7 @@ class CoreOSInventoryTests(unittest.TestCase):
                 (self.root / "Containerfile").write_text(original + instruction + "\n")
                 result = self.run_tool()
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn("runtime COPY", result.stderr)
+                self.assertIn("COPY", result.stderr)
 
     def test_shell_generated_systemd_unit_is_rejected(self) -> None:
         self.assert_grammar_rejection(
@@ -211,8 +245,8 @@ class CoreOSInventoryTests(unittest.TestCase):
             with self.subTest(surface=label):
                 (self.root / "Containerfile").write_text(original + instruction + "\n")
                 result = self.run_tool()
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn("unsupported runtime mutation command", result.stderr)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("build_contract.stages[]", result.stdout)
 
     def test_previously_untracked_runtime_mutation_is_rejected(self) -> None:
         self.assert_grammar_rejection(
@@ -226,6 +260,116 @@ class CoreOSInventoryTests(unittest.TestCase):
             "unsupported runtime mutation command",
         )
 
+    def test_complete_runtime_run_approval_rejects_shell_obfuscation(self) -> None:
+        additions = {
+            "pipeline": "RUN true | touch /usr/bin/hidden",
+            "background": "RUN true & touch /usr/bin/hidden",
+            "dollar substitution": "RUN printf '%s' \"$(touch /usr/bin/hidden)\"",
+            "backtick substitution": "RUN printf '%s' `touch /usr/bin/hidden`",
+            "redirection": "RUN printf x > /usr/bin/hidden",
+            "awk write": "RUN awk 'BEGIN { print 1 > \"/usr/bin/hidden\" }'",
+            "find exec": "RUN find /tmp -exec touch /usr/bin/hidden ';'",
+            "find delete": "RUN find /tmp -delete",
+            "case": "RUN case x in x) touch /usr/bin/hidden ;; esac",
+            "variable": "RUN target=/usr/bin/hidden; touch \"$target\"",
+            "glob": "RUN rm -f /usr/bin/sl-*",
+            "indirection": "RUN command=touch; \"$command\" /usr/bin/hidden",
+            "new run": "RUN true",
+        }
+        original = (self.root / "Containerfile").read_text()
+        for label, instruction in additions.items():
+            with self.subTest(label=label):
+                (self.root / "Containerfile").write_text(original + instruction + "\n")
+                result = self.run_tool()
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("build_contract.stages[]", result.stdout)
+
+    def test_extra_operation_inside_approved_run_is_detected(self) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text().replace("&& dnf clean all", "&& touch /usr/bin/hidden && dnf clean all"))
+        self.assert_change("build_contract.stages[]")
+
+    def test_extra_operation_inside_approved_printf_or_sed_is_detected(self) -> None:
+        original = (self.root / "Containerfile").read_text()
+        attempts = (
+            original.replace("printf '%s' safe >", "printf '%s' safe; touch /usr/bin/hidden; printf '%s' safe >"),
+            original.replace("sed 's/a/b/' /tmp/input >", "sed 's/a/b/' /tmp/input; touch /usr/bin/hidden; sed 's/a/b/' /tmp/input >"),
+        )
+        for changed in attempts:
+            (self.root / "Containerfile").write_text(changed)
+            self.assert_change("build_contract.stages[]")
+
+    def test_from_inside_continued_run_is_not_a_stage_boundary(self) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text() + "RUN printf x \\\nFROM attacker.example/image\n")
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("build_contract.stages[]", result.stdout)
+        self.assertNotIn("runtime_base_image", result.stdout)
+
+    def test_unsupported_instruction_casing_is_rejected(self) -> None:
+        original = (self.root / "Containerfile").read_text()
+        for spelling in ("run", "Run"):
+            with self.subTest(spelling=spelling):
+                (self.root / "Containerfile").write_text(original + f"{spelling} true\n")
+                result = self.run_tool()
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn("unsupported instruction casing", result.stderr)
+
+    def test_additional_stage_and_alternate_runtime_base_are_detected(self) -> None:
+        original = (self.root / "Containerfile").read_text()
+        (self.root / "Containerfile").write_text(original + "FROM extra.example/base AS unexpected\n")
+        self.assert_change("build_contract.stages[]")
+        (self.root / "Containerfile").write_text(original.replace("quay.example/coreos@sha256:111", "quay.example/coreos@sha256:222"))
+        self.assert_change("runtime_base_image")
+
+    def test_malformed_continuation_is_rejected(self) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text() + "RUN true \\\n")
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("dangling", result.stderr)
+
+    def test_copy_provenance_and_intermediate_stages_are_bound(self) -> None:
+        original = (self.root / "Containerfile").read_text()
+        attempts = {
+            "changed stage": original.replace("--from=build /build/sl-app", "--from=policy-build /build/sl-app"),
+            "external stage": original.replace("--from=build /build/sl-app", "--from=registry.example/image /build/sl-app"),
+            "post compile mutation": original.replace(
+                "RUN printf compiled > /build/sl-app",
+                "RUN printf compiled > /build/sl-app\nRUN printf changed >> /build/sl-app",
+            ),
+            "policy build mutation": original.replace(
+                "RUN make -C /policy sl_platformd.pp",
+                "RUN make -C /policy sl_platformd.pp && printf changed >> /policy/sl_platformd.pp",
+            ),
+        }
+        for label, changed in attempts.items():
+            with self.subTest(label=label):
+                (self.root / "Containerfile").write_text(changed)
+                result = self.run_tool()
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertTrue("build_contract.stages[]" in result.stdout or "unknown or external stage" in result.stderr)
+
+    def test_stage_alias_collision_is_rejected(self) -> None:
+        path = self.root / "Containerfile"
+        path.write_text(path.read_text().replace("AS policy-build", "AS build"))
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("duplicate or ambiguous stage alias", result.stderr)
+
+    def test_maintained_build_source_change_is_detected(self) -> None:
+        path = self.root / "app/Cargo.toml"
+        path.write_text(path.read_text() + "description='changed'\n")
+        self.assert_change("build_contract.build_context_inputs.app/Cargo.toml")
+
+    def test_copy_inventory_records_exact_source_stage(self) -> None:
+        result = self.run_tool("--format", "json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        contract = json.loads(self.contract.read_text())["contract"]
+        executable = next(item for item in contract["copy_provenance"] if item["destination"] == "/usr/bin/sl-app")
+        self.assertEqual(executable["from"], "build")
+
     def test_parser_error_is_machine_readable(self) -> None:
         path = self.root / "Containerfile"
         path.write_text(path.read_text() + "ADD payload /usr/bin/untracked\n")
@@ -233,16 +377,18 @@ class CoreOSInventoryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         parsed = json.loads(result.stdout)
         self.assertEqual(parsed["status"], "error")
-        self.assertIn("ADD is not supported", parsed["error"])
+        self.assertIn("unsupported Containerfile instruction", parsed["error"])
 
     def test_candidate_generation_cannot_bypass_runtime_parser(self) -> None:
         path = self.root / "Containerfile"
         path.write_text(path.read_text() + "RUN touch /usr/bin/untracked-runtime\n")
         candidate = self.root / "unapproved.json"
         result = self.run_tool("--candidate-output", str(candidate))
-        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-        self.assertIn("unsupported runtime mutation command", result.stderr)
-        self.assertFalse(candidate.exists())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(candidate.exists())
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("build_contract.stages[]", result.stdout)
 
     def test_candidate_cannot_overwrite_baseline(self) -> None:
         result = self.run_tool("--candidate-output", str(self.baseline))
