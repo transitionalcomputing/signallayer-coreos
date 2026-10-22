@@ -31,6 +31,9 @@ def fixture(root: Path) -> None:
     )
     write(root / "app/Cargo.toml", "[package]\nname='sl-app'\nversion.workspace=true\n")
     write(root / "image/platform/sl-app.service", "[Service]\nExecStart=/usr/bin/sl-app\n")
+    write(root / "image/build/build-qcow2.sh", "#!/usr/bin/env bash\nexit 0\n")
+    write(root / "image/build/prepare-boot-manifest.py", "print('fixture')\n")
+    write(root / "image/build/qcow2.toml", "name = 'fixture'\n")
     write(root / "image/platform/sl-app.sysusers", 'u sl-app - "app" /nonexistent /usr/sbin/nologin\n')
     write(
         root / "image/platform/org.signallayer.App1.conf",
@@ -49,6 +52,7 @@ def fixture(root: Path) -> None:
         """
         FROM build.example/unused AS build
         COPY app /src/app
+        COPY image/build /src/image/build
         RUN printf compiled > /build/sl-app
         FROM build.example/policy AS policy-build
         COPY image/platform/selinux /policy
@@ -362,6 +366,34 @@ class CoreOSInventoryTests(unittest.TestCase):
         path = self.root / "app/Cargo.toml"
         path.write_text(path.read_text() + "description='changed'\n")
         self.assert_change("build_contract.build_context_inputs.app/Cargo.toml")
+
+    def test_generated_build_output_is_excluded_exactly(self) -> None:
+        for relative in (
+            "image/build/output/generated.json",
+            "image/build/output/nested/run/evidence.log",
+        ):
+            with self.subTest(relative=relative):
+                path = self.root / relative
+                write(path, "generated\n")
+                result = self.run_tool()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_maintained_image_build_inputs_remain_bound(self) -> None:
+        for relative in (
+            "image/build/build-qcow2.sh",
+            "image/build/prepare-boot-manifest.py",
+            "image/build/qcow2.toml",
+        ):
+            with self.subTest(relative=relative):
+                path = self.root / relative
+                original = path.read_text()
+                path.write_text(original + "changed\n")
+                self.assert_change(f"build_contract.build_context_inputs.{relative}")
+                path.write_text(original)
+
+    def test_output_name_outside_exact_exclusion_is_detected(self) -> None:
+        write(self.root / "image/build/output-adjacent/generated.log", "not excluded\n")
+        self.assert_change("build_contract.build_context_inputs.image/build/output-adjacent/generated.log")
 
     def test_copy_inventory_records_exact_source_stage(self) -> None:
         result = self.run_tool("--format", "json")

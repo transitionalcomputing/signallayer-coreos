@@ -101,7 +101,7 @@
       "remoted/static/index.html": "23870de1cfa928a21fe5d3e65a100562c2d2e248385c0541be758d074bd8f978",
       "sessiond/Cargo.toml": "71eda11f86adcc4780b163500db43ef82be0edfc849b39300131fc6288b9d0b1",
       "sessiond/src/main.rs": "0f93579106527c7129dc6d12cab39f4efe87e8c4dffdb968aac6257bddfcadc7",
-      "tools/coreos-inventory": "f081139756d3965a00798d0e63d81567af5d961f1334c9e969c205d27158a731",
+      "tools/coreos-inventory": "3f44ec791fb57a08a25c9bf816aaa24768b72d0bce0035481059b04fa6813e8a",
       "tools/release-preflight": "c51e8e9b1d2e224eb2757ea26d996804d176b343900025a446228deff8d3f346"
     },
     "copy_provenance": [
@@ -651,7 +651,7 @@
       }
     ]
   },
-  "recorded_from": "0e21bac543b7158bf7aca630947c9026d6f71ca4",
+  "recorded_from": "d3de793191126dc92bb0e23e0ee9c37e65e38fb5",
   "schema_version": 1,
   "scope": "exact Containerfile instructions, COPY provenance, and maintained build-context inputs"
 }

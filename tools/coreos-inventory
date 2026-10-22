@@ -220,6 +220,7 @@ def runtime_packages(stage: dict[str, object]) -> list[str]:
 
 
 def build_context_inputs(root: Path, stages: list[dict[str, object]]) -> dict[str, str]:
+    generated_output = Path("image/build/output")
     files: dict[str, str] = {}
     for stage in stages:
         for line in stage["instructions"]:
@@ -242,6 +243,8 @@ def build_context_inputs(root: Path, stages: list[dict[str, object]]) -> dict[st
                     if not candidate.is_file():
                         continue
                     relative = candidate.relative_to(root)
+                    if relative == generated_output or generated_output in relative.parents:
+                        continue
                     if relative in {BASELINE_RELATIVE, DEFAULT_BUILD_CONTRACT}:
                         continue
                     files[str(relative)] = digest(candidate)

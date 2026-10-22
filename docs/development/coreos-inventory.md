@@ -38,7 +38,11 @@ The Containerfile parser recognizes only the project's uppercase instruction
 grammar and constructs logical instructions before stage boundaries. The build
 contract records every complete instruction in every stage, the ordered and
 pinned `FROM` graph, every exact `COPY --from` provenance edge, and hashes of
-maintained build-context inputs. A changed, added, or removed runtime `RUN`
+maintained build-context inputs. It excludes only `image/build/output/` and its
+descendants from those hashes, matching `.containerignore`; generated qcow2 and
+validation output therefore cannot modify the reviewed source contract, while
+all other maintained files under `image/build/` remain bound. A changed, added,
+or removed runtime `RUN`
 therefore differs as a complete instruction; shell pipelines, substitutions,
 redirections, variables, globs, or extra commands cannot inherit approval from
 an accepted prefix. Unknown/external stages, alias collisions, malformed
@@ -140,3 +144,9 @@ service is introduced here. Installed-artifact inventory and transitive payload
 proof remain **UNPROVEN** and require post-build inspection and runtime
 acceptance. Human product-owner approval remains separate from every executable
 check.
+
+Known nonblocking review observations are that the release wrapper checks the
+worktree before, but not again after, the OCI build; release intent is recorded
+in the external evidence record rather than as a separate in-image identity;
+and `recorded_from` identifies the prior reviewed commit used to generate a
+contract candidate. These limitations do not confer approval or attestation.

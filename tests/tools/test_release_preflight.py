@@ -14,6 +14,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PREFLIGHT = REPO / "tools/release-preflight"
 RELEASE_OCI = REPO / "tools/build-release-oci"
+INVENTORY = REPO / "tools/coreos-inventory"
 
 
 def clean_release_repo(parent: Path) -> Path:
@@ -537,6 +538,28 @@ class ReleasePreflightTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("release-preflight: PASS", result.stdout)
+
+    def test_prior_qcow2_output_does_not_block_release_source_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = clean_release_repo(Path(directory))
+            write(root / "image/build/output/previous/signallayer-coreos.qcow2", "generated\n")
+            inventory = subprocess.run(
+                [str(INVENTORY), "--root", str(root)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(inventory.returncode, 0, inventory.stdout + inventory.stderr)
+            status = subprocess.run(
+                ["git", "-C", str(root), "status", "--porcelain=v1", "--untracked-files=all"],
+                text=True,
+                stdout=subprocess.PIPE,
+                check=True,
+            )
+            self.assertEqual(status.stdout, "")
+            preflight = self.run_preflight(root, "0.0.3.1")
+            self.assertEqual(preflight.returncode, 0, preflight.stderr)
+            self.assertIn("release-preflight: PASS", preflight.stdout)
 
 
 if __name__ == "__main__":
