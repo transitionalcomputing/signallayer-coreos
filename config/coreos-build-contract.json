@@ -1,0 +1,657 @@
+{
+  "contract": {
+    "build_context_inputs": {
+      "Cargo.lock": "9a2aa5638d35f1234152bb4b0a707676cac777199988722c2194cd81584dc698",
+      "Cargo.toml": "80d92c0f477cf1866c31f29538f74c161d98b510889fb08966697285a8729c7b",
+      "Containerfile": "97b20e899838c15c8565b65dccf3e251f7c965ead9577128db129c024f377013",
+      "authd/Cargo.toml": "3da3945f555c9d866d7b8e7ddcc321735205f583e6560899b0462a23b5621f54",
+      "authd/src/checked_interface.rs": "ef525b07190735b372187130a54c2f414728ee1f2f4c978ee8cf406ec783cfcd",
+      "authd/src/codes.rs": "96deaac4ce4e92c0692d1cd006b3fc3eced1ede975ed2ff54d11403e4690a076",
+      "authd/src/hash.rs": "e68131fa48d024b35ead9fd5e5ab4b8c834837a277545413cb7e9592943cd0c7",
+      "authd/src/machine.rs": "7b8b705c58ffc602a2d1ca5895577fdbe0afde50b62528fee3ee546b56200e89",
+      "authd/src/machine/tests.rs": "705c3cd7c6ec766beb4b0e303c30200e884cee649c81cc0d28a128b11464b7b1",
+      "authd/src/main.rs": "09f4645d981b7c9f0ca1399e177ea7f27250a456365808a6289c1c1431f3b290",
+      "authd/src/random.rs": "5a7ed8330cd11804b4cbd1e637c61b6ece98f7718d47969fea66a5518bb00899",
+      "authd/src/service.rs": "1ceb811ec8f039ecdf5e2e89ff2af687f100ef2c87d27242f1fadfaf54ca8b84",
+      "authd/src/service/tests.rs": "bdca8d4a4395701ce76c1a4c2c15044ac418a8e714ad62050e5f4dba17da778f",
+      "authd/src/store.rs": "511f0b26b3e9e1b6cd8288bda3da25098a9801d9c13fd1dbc9fe2d4eb2b8c18e",
+      "config/security/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "config/sysctl/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "config/systemd/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "console/Cargo.toml": "e08110be2e883c440fba7a76db674fb25882b03532486a240250e67b804859d9",
+      "console/src/lib.rs": "4c75f8b2177e28da8bb826b67e6605cad38c32fbd6ac2cdca3a432cdd40ee9b9",
+      "console/src/main.rs": "77593ee21fc72a173ce199118cc52a9b31bf96a7c258496d4268609b12577d8c",
+      "console/src/tests.rs": "251ec6b568def35ecc548be55cbf5efe053452c8e196c9a19d853bb8780b0d74",
+      "corectl/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "corectl/Cargo.toml": "9af2c7d3aa806acded0517479c0b80d713dcb84f5ed8c48770f15bf8b8b43cce",
+      "corectl/src/main.rs": "bed9757210c3a40c74e73bb5a67d13dfa6d7d58d7d70a5d51ba07b15da91228e",
+      "crates/platform-client/Cargo.toml": "e1d9c03d7817767d36f4260cdbdf5d7f91347cafeaa1c04a72086b9aa36f397f",
+      "crates/platform-client/src/lib.rs": "2bbe0d7402bbd38ecf9298628f97a57218cb9e1fee2214ffade15ed9322e7fad",
+      "crates/protocol/Cargo.toml": "1eb34dda740dbe7c45ec97b66ea8815d51779f5e65bc418212ae1f4ad7819821",
+      "crates/protocol/src/lib.rs": "ea14e85c90ddbd41634d180d5dc0d1c9260110a423e2c858ca7ed557c09185af",
+      "crates/remote-state/Cargo.toml": "fd8abe50884a9554e6bf8b288f39badcbeec34652937346efcd8c6e90ffc1942",
+      "crates/remote-state/src/lib.rs": "cfc314c1f9addf671de515307e69f5d66f01ad9c4626ee8f5ab82aad1405c3f7",
+      "docs/releases/0.0.1-provenance.md": "779bbeea47031f5dfb9341b8d949bce8943b4a333a6e8ca01645295a24e5c821",
+      "docs/releases/0.0.1.md": "1c857db796c76f6be4c3068cd3a1ff43932be7530985f66cc740b82a6f9fa25b",
+      "docs/releases/0.0.3-provenance.md": "351f4be2cbc78a98fc4e283112f5b410e599ec469ee61bdb7a7fad50f6e371c8",
+      "docs/releases/0.0.3.1.md": "953eab7ca4fb2aa230ca8304007dfb3ae39ee1b4d731ff74d770ee693a3564e9",
+      "docs/releases/0.0.3.md": "7e0564d8ed0ff0967e8cf33e047f4b84709f4bbe7551345906058c02e62fe939",
+      "image/build/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "image/build/README.md": "0178000f9274a634ea9b6ae827326ba9c72c0f6f9b27f0b6eb122e420ccf4b6d",
+      "image/build/build-qcow2.sh": "0a2c33c4a70d98d61e46912264e3dcade0d1b20cc40af8a69599b8b667e5838c",
+      "image/build/inspect-qcow2.sh": "bc5ebff53bc6b9eb6d83649eba237c5dbf2fb8f6b7ba1725c12a4c1a861bf9f9",
+      "image/build/prepare-boot-manifest.py": "4ab72d5a8893f8d5ef908a668856b9503b22e1a7c286b0fe58163f43ec01163c",
+      "image/build/qcow2.toml": "fcfb1c3c2ccbdce6db6660b8bc6f63622ac67fbee9086843acd338ec9ab0b7d6",
+      "image/platform/org.signallayer.Auth1.conf": "cb1177f4ef2b8e6a6b3658ae5103b1f8d37aeef1325fe0bc95c7dfcf3d2e0b94",
+      "image/platform/org.signallayer.NetworkObserver1.conf": "664be8c319043619876987ed9612d37665674ef11450f7f9a3dc1d51e44d0378",
+      "image/platform/org.signallayer.Platform1.conf": "89cf784f63604dff339151c5e5053e030f6c344f8bc2203585d293f34b8c9767",
+      "image/platform/org.signallayer.Session1.conf": "eb9fe5f1a2d528df52bd093d940c108d3541ba8eb5b52cf3a5405eff4f7f3698",
+      "image/platform/selinux/sl_platformd.fc": "2082b06ec7fd2302370d463cbb8d55b2914aad9fac13564689558f0aeadec208",
+      "image/platform/selinux/sl_platformd.te": "759f6963ee62e73b6d142f26544430f322a09f10270e4232e26f956dbfbfa07b",
+      "image/platform/sl-authd.service": "7d5223172a50557fc05a689b9a2777f7003ff842bd874dde270c9034e4646f37",
+      "image/platform/sl-authd.sysusers": "73d7c90d0efb8bafd3e4ac33ec751269e92bfc0ce44d2791d7544fc4096e12bb",
+      "image/platform/sl-bootc-runtime.conf": "b9b288a3286cb030fe0541df86cc6429f3a0c2c65afb3f1d6c56811b12aedf62",
+      "image/platform/sl-console.sysusers": "e99c3a9aa5b86b707ec818fc384ce1b0f99a6a724d4fc64f5a8ae607eb284db0",
+      "image/platform/sl-console@.service": "c2fef73ee4168185dbfb4c74750bd6cf7cc2574f49db7bd652803b6096a67783",
+      "image/platform/sl-network-observer.service": "b64851fb30840527d1cb8e7b97273f25aeed8f0f4e1054523c20866b9a0ff425",
+      "image/platform/sl-network-observer.sysusers": "02bd59a3221aa7c651dd3aeb5da01f609234da1553b2eecda1d4a908da7b7e2d",
+      "image/platform/sl-platformd.service": "7df6f6b848072eaf7c43c0632c9fa34a7fb16e270fa1110e7a00812cee693f7c",
+      "image/platform/sl-reboot.service": "7c66def92cef05686f80d1ca34b7760fbb6476e1160545372d378742c57e265b",
+      "image/platform/sl-remoted.service": "963474938f191e95dd5ffe4c420f67bffd2b24ccaa46c1cc4d23326b78da3080",
+      "image/platform/sl-remoted.sysusers": "909e8cdf271fb79d0514f518d49bbc741c31536bab6011323d8333c3527555b6",
+      "image/platform/sl-rm-boot-reset.service": "4a187961f9bebbcfbfb39101594bc25864f62e0731acdc8fe7c90975e412209c",
+      "image/platform/sl-rm-clear-reset.service": "cde9412d84b39543d11a6dfafa3f9b217bc30e6820819a9c8891f4d9a7b6094f",
+      "image/platform/sl-rm-disable.service": "c596c8d317a8610be4cc8bbad0882c362920fd9c6324eebfd091d6d865a47e97",
+      "image/platform/sl-rm-enable.service": "ab4ea76295f1e869f97b5c9d34f23c89c74f421768f14992aa06f63c34685b49",
+      "image/platform/sl-rm-rotate.service": "d539ff594c92459a58ee2209710a71b978a2656f683b924614edc2f8eaa8ae21",
+      "image/platform/sl-rollback.service": "df535dab68d7635892bd146e95a630e1c16c89e5af9d7de75ba6c4cf03af8f55",
+      "image/platform/sl-sessiond.service": "ce7df4d7b5d1721fd2fd18c16ad8a61f92c412e1cf4518b185541f8c03a446d7",
+      "image/platform/sl-sessiond.sysusers": "54bc3d6e37bfbba4d83395f257a920c33a5f24d7bed09a33b9f86777b55ba92b",
+      "image/platform/sl-update.service": "2a59ebf66e4b0321dda360745e2969286ce8667746747d20e198337237403e82",
+      "image/platform/udisks2-polkit.conf": "7798a6fe37e70c0e442b0ff84813662d5285624aaf3b4dc275c0e3542dfe0172",
+      "network-observer/Cargo.toml": "221efbd4dd2a422157da5ae28fff65fdf0cbea51c54d82045499d1ce477271b6",
+      "network-observer/src/main.rs": "6d30bf8da26c3edfe2142c84fb49ed3ef773c764932642d18b5fa1ca5a862719",
+      "platformd/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "platformd/Cargo.toml": "1bc15b8baf910ac89b3ffec4b138fba9a57841af6145e581a11e69f2a82cb80e",
+      "platformd/src/checked_interface.rs": "48db835b4c2c95945eb7c69e69eb1ed121856bc852f5337bd0ae4dc4441a666f",
+      "platformd/src/main.rs": "f9f007f76c063d230ba890f933dba8dfea4f8faea10738c97e2f814b6856225f",
+      "platformd/src/remote.rs": "e7e92b88e98f2ce297f8fb2e03c06ca7e2c89dca2d64ad3fff0a5f3194d05c86",
+      "platformd/src/remote/tests.rs": "625b03bf05630c744b1cae4b345d0c961b936ba516599208a5ebfa254a2fbb1b",
+      "platformd/src/shared_read.rs": "fc32dfaa06b5a7a4cdce95309e14364dc997aedda331ebfacb9943a2db2fde26",
+      "remote-worker/Cargo.toml": "eb1c14d1487166e2f3c436c986eeee05f3790e407f609e443cdfb78aee4a4b57",
+      "remote-worker/src/main.rs": "3e34bc99308e15f3410875b25e0cd1f0fd8593569618d765fb1b087cbaaac2f8",
+      "remote-worker/src/worker.rs": "e6850ed466e4e4635c764207849f2db80d0e7f0548138cf5ccdc8bc6da85944d",
+      "remote-worker/src/worker/tests.rs": "38b0044b241204de2d8f3eae708d682a0a177a8d7babe29442b8bd48cbc6604d",
+      "remoted/Cargo.toml": "7c8d1deb67a0f0e81b448ea40e8e55d0f8d3f40acfc12260c42a416407b04bd9",
+      "remoted/src/controller.rs": "1bfadbefc1d89bc497a87bab988885a2a62783352d66c9b3b8eee3c358a3e091",
+      "remoted/src/controller/tests.rs": "f2214cea834f8a10c1d29c65595ecf45229815e79b9791c45c41e31ce8e32ef2",
+      "remoted/src/http.rs": "db282f6209a8735ca6e4e400d969165beb2cf6bde093f3f4e27492572e079cea",
+      "remoted/src/http/tests.rs": "51711df718c3e7c38f92bb4745bc08f9a66f8d5b6a2dab937038aea6fe704376",
+      "remoted/src/main.rs": "c8431f234a6abe6d3a45cc5821ae05b69dc75942c29c93919293cf9772d970b4",
+      "remoted/src/netlink.rs": "7277d2a6862186720a0fe91d5cc56c27252c55c5102b169c7add484be0408ded",
+      "remoted/src/network.rs": "e79eed90381cd75bdf41da5a4c386536f24e51fd8526007111415e6d4f1776dc",
+      "remoted/src/peers.rs": "c94ed9db2bfe823c99b64c96a020a2edfb47f1c27f9838634910a86e8a233384",
+      "remoted/src/server.rs": "c3f24fc0e2d31f4e89bece621049e98db1c960aa1bbc5ac9747cf89a2345e0ff",
+      "remoted/src/server/tests.rs": "feb598e2c2d9e0058f124dcd06192373482b9559c9582ca15a8a75fcda029b6a",
+      "remoted/src/sessions.rs": "916a2ee35f0de0ca5bad4a741af2cb5e05bd247783332c5875fc9a8a5f807147",
+      "remoted/src/tls.rs": "37a318332c17c754497446d0d1e002e69f49f4df13430c3474bb9f77b31b52f8",
+      "remoted/src/tls_fixture.pem": "a145af9cebf496e0cda4fc2a55ba4b917ed5a28c5f66141fa9cc7fa9c88e7555",
+      "remoted/static/app.css": "d177f00829bfca116ff4102e279106095836f9c2268fe2604fcb62b5514544c6",
+      "remoted/static/app.js": "64285a748b070000b2c952be9698b95979a5ce9081c0b90329755986b0b69a49",
+      "remoted/static/index.html": "23870de1cfa928a21fe5d3e65a100562c2d2e248385c0541be758d074bd8f978",
+      "sessiond/Cargo.toml": "71eda11f86adcc4780b163500db43ef82be0edfc849b39300131fc6288b9d0b1",
+      "sessiond/src/main.rs": "0f93579106527c7129dc6d12cab39f4efe87e8c4dffdb968aac6257bddfcadc7",
+      "tools/coreos-inventory": "3f44ec791fb57a08a25c9bf816aaa24768b72d0bce0035481059b04fa6813e8a",
+      "tools/release-preflight": "c51e8e9b1d2e224eb2757ea26d996804d176b343900025a446228deff8d3f346"
+    },
+    "copy_provenance": [
+      {
+        "destination": "./",
+        "from": null,
+        "sources": [
+          "Cargo.toml",
+          "Cargo.lock"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./crates",
+        "from": null,
+        "sources": [
+          "crates"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./platformd",
+        "from": null,
+        "sources": [
+          "platformd"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./corectl",
+        "from": null,
+        "sources": [
+          "corectl"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./sessiond",
+        "from": null,
+        "sources": [
+          "sessiond"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./network-observer",
+        "from": null,
+        "sources": [
+          "network-observer"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./authd",
+        "from": null,
+        "sources": [
+          "authd"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./remote-worker",
+        "from": null,
+        "sources": [
+          "remote-worker"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./remoted",
+        "from": null,
+        "sources": [
+          "remoted"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./console",
+        "from": null,
+        "sources": [
+          "console"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./Containerfile",
+        "from": null,
+        "sources": [
+          "Containerfile"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./config",
+        "from": null,
+        "sources": [
+          "config"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./image/platform",
+        "from": null,
+        "sources": [
+          "image/platform"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./image/build",
+        "from": null,
+        "sources": [
+          "image/build"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./docs/releases",
+        "from": null,
+        "sources": [
+          "docs/releases"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./tools/coreos-inventory",
+        "from": null,
+        "sources": [
+          "tools/coreos-inventory"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./tools/release-preflight",
+        "from": null,
+        "sources": [
+          "tools/release-preflight"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "/build",
+        "from": "release-preflight",
+        "sources": [
+          "/build"
+        ],
+        "stage": "platform-build"
+      },
+      {
+        "destination": "/policy",
+        "from": null,
+        "sources": [
+          "image/platform/selinux"
+        ],
+        "stage": "policy-build"
+      },
+      {
+        "destination": "/usr/bin/sl-platformd",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-platformd"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/bin/corectl",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/corectl"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/bin/sl-sessiond",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-sessiond"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/bin/sl-network-observer",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-network-observer"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/bin/sl-authd",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-authd"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/libexec/signallayer/sl-remote-worker",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-remote-worker"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/bin/sl-remoted",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-remoted"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/bin/sl-console",
+        "from": "platform-build",
+        "sources": [
+          "/build/target/release/sl-console"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-platformd.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-platformd.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-sessiond.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-sessiond.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-network-observer.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-network-observer.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-authd.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-authd.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-update.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-update.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-rollback.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-rollback.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-reboot.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-reboot.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-rm-enable.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-rm-enable.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-rm-disable.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-rm-disable.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-rm-rotate.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-rm-rotate.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-rm-clear-reset.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-rm-clear-reset.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-rm-boot-reset.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-rm-boot-reset.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-remoted.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-remoted.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/sl-console@.service",
+        "from": null,
+        "sources": [
+          "image/platform/sl-console@.service"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/tmpfiles.d/sl-bootc-runtime.conf",
+        "from": null,
+        "sources": [
+          "image/platform/sl-bootc-runtime.conf"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/sysusers.d/sl-sessiond.conf",
+        "from": null,
+        "sources": [
+          "image/platform/sl-sessiond.sysusers"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/sysusers.d/sl-network-observer.conf",
+        "from": null,
+        "sources": [
+          "image/platform/sl-network-observer.sysusers"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/sysusers.d/sl-authd.conf",
+        "from": null,
+        "sources": [
+          "image/platform/sl-authd.sysusers"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/sysusers.d/sl-remoted.conf",
+        "from": null,
+        "sources": [
+          "image/platform/sl-remoted.sysusers"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/sysusers.d/sl-console.conf",
+        "from": null,
+        "sources": [
+          "image/platform/sl-console.sysusers"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.Platform1.conf",
+        "from": null,
+        "sources": [
+          "image/platform/org.signallayer.Platform1.conf"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.Session1.conf",
+        "from": null,
+        "sources": [
+          "image/platform/org.signallayer.Session1.conf"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf",
+        "from": null,
+        "sources": [
+          "image/platform/org.signallayer.NetworkObserver1.conf"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.Auth1.conf",
+        "from": null,
+        "sources": [
+          "image/platform/org.signallayer.Auth1.conf"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf",
+        "from": null,
+        "sources": [
+          "image/platform/udisks2-polkit.conf"
+        ],
+        "stage": "final:5"
+      },
+      {
+        "destination": "/usr/share/selinux/packages/sl_platformd.pp",
+        "from": "policy-build",
+        "sources": [
+          "/policy/sl_platformd.pp"
+        ],
+        "stage": "final:5"
+      }
+    ],
+    "global_instructions": [
+      "ARG RELEASE_INTENT=developer",
+      "ARG PLANNED_OS_VERSION="
+    ],
+    "stages": [
+      {
+        "alias": "release-preflight",
+        "base": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+        "instructions": [
+          "ARG RELEASE_INTENT",
+          "ARG PLANNED_OS_VERSION",
+          "WORKDIR /build",
+          "COPY Cargo.toml Cargo.lock ./",
+          "COPY crates ./crates",
+          "COPY platformd ./platformd",
+          "COPY corectl ./corectl",
+          "COPY sessiond ./sessiond",
+          "COPY network-observer ./network-observer",
+          "COPY authd ./authd",
+          "COPY remote-worker ./remote-worker",
+          "COPY remoted ./remoted",
+          "COPY console ./console",
+          "COPY Containerfile ./Containerfile",
+          "COPY config ./config",
+          "COPY image/platform ./image/platform",
+          "COPY image/build ./image/build",
+          "COPY docs/releases ./docs/releases",
+          "COPY tools/coreos-inventory ./tools/coreos-inventory",
+          "COPY tools/release-preflight ./tools/release-preflight",
+          "RUN python3 tools/coreos-inventory --root .",
+          "RUN set -eu; case \"$RELEASE_INTENT\" in developer) planned=0.0.3.1 ;; release) test -n \"$PLANNED_OS_VERSION\" || { echo 'Release intent requires PLANNED_OS_VERSION.' >&2; exit 2; }; planned=$PLANNED_OS_VERSION ;; *) echo \"Unknown RELEASE_INTENT: $RELEASE_INTENT\" >&2; exit 2 ;; esac; python3 tools/release-preflight \"$planned\""
+        ]
+      },
+      {
+        "alias": "platform-tools",
+        "base": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+        "instructions": [
+          "RUN dnf -y install --setopt=install_weak_deps=False cargo gcc rustfmt && dnf clean all",
+          "WORKDIR /build",
+          "ENV CARGO_HOME=/build/target/cargo-home"
+        ]
+      },
+      {
+        "alias": "platform-build",
+        "base": "platform-tools",
+        "instructions": [
+          "ARG RELEASE_INTENT",
+          "ARG PLANNED_OS_VERSION",
+          "COPY --from=release-preflight /build /build",
+          "RUN python3 tools/coreos-inventory --root . && set -eu; case \"$RELEASE_INTENT\" in developer) planned=0.0.3.1 ;; release) test -n \"$PLANNED_OS_VERSION\" || { echo 'Release intent requires PLANNED_OS_VERSION.' >&2; exit 2; }; planned=$PLANNED_OS_VERSION ;; *) echo \"Unknown RELEASE_INTENT: $RELEASE_INTENT\" >&2; exit 2 ;; esac; python3 tools/release-preflight \"$planned\"",
+          "RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked",
+          "RUN ! grep -rEq 'Start(Update|Rollback|Reboot)|Command::new|std::process|systemctl|/bin/(sh|bash)' console/src && test \"$(grep -oE '\"(EnableRemoteManagement|DisableRemoteManagement|ReenrollRemoteManagement|GetRemoteManagementEnrollment)\"' console/src/lib.rs | sort -u | tr '\\n' ' ')\" = '\"DisableRemoteManagement\" \"EnableRemoteManagement\" \"GetRemoteManagementEnrollment\" \"ReenrollRemoteManagement\" '",
+          "RUN cargo tree --locked --offline -p sl-remoted -e normal,build --prefix none | grep -q '^sl-remote-state ' && ! cargo tree --locked --offline -p sl-remoted -e normal,build --prefix none | grep -Eq '^sl-(protocol|platform-client|platformd) ' && ! grep -Eq '^sl-(protocol|platform-client|platformd)' remoted/Cargo.toml && ! grep -rEq 'Platform1|PlatformProxy|sl_protocol|sl_platform_client' remoted/src remoted/static"
+        ]
+      },
+      {
+        "alias": "policy-tools",
+        "base": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+        "instructions": [
+          "RUN dnf -y install --setopt=install_weak_deps=False selinux-policy-devel setools-console make && dnf clean all"
+        ]
+      },
+      {
+        "alias": "policy-build",
+        "base": "policy-tools",
+        "instructions": [
+          "COPY image/platform/selinux /policy",
+          "WORKDIR /policy",
+          "RUN make -f /usr/share/selinux/devel/Makefile sl_platformd.pp"
+        ]
+      },
+      {
+        "alias": null,
+        "base": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+        "instructions": [
+          "ARG SOURCE_REVISION=unknown",
+          "ARG BUILD_ID=unknown",
+          "RUN dnf -y install --setopt=install_weak_deps=False audit && dnf clean all && rm -rf -- /run/dnf /var/cache/libdnf5 /var/lib/dnf/repos && rm -f -- /var/log/dnf5.log /var/cache/ldconfig/aux-cache",
+          "LABEL containers.bootc=\"1\" org.opencontainers.image.title=\"SignalLayerIT CoreOS\" org.opencontainers.image.version=\"0.0.3.1\" org.opencontainers.image.revision=\"${SOURCE_REVISION}\" org.signallayer.image.build-id=\"${BUILD_ID}\" org.opencontainers.image.source=\"https://github.com/transitionalcomputing/signallayer-coreos\"",
+          "RUN set -eu; case \"${SOURCE_REVISION}${BUILD_ID}\" in *[!A-Za-z0-9._+-]*) echo 'Build metadata must use letters, digits, dot, underscore, plus, or hyphen.' >&2; exit 1 ;; esac; install -d -m 0755 /usr/lib/signallayer; install -d -m 0755 /usr/lib/signallayer/openssl.d; install -m 0644 /etc/pki/tls/openssl.d/pkcs11-provider.conf /usr/lib/signallayer/openssl.d/; sed 's@^\\.include /etc/pki/tls/openssl.d$@.include /usr/lib/signallayer/openssl.d@' /etc/pki/tls/openssl.cnf > /usr/lib/signallayer/openssl.cnf; chmod 0644 /usr/lib/signallayer/openssl.cnf; printf '%s\\n' 'NAME=\"SignalLayerIT CoreOS\"' 'VERSION=\"0.0.3.1\"' 'PLATFORM_API_VERSION=\"0.3\"' \"SOURCE_REVISION=\\\"${SOURCE_REVISION}\\\"\" \"BUILD_ID=\\\"${BUILD_ID}\\\"\" > /usr/lib/signallayer/release",
+          "COPY --from=platform-build /build/target/release/sl-platformd /usr/bin/sl-platformd",
+          "COPY --from=platform-build /build/target/release/corectl /usr/bin/corectl",
+          "COPY --from=platform-build /build/target/release/sl-sessiond /usr/bin/sl-sessiond",
+          "COPY --from=platform-build /build/target/release/sl-network-observer /usr/bin/sl-network-observer",
+          "COPY --from=platform-build /build/target/release/sl-authd /usr/bin/sl-authd",
+          "COPY --from=platform-build /build/target/release/sl-remote-worker /usr/libexec/signallayer/sl-remote-worker",
+          "COPY --from=platform-build /build/target/release/sl-remoted /usr/bin/sl-remoted",
+          "COPY --from=platform-build /build/target/release/sl-console /usr/bin/sl-console",
+          "COPY image/platform/sl-platformd.service /usr/lib/systemd/system/sl-platformd.service",
+          "COPY image/platform/sl-sessiond.service /usr/lib/systemd/system/sl-sessiond.service",
+          "COPY image/platform/sl-network-observer.service /usr/lib/systemd/system/sl-network-observer.service",
+          "COPY image/platform/sl-authd.service /usr/lib/systemd/system/sl-authd.service",
+          "COPY image/platform/sl-update.service /usr/lib/systemd/system/sl-update.service",
+          "COPY image/platform/sl-rollback.service /usr/lib/systemd/system/sl-rollback.service",
+          "COPY image/platform/sl-reboot.service /usr/lib/systemd/system/sl-reboot.service",
+          "COPY image/platform/sl-rm-enable.service /usr/lib/systemd/system/sl-rm-enable.service",
+          "COPY image/platform/sl-rm-disable.service /usr/lib/systemd/system/sl-rm-disable.service",
+          "COPY image/platform/sl-rm-rotate.service /usr/lib/systemd/system/sl-rm-rotate.service",
+          "COPY image/platform/sl-rm-clear-reset.service /usr/lib/systemd/system/sl-rm-clear-reset.service",
+          "COPY image/platform/sl-rm-boot-reset.service /usr/lib/systemd/system/sl-rm-boot-reset.service",
+          "COPY image/platform/sl-remoted.service /usr/lib/systemd/system/sl-remoted.service",
+          "COPY image/platform/sl-console@.service /usr/lib/systemd/system/sl-console@.service",
+          "COPY image/platform/sl-bootc-runtime.conf /usr/lib/tmpfiles.d/sl-bootc-runtime.conf",
+          "COPY image/platform/sl-sessiond.sysusers /usr/lib/sysusers.d/sl-sessiond.conf",
+          "COPY image/platform/sl-network-observer.sysusers /usr/lib/sysusers.d/sl-network-observer.conf",
+          "COPY image/platform/sl-authd.sysusers /usr/lib/sysusers.d/sl-authd.conf",
+          "COPY image/platform/sl-remoted.sysusers /usr/lib/sysusers.d/sl-remoted.conf",
+          "COPY image/platform/sl-console.sysusers /usr/lib/sysusers.d/sl-console.conf",
+          "COPY image/platform/org.signallayer.Platform1.conf /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf",
+          "COPY image/platform/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.Session1.conf",
+          "COPY image/platform/org.signallayer.NetworkObserver1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf",
+          "COPY image/platform/org.signallayer.Auth1.conf /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf",
+          "COPY image/platform/udisks2-polkit.conf /usr/lib/systemd/system/udisks2.service.d/10-polkit-order.conf",
+          "COPY --from=policy-build /policy/sl_platformd.pp /usr/share/selinux/packages/sl_platformd.pp",
+          "RUN semodule -n -i /usr/share/selinux/packages/sl_platformd.pp && test \"$(matchpathcon -n /usr/bin/sl-platformd)\" = system_u:object_r:sl_platformd_exec_t:s0 && test \"$(matchpathcon -n /usr/bin/sl-sessiond)\" = system_u:object_r:sl_sessiond_exec_t:s0 && test \"$(matchpathcon -n /usr/bin/sl-network-observer)\" = system_u:object_r:sl_network_observer_exec_t:s0 && test \"$(matchpathcon -n /usr/bin/sl-authd)\" = system_u:object_r:sl_authd_exec_t:s0 && test \"$(matchpathcon -n /usr/bin/sl-console)\" = system_u:object_r:sl_console_exec_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-console@.service)\" = system_u:object_r:sl_console_unit_file_t:s0 && test \"$(matchpathcon -n -m dir /var/lib/sl-authd)\" = system_u:object_r:sl_authd_var_lib_t:s0 && test \"$(matchpathcon -n -m file /var/lib/sl-authd/state.json)\" = system_u:object_r:sl_authd_var_lib_t:s0 && test \"$(matchpathcon -n /usr/bin/bootc)\" = system_u:object_r:install_exec_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-update.service)\" = system_u:object_r:sl_update_unit_file_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-rollback.service)\" = system_u:object_r:sl_update_unit_file_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-reboot.service)\" = system_u:object_r:sl_reboot_unit_file_t:s0 && test \"$(matchpathcon -n -m dir /run/ostree)\" = system_u:object_r:sl_bootc_runtime_t:s0 && test \"$(matchpathcon -n /run/ostree/staged-deployment)\" = system_u:object_r:sl_bootc_state_t:s0 && grep -Fqx 'd /run/ostree 0755 root root -' /usr/lib/tmpfiles.d/sl-bootc-runtime.conf && grep -Fqx 'z /run/ostree 0755 root root -' /usr/lib/tmpfiles.d/sl-bootc-runtime.conf && grep -Fqx 'ExecStart=/usr/bin/bootc upgrade --quiet' /usr/lib/systemd/system/sl-update.service && ! grep -Eq -- '--apply|--download-only|ExecStart=.*(sh|bash)' /usr/lib/systemd/system/sl-update.service && grep -Fqx 'ExecStart=/usr/bin/bootc rollback' /usr/lib/systemd/system/sl-rollback.service && ! grep -Eq -- '--apply|--soft-reboot|ExecStart=.*(sh|bash)' /usr/lib/systemd/system/sl-rollback.service && grep -Fqx 'ExecStart=/usr/bin/sl-network-observer' /usr/lib/systemd/system/sl-network-observer.service && grep -Fq '<deny send_destination=\"org.freedesktop.NetworkManager\"/>' /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && grep -Fq 'send_interface=\"org.freedesktop.DBus.Properties\"' /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && grep -Fq 'send_member=\"Get\"/>' /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf && grep -Fqx 'ExecStart=/usr/bin/systemctl --no-block reboot' /usr/lib/systemd/system/sl-reboot.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-reboot.service)\" = 1 && ! grep -Eq 'ExecStart=.*(sh|bash)' /usr/lib/systemd/system/sl-reboot.service && test \"$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)\" = 3 && awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Fq '<deny send_destination=\"org.signallayer.Platform1\" send_path=\"/org/signallayer/Platform1\" send_interface=\"org.signallayer.Platform1\" send_member=\"StartReboot\"/>' && awk '/<policy user=\"root\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Fq '<allow send_destination=\"org.signallayer.Platform1\" send_path=\"/org/signallayer/Platform1\" send_interface=\"org.signallayer.Platform1\" send_member=\"StartReboot\"/>' && test \"$(grep -c 'send_member=\"StartReboot\"' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf)\" = 2 && ! awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Eq '<allow [^>]*send_member=\"StartReboot\"' && ! (tr -s ' \\n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | grep -Eo '<allow [^>]*send_destination[^>]*/>' | grep -vq 'send_member=') && test \"$(grep -rl 'StartReboot' /usr/share/dbus-1/system.d /etc/dbus-1 2>/dev/null)\" = /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf && grep -Fqx 'ExecStart=/usr/bin/sl-authd' /usr/lib/systemd/system/sl-authd.service && grep -Fqx 'User=sl-authd' /usr/lib/systemd/system/sl-authd.service && grep -Fqx 'StateDirectory=sl-authd' /usr/lib/systemd/system/sl-authd.service && grep -Fqx 'StateDirectoryMode=0700' /usr/lib/systemd/system/sl-authd.service && grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-authd.service && grep -Fqx 'RestrictAddressFamilies=AF_UNIX' /usr/lib/systemd/system/sl-authd.service && grep -Fqx 'u sl-authd - \"SignalLayerIT authentication service\" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-authd.conf && grep -Fqx 'u sl-remoted - \"SignalLayerIT remote management service\" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-remoted.conf && grep -Fqx 'u sl-console - \"SignalLayerIT local console\" /nonexistent /usr/sbin/nologin' /usr/lib/sysusers.d/sl-console.conf && grep -Fqx 'ExecStart=/usr/bin/sl-console' /usr/lib/systemd/system/sl-console@.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-console@.service)\" = 1 && grep -Fqx 'User=sl-console' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'Restart=always' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'Requires=dbus.service' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'Wants=sl-rm-boot-reset.service sl-authd.service sl-platformd.service sl-sessiond.service' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'TTYPath=/dev/%I' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'StandardInput=tty-force' /usr/lib/systemd/system/sl-console@.service && ! grep -Fqx 'PrivateDevices=yes' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'AmbientCapabilities=' /usr/lib/systemd/system/sl-console@.service && grep -Fqx 'RestrictAddressFamilies=AF_UNIX' /usr/lib/systemd/system/sl-console@.service && ! grep -Eq 'ExecStart=.*(sh|bash)|Start(Update|Rollback|Reboot)|systemctl' /usr/lib/systemd/system/sl-console@.service && test \"$(grep -c '<policy ' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf)\" = 6 && test \"$(awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \\n' ' ')\" = ' <policy context=\"default\"> <deny own=\"org.signallayer.Auth1\"/> <deny send_destination=\"org.signallayer.Auth1\"/> </policy> ' && test \"$(awk '/<policy user=\"sl-authd\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | tr -s ' \\n' ' ')\" = ' <policy user=\"sl-authd\"> <allow own=\"org.signallayer.Auth1\"/> </policy> ' && test \"$(awk '/<policy user=\"sl-remoted\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"ConfirmRecoveryKey\" send_member=\"ConsumePairing\" send_member=\"VerifyPassword\" ' && test \"$(awk '/<policy user=\"sl-console\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"RecoverPassword\" send_member=\"VerifyPassword\" ' && test \"$(awk '/<policy user=\"root\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"CancelPendingPairing\" send_member=\"EnsurePendingPairing\" send_member=\"GetEnrollmentState\" send_member=\"GetPendingPairing\" send_member=\"ResetEnrollment\" ' && test \"$(awk '/<policy user=\"sl-sessiond\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"GetEnrollmentState\" ' && test \"$(tr -s ' \\n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -Eo '<allow [^>]*send_destination[^>]*/>' | grep -c '^<allow send_destination=\"org.signallayer.Auth1\" send_path=\"/org/signallayer/Auth1\" send_interface=\"org.signallayer.Auth1\" send_member=\"[A-Za-z]*\"/>$')\" = 11 && test \"$(tr -s ' \\n' ' ' < /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf | grep -Eo '<allow [^>]*/>' | wc -l)\" = 12 && test \"$(grep -rl 'org\\.signallayer\\.Auth1' /usr/share/dbus-1/system.d /etc/dbus-1 2>/dev/null)\" = /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf && ! grep -Eq 'org\\.signallayer\\.Platform1|StartReboot|StartUpdate|StartRollback' /usr/share/dbus-1/system.d/org.signallayer.Session1.conf /usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf /usr/share/dbus-1/system.d/org.signallayer.Auth1.conf && test -x /usr/libexec/signallayer/sl-remote-worker && test \"$(matchpathcon -n /usr/libexec/signallayer/sl-remote-worker)\" = system_u:object_r:sl_remote_worker_exec_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-rm-enable.service)\" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-rm-disable.service)\" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-rm-rotate.service)\" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-rm-clear-reset.service)\" = system_u:object_r:sl_rm_worker_unit_file_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-rm-boot-reset.service)\" = system_u:object_r:sl_rm_boot_reset_unit_file_t:s0 && test \"$(matchpathcon -n -m dir /var/lib/sl-remote-management)\" = system_u:object_r:sl_rm_state_t:s0 && test \"$(matchpathcon -n -m file /var/lib/sl-remote-management/enabled)\" = system_u:object_r:sl_rm_state_t:s0 && test \"$(matchpathcon -n -m file /var/lib/sl-remote-management/reset-pending)\" = system_u:object_r:sl_rm_state_t:s0 && test \"$(matchpathcon -n -m dir /var/lib/sl-remote-management/tls)\" = system_u:object_r:sl_rm_tls_t:s0 && test \"$(matchpathcon -n -m lnk_file /var/lib/sl-remote-management/tls/current)\" = system_u:object_r:sl_rm_tls_t:s0 && test \"$(matchpathcon -n -m dir /var/lib/sl-remote-management/tls/gen-0123456789abcdef)\" = system_u:object_r:sl_rm_tls_t:s0 && test \"$(matchpathcon -n -m file /var/lib/sl-remote-management/tls/gen-0123456789abcdef/key.pem)\" = system_u:object_r:sl_rm_tls_key_t:s0 && test \"$(matchpathcon -n -m file /var/lib/sl-remote-management/tls/gen-0123456789abcdef/cert.pem)\" = system_u:object_r:sl_rm_tls_t:s0 && test \"$(matchpathcon -n -m file /var/lib/sl-remote-management/tls/gen-0123456789abcdef/fingerprint)\" = system_u:object_r:sl_rm_tls_t:s0 && grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker enable' /usr/lib/systemd/system/sl-rm-enable.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-enable.service)\" = 1 && grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-enable.service && grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-enable.service && grep -Fqx 'Environment=SYSTEMD_BYPASS_USERDB=1' /usr/lib/systemd/system/sl-rm-enable.service && grep -Fqx 'CapabilityBoundingSet=CAP_CHOWN' /usr/lib/systemd/system/sl-rm-enable.service && grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-enable.service && ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-enable.service && grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker disable' /usr/lib/systemd/system/sl-rm-disable.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-disable.service)\" = 1 && grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-disable.service && grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-disable.service && grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-rm-disable.service && grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-disable.service && ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-disable.service && grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker rotate-tls' /usr/lib/systemd/system/sl-rm-rotate.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-rotate.service)\" = 1 && grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-rotate.service && grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-rotate.service && grep -Fqx 'Environment=SYSTEMD_BYPASS_USERDB=1' /usr/lib/systemd/system/sl-rm-rotate.service && grep -Fqx 'CapabilityBoundingSet=CAP_CHOWN' /usr/lib/systemd/system/sl-rm-rotate.service && grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-rotate.service && ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-rotate.service && grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker clear-reset-pending' /usr/lib/systemd/system/sl-rm-clear-reset.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-clear-reset.service)\" = 1 && grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-clear-reset.service && grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-clear-reset.service && grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-rm-clear-reset.service && grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-clear-reset.service && ! grep -Eq '^(WantedBy|ConditionKernelCommandLine)=' /usr/lib/systemd/system/sl-rm-clear-reset.service && grep -Fqx 'ExecStart=/usr/libexec/signallayer/sl-remote-worker boot-reset' /usr/lib/systemd/system/sl-rm-boot-reset.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-rm-boot-reset.service)\" = 1 && grep -Fqx 'Type=oneshot' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'StateDirectory=sl-remote-management' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'ConditionKernelCommandLine=signallayer.remote-management-reset' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'Requires=sl-authd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'After=sl-authd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'Before=sl-remoted.service sl-console@tty1.service sl-console@ttyS0.service sl-sessiond.service sl-platformd.service' /usr/lib/systemd/system/sl-rm-boot-reset.service && grep -Fqx 'WantedBy=multi-user.target' /usr/lib/systemd/system/sl-rm-boot-reset.service && test \"$(awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"GetStatus\" ' && test \"$(awk '/<policy user=\"sl-console\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"DisableRemoteManagement\" send_member=\"EnableRemoteManagement\" send_member=\"GetRemoteManagementEnrollment\" send_member=\"ReenrollRemoteManagement\" ' && test \"$(awk '/<policy user=\"root\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Eo '<allow [^>]*/>' | grep -o 'send_member=\"[A-Za-z]*\"' | sort | tr '\\n' ' ')\" = 'send_member=\"DisableRemoteManagement\" send_member=\"EnableRemoteManagement\" send_member=\"GetRemoteManagementEnrollment\" send_member=\"ReenrollRemoteManagement\" send_member=\"StartReboot\" send_member=\"StartRollback\" send_member=\"StartUpdate\" ' && awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Fq '<deny send_destination=\"org.signallayer.Platform1\" send_path=\"/org/signallayer/Platform1\" send_interface=\"org.signallayer.Platform1\" send_member=\"EnableRemoteManagement\"/>' && awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Fq '<deny send_destination=\"org.signallayer.Platform1\" send_path=\"/org/signallayer/Platform1\" send_interface=\"org.signallayer.Platform1\" send_member=\"DisableRemoteManagement\"/>' && awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Fq '<deny send_destination=\"org.signallayer.Platform1\" send_path=\"/org/signallayer/Platform1\" send_interface=\"org.signallayer.Platform1\" send_member=\"ReenrollRemoteManagement\"/>' && awk '/<policy context=\"default\">/,/<\\/policy>/' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf | tr -s ' \\n' ' ' | grep -Fq '<deny send_destination=\"org.signallayer.Platform1\" send_path=\"/org/signallayer/Platform1\" send_interface=\"org.signallayer.Platform1\" send_member=\"GetRemoteManagementEnrollment\"/>' && ! grep -q 'user=\"sl-remoted\"' /usr/share/dbus-1/system.d/org.signallayer.Platform1.conf && test -x /usr/bin/sl-remoted && test \"$(matchpathcon -n /usr/bin/sl-remoted)\" = system_u:object_r:sl_remoted_exec_t:s0 && test \"$(matchpathcon -n /usr/lib/systemd/system/sl-remoted.service)\" = system_u:object_r:sl_remoted_unit_file_t:s0 && test \"$(matchpathcon -n -m dir /run/sl-remoted)\" = system_u:object_r:sl_remoted_runtime_t:s0 && test \"$(matchpathcon -n -m file /run/sl-remoted/listening)\" = system_u:object_r:sl_remoted_runtime_t:s0 && grep -Fqx 'ExecStart=/usr/bin/sl-remoted' /usr/lib/systemd/system/sl-remoted.service && test \"$(grep -c '^Exec' /usr/lib/systemd/system/sl-remoted.service)\" = 1 && grep -Fqx 'User=sl-remoted' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'Group=sl-remoted' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'CapabilityBoundingSet=' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'AmbientCapabilities=' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'RuntimeDirectory=sl-remoted' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'ConditionPathExists=/var/lib/sl-remote-management/enabled' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'ConditionPathExists=/var/lib/sl-remote-management/tls/current' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'ConditionPathExists=!/var/lib/sl-remote-management/reset-pending' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'Requires=sl-rm-boot-reset.service' /usr/lib/systemd/system/sl-remoted.service && grep -Eqx 'After=sl-rm-boot-reset\\.service( .*)?' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'WantedBy=multi-user.target' /usr/lib/systemd/system/sl-remoted.service && grep -Fqx 'RemainAfterExit=yes' /usr/lib/systemd/system/sl-rm-boot-reset.service && ! find / -xdev \\( -path /proc -o -path /sys \\) -prune -o -name 'tls_fixture*' -print | grep -q . && ! grep -rqF -e 'MIIBdjCCARugAwIBAgIUP22sb/7007zskPnAyvXdd5FNGmswCgYIKoZIzj0EAwIw' -e 'MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg4RY9F5svzWhX8bED' /usr/bin /usr/libexec/signallayer /usr/lib/systemd/system /etc /var && test \"$(matchpathcon -n /usr/lib/signallayer/release)\" = system_u:object_r:sl_platformd_release_t:s0 && test \"$(matchpathcon -n -m dir /ostree)\" = system_u:object_r:sl_platformd_ostree_t:s0 && test \"$(matchpathcon -n -m file /ostree/lock)\" = system_u:object_r:sl_platformd_lock_t:s0 && rm -f /usr/bin/semodule_expand /usr/bin/semodule_link /usr/bin/semodule_package /usr/bin/semodule_unpackage /usr/share/selinux/devel/include/services/container.if /usr/share/selinux/devel/include/distributed/passt.if && rmdir /usr/share/selinux/devel/include/services /usr/share/selinux/devel/include/distributed /usr/share/selinux/devel/include /usr/share/selinux/devel",
+          "RUN install -d /usr/lib/systemd/system/multi-user.target.wants && test -e /usr/lib/systemd/system/auditd.service && { test -L /usr/lib/systemd/system/multi-user.target.wants/auditd.service || ln -s ../auditd.service /usr/lib/systemd/system/multi-user.target.wants/auditd.service; } && test \"$(readlink /usr/lib/systemd/system/multi-user.target.wants/auditd.service)\" = ../auditd.service && ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service && ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service && ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service && ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service && ln -s ../sl-rm-boot-reset.service /usr/lib/systemd/system/multi-user.target.wants/sl-rm-boot-reset.service && ln -s ../sl-remoted.service /usr/lib/systemd/system/multi-user.target.wants/sl-remoted.service && ln -s ../sl-console@.service /usr/lib/systemd/system/multi-user.target.wants/sl-console@tty1.service && ln -s ../sl-console@.service /usr/lib/systemd/system/multi-user.target.wants/sl-console@ttyS0.service && install -d /etc/systemd/system && ln -s /dev/null /etc/systemd/system/getty@.service && ln -s /dev/null /etc/systemd/system/serial-getty@.service && ln -s /dev/null /etc/systemd/system/console-getty.service && test \"$(readlink /etc/systemd/system/getty@.service)\" = /dev/null && test \"$(readlink /etc/systemd/system/serial-getty@.service)\" = /dev/null && test \"$(readlink /etc/systemd/system/console-getty.service)\" = /dev/null && test \"$(readlink /usr/lib/systemd/system/multi-user.target.wants/sl-console@tty1.service)\" = ../sl-console@.service && test \"$(readlink /usr/lib/systemd/system/multi-user.target.wants/sl-console@ttyS0.service)\" = ../sl-console@.service"
+        ]
+      }
+    ]
+  },
+  "recorded_from": "d3de793191126dc92bb0e23e0ee9c37e65e38fb5",
+  "schema_version": 1,
+  "scope": "exact Containerfile instructions, COPY provenance, and maintained build-context inputs"
+}

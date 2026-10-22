@@ -1,0 +1,623 @@
+{
+  "accepted_source": "d1860e8ffa6a385beb3632ecdfc40e916eeaaf67",
+  "approval_status": "accepted",
+  "inventory": {
+    "cargo_components": {
+      "corectl": {
+        "path": "corectl",
+        "version": "0.0.3"
+      },
+      "sl-authd": {
+        "path": "authd",
+        "version": "0.0.3"
+      },
+      "sl-console": {
+        "path": "console",
+        "version": "0.0.3"
+      },
+      "sl-network-observer": {
+        "path": "network-observer",
+        "version": "0.0.3"
+      },
+      "sl-platform-client": {
+        "path": "crates/platform-client",
+        "version": "0.0.3"
+      },
+      "sl-platformd": {
+        "path": "platformd",
+        "version": "0.0.3"
+      },
+      "sl-protocol": {
+        "path": "crates/protocol",
+        "version": "0.0.3"
+      },
+      "sl-remote-state": {
+        "path": "crates/remote-state",
+        "version": "0.0.3"
+      },
+      "sl-remote-worker": {
+        "path": "remote-worker",
+        "version": "0.0.3"
+      },
+      "sl-remoted": {
+        "path": "remoted",
+        "version": "0.0.3"
+      },
+      "sl-sessiond": {
+        "path": "sessiond",
+        "version": "0.0.3"
+      }
+    },
+    "coreos_executables": {
+      "/usr/bin/corectl": {
+        "destination": "/usr/bin/corectl",
+        "source": "/build/target/release/corectl"
+      },
+      "/usr/bin/sl-authd": {
+        "destination": "/usr/bin/sl-authd",
+        "source": "/build/target/release/sl-authd"
+      },
+      "/usr/bin/sl-console": {
+        "destination": "/usr/bin/sl-console",
+        "source": "/build/target/release/sl-console"
+      },
+      "/usr/bin/sl-network-observer": {
+        "destination": "/usr/bin/sl-network-observer",
+        "source": "/build/target/release/sl-network-observer"
+      },
+      "/usr/bin/sl-platformd": {
+        "destination": "/usr/bin/sl-platformd",
+        "source": "/build/target/release/sl-platformd"
+      },
+      "/usr/bin/sl-remoted": {
+        "destination": "/usr/bin/sl-remoted",
+        "source": "/build/target/release/sl-remoted"
+      },
+      "/usr/bin/sl-sessiond": {
+        "destination": "/usr/bin/sl-sessiond",
+        "source": "/build/target/release/sl-sessiond"
+      },
+      "/usr/libexec/signallayer/sl-remote-worker": {
+        "destination": "/usr/libexec/signallayer/sl-remote-worker",
+        "source": "/build/target/release/sl-remote-worker"
+      }
+    },
+    "dbus_files": {
+      "/usr/share/dbus-1/system.d/org.signallayer.Auth1.conf": {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.Auth1.conf",
+        "sha256": "cb1177f4ef2b8e6a6b3658ae5103b1f8d37aeef1325fe0bc95c7dfcf3d2e0b94",
+        "source": "image/platform/org.signallayer.Auth1.conf"
+      },
+      "/usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf": {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf",
+        "sha256": "664be8c319043619876987ed9612d37665674ef11450f7f9a3dc1d51e44d0378",
+        "source": "image/platform/org.signallayer.NetworkObserver1.conf"
+      },
+      "/usr/share/dbus-1/system.d/org.signallayer.Platform1.conf": {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.Platform1.conf",
+        "sha256": "89cf784f63604dff339151c5e5053e030f6c344f8bc2203585d293f34b8c9767",
+        "source": "image/platform/org.signallayer.Platform1.conf"
+      },
+      "/usr/share/dbus-1/system.d/org.signallayer.Session1.conf": {
+        "destination": "/usr/share/dbus-1/system.d/org.signallayer.Session1.conf",
+        "sha256": "eb9fe5f1a2d528df52bd093d940c108d3541ba8eb5b52cf3a5405eff4f7f3698",
+        "source": "image/platform/org.signallayer.Session1.conf"
+      }
+    },
+    "dbus_policy_rules": {
+      "/usr/share/dbus-1/system.d/org.signallayer.Auth1.conf": [
+        {
+          "rules": [
+            {
+              "action": "deny",
+              "own": "org.signallayer.Auth1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Auth1"
+            }
+          ],
+          "selector": {
+            "context": "default"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "own": "org.signallayer.Auth1"
+            }
+          ],
+          "selector": {
+            "user": "sl-authd"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "VerifyPassword",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "ConsumePairing",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "ConfirmRecoveryKey",
+              "send_path": "/org/signallayer/Auth1"
+            }
+          ],
+          "selector": {
+            "user": "sl-remoted"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "VerifyPassword",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "RecoverPassword",
+              "send_path": "/org/signallayer/Auth1"
+            }
+          ],
+          "selector": {
+            "user": "sl-console"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "EnsurePendingPairing",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "CancelPendingPairing",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "ResetEnrollment",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "GetPendingPairing",
+              "send_path": "/org/signallayer/Auth1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "GetEnrollmentState",
+              "send_path": "/org/signallayer/Auth1"
+            }
+          ],
+          "selector": {
+            "user": "root"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Auth1",
+              "send_interface": "org.signallayer.Auth1",
+              "send_member": "GetEnrollmentState",
+              "send_path": "/org/signallayer/Auth1"
+            }
+          ],
+          "selector": {
+            "user": "sl-sessiond"
+          }
+        }
+      ],
+      "/usr/share/dbus-1/system.d/org.signallayer.NetworkObserver1.conf": [
+        {
+          "rules": [
+            {
+              "action": "deny",
+              "own": "org.signallayer.NetworkObserver1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.NetworkObserver1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.NetworkObserver1",
+              "send_interface": "org.signallayer.NetworkObserver1",
+              "send_member": "GetNetworkStatus",
+              "send_path": "/org/signallayer/NetworkObserver1"
+            }
+          ],
+          "selector": {
+            "context": "default"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "own": "org.signallayer.NetworkObserver1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.freedesktop.NetworkManager"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.freedesktop.NetworkManager",
+              "send_interface": "org.freedesktop.DBus.Properties",
+              "send_member": "Get"
+            }
+          ],
+          "selector": {
+            "user": "sl-network-observer"
+          }
+        }
+      ],
+      "/usr/share/dbus-1/system.d/org.signallayer.Platform1.conf": [
+        {
+          "rules": [
+            {
+              "action": "deny",
+              "own": "org.signallayer.Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "StartUpdate",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "StartRollback",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "StartReboot",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "EnableRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "DisableRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "ReenrollRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "deny",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "GetRemoteManagementEnrollment",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "GetStatus",
+              "send_path": "/org/signallayer/Platform1"
+            }
+          ],
+          "selector": {
+            "context": "default"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "own": "org.signallayer.Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "StartUpdate",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "StartRollback",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "StartReboot",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "EnableRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "DisableRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "ReenrollRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "GetRemoteManagementEnrollment",
+              "send_path": "/org/signallayer/Platform1"
+            }
+          ],
+          "selector": {
+            "user": "root"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "EnableRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "DisableRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "ReenrollRemoteManagement",
+              "send_path": "/org/signallayer/Platform1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Platform1",
+              "send_interface": "org.signallayer.Platform1",
+              "send_member": "GetRemoteManagementEnrollment",
+              "send_path": "/org/signallayer/Platform1"
+            }
+          ],
+          "selector": {
+            "user": "sl-console"
+          }
+        }
+      ],
+      "/usr/share/dbus-1/system.d/org.signallayer.Session1.conf": [
+        {
+          "rules": [
+            {
+              "action": "deny",
+              "own": "org.signallayer.Session1"
+            },
+            {
+              "action": "allow",
+              "send_destination": "org.signallayer.Session1",
+              "send_interface": "org.signallayer.Session1",
+              "send_member": "GetPlatformStatus",
+              "send_path": "/org/signallayer/Session1"
+            }
+          ],
+          "selector": {
+            "context": "default"
+          }
+        },
+        {
+          "rules": [
+            {
+              "action": "allow",
+              "own": "org.signallayer.Session1"
+            }
+          ],
+          "selector": {
+            "user": "sl-sessiond"
+          }
+        }
+      ]
+    },
+    "runtime_base_image": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+    "runtime_packages_declared": [
+      "audit"
+    ],
+    "selinux_policy_inputs": {
+      "image/platform/selinux/sl_platformd.fc": "2082b06ec7fd2302370d463cbb8d55b2914aad9fac13564689558f0aeadec208",
+      "image/platform/selinux/sl_platformd.te": "759f6963ee62e73b6d142f26544430f322a09f10270e4232e26f956dbfbfa07b"
+    },
+    "systemd_operations": [
+      "ln -s ../auditd.service /usr/lib/systemd/system/multi-user.target.wants/auditd.service",
+      "ln -s ../sl-authd.service /usr/lib/systemd/system/multi-user.target.wants/sl-authd.service",
+      "ln -s ../sl-console@.service /usr/lib/systemd/system/multi-user.target.wants/sl-console@tty1.service",
+      "ln -s ../sl-console@.service /usr/lib/systemd/system/multi-user.target.wants/sl-console@ttyS0.service",
+      "ln -s ../sl-network-observer.service /usr/lib/systemd/system/multi-user.target.wants/sl-network-observer.service",
+      "ln -s ../sl-platformd.service /usr/lib/systemd/system/multi-user.target.wants/sl-platformd.service",
+      "ln -s ../sl-remoted.service /usr/lib/systemd/system/multi-user.target.wants/sl-remoted.service",
+      "ln -s ../sl-rm-boot-reset.service /usr/lib/systemd/system/multi-user.target.wants/sl-rm-boot-reset.service",
+      "ln -s ../sl-sessiond.service /usr/lib/systemd/system/multi-user.target.wants/sl-sessiond.service",
+      "ln -s /dev/null /etc/systemd/system/console-getty.service",
+      "ln -s /dev/null /etc/systemd/system/getty@.service",
+      "ln -s /dev/null /etc/systemd/system/serial-getty@.service"
+    ],
+    "systemd_units": {
+      "/usr/lib/systemd/system/sl-authd.service": {
+        "destination": "/usr/lib/systemd/system/sl-authd.service",
+        "sha256": "7d5223172a50557fc05a689b9a2777f7003ff842bd874dde270c9034e4646f37",
+        "source": "image/platform/sl-authd.service"
+      },
+      "/usr/lib/systemd/system/sl-console@.service": {
+        "destination": "/usr/lib/systemd/system/sl-console@.service",
+        "sha256": "c2fef73ee4168185dbfb4c74750bd6cf7cc2574f49db7bd652803b6096a67783",
+        "source": "image/platform/sl-console@.service"
+      },
+      "/usr/lib/systemd/system/sl-network-observer.service": {
+        "destination": "/usr/lib/systemd/system/sl-network-observer.service",
+        "sha256": "b64851fb30840527d1cb8e7b97273f25aeed8f0f4e1054523c20866b9a0ff425",
+        "source": "image/platform/sl-network-observer.service"
+      },
+      "/usr/lib/systemd/system/sl-platformd.service": {
+        "destination": "/usr/lib/systemd/system/sl-platformd.service",
+        "sha256": "7df6f6b848072eaf7c43c0632c9fa34a7fb16e270fa1110e7a00812cee693f7c",
+        "source": "image/platform/sl-platformd.service"
+      },
+      "/usr/lib/systemd/system/sl-reboot.service": {
+        "destination": "/usr/lib/systemd/system/sl-reboot.service",
+        "sha256": "7c66def92cef05686f80d1ca34b7760fbb6476e1160545372d378742c57e265b",
+        "source": "image/platform/sl-reboot.service"
+      },
+      "/usr/lib/systemd/system/sl-remoted.service": {
+        "destination": "/usr/lib/systemd/system/sl-remoted.service",
+        "sha256": "963474938f191e95dd5ffe4c420f67bffd2b24ccaa46c1cc4d23326b78da3080",
+        "source": "image/platform/sl-remoted.service"
+      },
+      "/usr/lib/systemd/system/sl-rm-boot-reset.service": {
+        "destination": "/usr/lib/systemd/system/sl-rm-boot-reset.service",
+        "sha256": "4a187961f9bebbcfbfb39101594bc25864f62e0731acdc8fe7c90975e412209c",
+        "source": "image/platform/sl-rm-boot-reset.service"
+      },
+      "/usr/lib/systemd/system/sl-rm-clear-reset.service": {
+        "destination": "/usr/lib/systemd/system/sl-rm-clear-reset.service",
+        "sha256": "cde9412d84b39543d11a6dfafa3f9b217bc30e6820819a9c8891f4d9a7b6094f",
+        "source": "image/platform/sl-rm-clear-reset.service"
+      },
+      "/usr/lib/systemd/system/sl-rm-disable.service": {
+        "destination": "/usr/lib/systemd/system/sl-rm-disable.service",
+        "sha256": "c596c8d317a8610be4cc8bbad0882c362920fd9c6324eebfd091d6d865a47e97",
+        "source": "image/platform/sl-rm-disable.service"
+      },
+      "/usr/lib/systemd/system/sl-rm-enable.service": {
+        "destination": "/usr/lib/systemd/system/sl-rm-enable.service",
+        "sha256": "ab4ea76295f1e869f97b5c9d34f23c89c74f421768f14992aa06f63c34685b49",
+        "source": "image/platform/sl-rm-enable.service"
+      },
+      "/usr/lib/systemd/system/sl-rm-rotate.service": {
+        "destination": "/usr/lib/systemd/system/sl-rm-rotate.service",
+        "sha256": "d539ff594c92459a58ee2209710a71b978a2656f683b924614edc2f8eaa8ae21",
+        "source": "image/platform/sl-rm-rotate.service"
+      },
+      "/usr/lib/systemd/system/sl-rollback.service": {
+        "destination": "/usr/lib/systemd/system/sl-rollback.service",
+        "sha256": "df535dab68d7635892bd146e95a630e1c16c89e5af9d7de75ba6c4cf03af8f55",
+        "source": "image/platform/sl-rollback.service"
+      },
+      "/usr/lib/systemd/system/sl-sessiond.service": {
+        "destination": "/usr/lib/systemd/system/sl-sessiond.service",
+        "sha256": "ce7df4d7b5d1721fd2fd18c16ad8a61f92c412e1cf4518b185541f8c03a446d7",
+        "source": "image/platform/sl-sessiond.service"
+      },
+      "/usr/lib/systemd/system/sl-update.service": {
+        "destination": "/usr/lib/systemd/system/sl-update.service",
+        "sha256": "2a59ebf66e4b0321dda360745e2969286ce8667746747d20e198337237403e82",
+        "source": "image/platform/sl-update.service"
+      }
+    },
+    "sysusers_entries": {
+      "/usr/lib/sysusers.d/sl-authd.conf": [
+        "u sl-authd - \"SignalLayerIT authentication service\" /nonexistent /usr/sbin/nologin"
+      ],
+      "/usr/lib/sysusers.d/sl-console.conf": [
+        "u sl-console - \"SignalLayerIT local console\" /nonexistent /usr/sbin/nologin"
+      ],
+      "/usr/lib/sysusers.d/sl-network-observer.conf": [
+        "u sl-network-observer - \"SignalLayerIT network observer\" /nonexistent /usr/sbin/nologin"
+      ],
+      "/usr/lib/sysusers.d/sl-remoted.conf": [
+        "u sl-remoted - \"SignalLayerIT remote management service\" /nonexistent /usr/sbin/nologin"
+      ],
+      "/usr/lib/sysusers.d/sl-sessiond.conf": [
+        "u sl-sessiond - \"SignalLayerIT session service\" /nonexistent /usr/sbin/nologin"
+      ]
+    },
+    "sysusers_files": {
+      "/usr/lib/sysusers.d/sl-authd.conf": {
+        "destination": "/usr/lib/sysusers.d/sl-authd.conf",
+        "sha256": "73d7c90d0efb8bafd3e4ac33ec751269e92bfc0ce44d2791d7544fc4096e12bb",
+        "source": "image/platform/sl-authd.sysusers"
+      },
+      "/usr/lib/sysusers.d/sl-console.conf": {
+        "destination": "/usr/lib/sysusers.d/sl-console.conf",
+        "sha256": "e99c3a9aa5b86b707ec818fc384ce1b0f99a6a724d4fc64f5a8ae607eb284db0",
+        "source": "image/platform/sl-console.sysusers"
+      },
+      "/usr/lib/sysusers.d/sl-network-observer.conf": {
+        "destination": "/usr/lib/sysusers.d/sl-network-observer.conf",
+        "sha256": "02bd59a3221aa7c651dd3aeb5da01f609234da1553b2eecda1d4a908da7b7e2d",
+        "source": "image/platform/sl-network-observer.sysusers"
+      },
+      "/usr/lib/sysusers.d/sl-remoted.conf": {
+        "destination": "/usr/lib/sysusers.d/sl-remoted.conf",
+        "sha256": "909e8cdf271fb79d0514f518d49bbc741c31536bab6011323d8333c3527555b6",
+        "source": "image/platform/sl-remoted.sysusers"
+      },
+      "/usr/lib/sysusers.d/sl-sessiond.conf": {
+        "destination": "/usr/lib/sysusers.d/sl-sessiond.conf",
+        "sha256": "54bc3d6e37bfbba4d83395f257a920c33a5f24d7bed09a33b9f86777b55ba92b",
+        "source": "image/platform/sl-sessiond.sysusers"
+      }
+    }
+  },
+  "schema_version": 1,
+  "scope": "source-declared CoreOS inventory; installed-artifact inventory is UNPROVEN"
+}

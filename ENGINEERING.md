@@ -1,6 +1,10 @@
 # SignalLayer Engineering Operating Rules
 
-Status: proposed. Takes effect only when the read-only release-preflight implementation and its tests are merged and the normal build entry points invoke it. Previously accepted evidence is not retroactively invalidated.
+Status: **ADOPTED**, effective 2026-10-21. The adoption prerequisites were
+satisfied by merged PR #31 (`00f030d`): the read-only release preflight,
+positive and negative tests, and mandatory OCI/qcow2 entry-point gates are in
+the accepted history. Previously accepted evidence is not retroactively
+invalidated.
 
 ## Purpose and accountability
 
@@ -58,10 +62,29 @@ Approval must name the specific proposed change and its tradeoffs; a broad autho
 ## Build and acceptance: fail early, test the right thing
 
 - Run inexpensive static checks and focused unit tests first; expensive image builds begin only after prerequisites are met.
-- Release-bound work supplies a planned OS version to `tools/release-preflight <planned-version>`. The OCI gate runs inside the container build as its first stage, before build-tool installation or Rust compilation; it does not run before the container build command starts. The qcow2 entry point runs the gate before creating build output or inspecting images. A build without these gates is not an accepted release candidate. Their integration into build entry points is a condition of adopting this policy.
+- Release-bound OCI work uses
+  `tools/build-release-oci <planned-version> --tag <image-reference> --evidence <record.json>`.
+  The wrapper requires a clean Git worktree (including no non-ignored untracked
+  context inputs), owns the context and build arguments, records the exact
+  commit and deterministic build ID, inspects the resulting immutable image ID,
+  and writes the evidence record only after those checks pass. Release-bound
+  qcow2 work uses `image/build/build-qcow2.sh --release-intent <planned-version>
+  --release-evidence <record.json> [image-reference]`; it binds the selected
+  immutable image to that record before creating output. Direct developer
+  builds retain their historical commands but do not constitute release intent.
+  These records assume a trusted build host and are not cryptographic
+  supply-chain attestations.
 - The OS release version is `N.N.N` or `N.N.N.N`; expected identity surfaces are the Containerfile OCI version label and embedded release-file VERSION, build ID prefix, qcow2 builder source reference/label check/output names, offline inspector identity expectations and matching `docs/releases/<version>.md`. Cargo workspace/package versions are **independent internal identities**: they must be SemVer-valid and consistent with Cargo.lock, and do not have to equal the OS version. Logs using `CARGO_PKG_VERSION` may therefore intentionally differ.
 - Release preflight must execute actual consumer checks where available (e.g., `cargo metadata --locked --offline --no-deps`) and cover malformed versions, absent patterns and mismatches; textual greps of simultaneously edited files alone are insufficient.
 - Build an artifact only from an identified commit and record source revision, builder inputs, OCI identity/digest, qcow2 SHA-256 and resulting embedded version/origin.
+- Keep the safeguards distinct: source inventory describes declared CoreOS
+  surfaces; the exact build contract detects changes to reviewed Containerfile
+  instructions, COPY provenance and copied source inputs; release evidence
+  binds a clean source revision to a locally inspected immutable OCI image; and
+  installed-artifact validation measures the built result. None of these is a
+  substitute for product-owner approval. Repository writers can modify the
+  committed inventory and contract, so their fields are review evidence rather
+  than an independent approval authority.
 - Every machine acceptance assertion needs a failing fixture derived from captured real failure evidence, or is marked UNPROVEN. Evaluate after the run finishes over explicit lifecycle boundaries. A command sent is not proof of delivery or response; inspect actual output. Harnesses derive expected OS identity from release inputs, not hardcoded version strings.
 - Identify assertions that rely on mocks/simulation versus real KVM or hardware. Do not call a system accepted unless the required real-runtime checks have passed.
 - Reuse passing evidence when the image payload and pertinent tests are unchanged; version changes require verification of the newly produced image, not claims copied from an earlier artifact.
@@ -89,7 +112,13 @@ When tests disagree with visual or runtime evidence, acceptance is UNPROVEN unti
 
 After an avoidable failure, add the *smallest executable regression/preflight check* for that failure class. Checklists alone are insufficient. Prefer reading existing build scripts, contracts and tests rather than introducing a parallel source of truth.
 
-First implementation gate: add `tools/release-preflight` with positive and deliberately mismatched/invalid-Cargo fixtures, plus mandatory invocations in the OCI and qcow2 build entry points. It must accept an explicit planned OS version, require expected surfaces to exist, preserve historical releases, and require Cargo validity without forcing equality to the OS version. Land and test it before adopting this document. Inventory monitoring is the next independent small change.
+Adoption record: `tools/release-preflight` accepts an independent planned OS
+version, requires all expected identity surfaces, protects historical tags and
+validates Cargo without forcing Cargo's SemVer to equal the OS version. Its
+positive, negative and historical replay tests and mandatory entry-point gates
+were merged before this policy became effective. Source-declared CoreOS
+inventory monitoring was added as the next independent safeguard; installed-
+artifact inventory remains a separate acceptance requirement.
 
 ## Change control
 
