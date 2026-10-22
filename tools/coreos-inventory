@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""Compare deterministic CoreOS source inventory with an accepted baseline."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import shlex
+import subprocess
+import sys
+import tomllib
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+SCHEMA_VERSION = 1
+DEFAULT_BASELINE = Path("config/coreos-source-inventory.json")
+UNIT_SUFFIXES = (".service", ".socket", ".timer", ".path", ".target", ".mount")
+
+
+class InventoryError(Exception):
+    pass
+
+
+def read(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError as error:
+        raise InventoryError(f"cannot read {path}: {error}") from error
+
+
+def digest(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise InventoryError(f"cannot hash {path}: {error}") from error
+
+
+def logical_lines(text: str) -> list[str]:
+    result: list[str] = []
+    current = ""
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        current = f"{current} {stripped}".strip()
+        if current.endswith("\\"):
+            current = current[:-1].rstrip()
+        else:
+            result.append(current)
+            current = ""
+    if current:
+        result.append(current)
+    return result
+
+
+def copy_mappings(root: Path, containerfile: str) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for line in logical_lines(containerfile):
+        if not line.startswith("COPY "):
+            continue
+        tokens = shlex.split(line)
+        values = [token for token in tokens[1:] if not token.startswith("--")]
+        if len(values) != 2:
+            continue
+        source, destination = values
+        source_path = root / source
+        record = {"source": source, "destination": destination}
+        if source_path.is_file():
+            record["sha256"] = digest(source_path)
+        records.append(record)
+    return records
+
+
+def final_stage(containerfile: str) -> tuple[str, str]:
+    matches = list(re.finditer(r"^FROM\s+(\S+).*$", containerfile, re.MULTILINE))
+    if not matches:
+        raise InventoryError("Containerfile has no FROM instruction")
+    start = matches[-1]
+    return start.group(1), containerfile[start.end() :]
+
+
+def runtime_packages(stage: str) -> list[str]:
+    packages: set[str] = set()
+    joined = "\n".join(logical_lines(stage))
+    for match in re.finditer(r"\bdnf\s+-y\s+install\s+(.*?)(?:\s*&&|\s*;|$)", joined):
+        for token in shlex.split(match.group(1)):
+            if not token.startswith("-") and "$" not in token:
+                packages.add(token)
+    return sorted(packages)
+
+
+def installed_files(root: Path, mappings: list[dict[str, str]], prefix: str) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for record in mappings:
+        destination = record["destination"]
+        if destination.startswith(prefix):
+            result[destination] = record
+    return dict(sorted(result.items()))
+
+
+def dbus_rules(root: Path, files: dict[str, dict[str, str]]) -> dict[str, list[dict[str, object]]]:
+    result: dict[str, list[dict[str, object]]] = {}
+    for destination, record in files.items():
+        source = root / record["source"]
+        if not source.is_file() or source.suffix != ".conf":
+            continue
+        try:
+            tree = ET.parse(source)
+        except ET.ParseError as error:
+            raise InventoryError(f"invalid D-Bus policy {record['source']}: {error}") from error
+        policies: list[dict[str, object]] = []
+        for policy in tree.findall("policy"):
+            rules = [
+                {"action": child.tag, **dict(sorted(child.attrib.items()))}
+                for child in policy
+                if child.tag in {"allow", "deny"}
+            ]
+            policies.append({"selector": dict(sorted(policy.attrib.items())), "rules": rules})
+        result[destination] = policies
+    return result
+
+
+def sysusers_entries(root: Path, files: dict[str, dict[str, str]]) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for destination, record in files.items():
+        source = root / record["source"]
+        entries = [line.strip() for line in read(source).splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        result[destination] = entries
+    return result
+
+
+def cargo_components(root: Path) -> dict[str, dict[str, str]]:
+    try:
+        with (root / "Cargo.toml").open("rb") as stream:
+            workspace = tomllib.load(stream)["workspace"]
+        workspace_version = str(workspace["package"]["version"])
+        members = workspace["members"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
+        raise InventoryError(f"cannot read Cargo workspace: {error}") from error
+    result: dict[str, dict[str, str]] = {}
+    for member in members:
+        manifest_path = root / member / "Cargo.toml"
+        try:
+            with manifest_path.open("rb") as stream:
+                package = tomllib.load(stream)["package"]
+            version = workspace_version if package["version"] == {"workspace": True} else str(package["version"])
+            result[str(package["name"])] = {"path": str(member), "version": version}
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
+            raise InventoryError(f"cannot read Cargo component {member}: {error}") from error
+    return dict(sorted(result.items()))
+
+
+def selinux_inputs(root: Path) -> dict[str, str]:
+    policy = root / "image/platform/selinux"
+    if not policy.is_dir():
+        raise InventoryError("missing SELinux policy input directory")
+    return {
+        str(path.relative_to(root)): digest(path)
+        for path in sorted(policy.rglob("*"))
+        if path.is_file()
+    }
+
+
+def systemd_operations(stage: str) -> list[str]:
+    operations: set[str] = set()
+    for line in logical_lines(stage):
+        for match in re.finditer(r"\bsystemctl\s+(?:enable|disable|mask|unmask|preset)\s+([^;&]+)", line):
+            operations.add(" ".join(match.group(0).split()))
+        for match in re.finditer(r"\bln\s+-s\s+(\S+)\s+(\S*systemd/system/\S+)", line):
+            operations.add(f"ln -s {match.group(1)} {match.group(2).rstrip(';&')}")
+    return sorted(operations)
+
+
+def source_commit(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unavailable"
+
+
+def collect(root: Path) -> dict[str, object]:
+    containerfile = read(root / "Containerfile")
+    base, stage = final_stage(containerfile)
+    mappings = copy_mappings(root, containerfile)
+    units = {
+        path: value
+        for path, value in installed_files(root, mappings, "/usr/lib/systemd/system/").items()
+        if path.endswith(UNIT_SUFFIXES)
+    }
+    dbus = {
+        **installed_files(root, mappings, "/usr/share/dbus-1/system.d/"),
+        **installed_files(root, mappings, "/usr/share/dbus-1/system-services/"),
+    }
+    sysusers = installed_files(root, mappings, "/usr/lib/sysusers.d/")
+    executables = {
+        **installed_files(root, mappings, "/usr/bin/"),
+        **installed_files(root, mappings, "/usr/libexec/signallayer/"),
+    }
+    return {
+        "runtime_base_image": base,
+        "runtime_packages_declared": runtime_packages(stage),
+        "systemd_units": units,
+        "systemd_operations": systemd_operations(stage),
+        "dbus_files": dict(sorted(dbus.items())),
+        "dbus_policy_rules": dbus_rules(root, dbus),
+        "sysusers_files": dict(sorted(sysusers.items())),
+        "sysusers_entries": sysusers_entries(root, sysusers),
+        "cargo_components": cargo_components(root),
+        "selinux_policy_inputs": selinux_inputs(root),
+        "coreos_executables": dict(sorted(executables.items())),
+    }
+
+
+def compare(expected: dict[str, object], actual: dict[str, object]) -> list[dict[str, object]]:
+    differences: list[dict[str, object]] = []
+
+    def walk(left: object, right: object, path: str) -> None:
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in sorted(left.keys() - right.keys()):
+                differences.append({"kind": "removed", "path": f"{path}.{key}".lstrip("."), "expected": left[key]})
+            for key in sorted(right.keys() - left.keys()):
+                differences.append({"kind": "added", "path": f"{path}.{key}".lstrip("."), "actual": right[key]})
+            for key in sorted(left.keys() & right.keys()):
+                walk(left[key], right[key], f"{path}.{key}".lstrip("."))
+            return
+        if isinstance(left, list) and isinstance(right, list):
+            old = {json.dumps(item, sort_keys=True, separators=(",", ":")): item for item in left}
+            new = {json.dumps(item, sort_keys=True, separators=(",", ":")): item for item in right}
+            for key in sorted(old.keys() - new.keys()):
+                differences.append({"kind": "removed", "path": f"{path}[]", "expected": old[key]})
+            for key in sorted(new.keys() - old.keys()):
+                differences.append({"kind": "added", "path": f"{path}[]", "actual": new[key]})
+            return
+        if left != right:
+            differences.append({"kind": "changed", "path": path, "expected": left, "actual": right})
+
+    walk(expected, actual, "")
+    return differences
+
+
+def document(root: Path, approval: str) -> dict[str, object]:
+    key = "accepted_source" if approval == "accepted" else "candidate_source"
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "approval_status": approval,
+        key: source_commit(root),
+        "scope": "source-declared CoreOS inventory; installed-artifact inventory is UNPROVEN",
+        "inventory": collect(root),
+    }
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, default=Path.cwd())
+    parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--format", choices=("human", "json"), default="human")
+    parser.add_argument("--candidate-output", type=Path)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    root = args.root.resolve()
+    baseline = (args.baseline or root / DEFAULT_BASELINE).resolve()
+    try:
+        if args.candidate_output:
+            output = args.candidate_output.resolve()
+            if output == baseline:
+                raise InventoryError("refusing to overwrite the accepted baseline; generate an unapproved candidate elsewhere")
+            if output.exists():
+                raise InventoryError(f"refusing to overwrite existing candidate output: {output}")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(document(root, "unapproved"), indent=2, sort_keys=True) + "\n")
+            print(f"coreos-inventory: wrote UNAPPROVED candidate to {output}")
+            return 0
+
+        try:
+            accepted = json.loads(read(baseline))
+        except json.JSONDecodeError as error:
+            raise InventoryError(f"invalid baseline JSON: {error}") from error
+        if accepted.get("schema_version") != SCHEMA_VERSION:
+            raise InventoryError("unsupported baseline schema")
+        if accepted.get("approval_status") != "accepted":
+            raise InventoryError("baseline is not explicitly marked accepted")
+        actual = collect(root)
+        differences = compare(accepted.get("inventory", {}), actual)
+        result = {
+            "status": "pass" if not differences else "fail",
+            "baseline": str(baseline.relative_to(root)) if baseline.is_relative_to(root) else str(baseline),
+            "baseline_source": accepted.get("accepted_source"),
+            "source": source_commit(root),
+            "differences": differences,
+            "installed_artifact_inventory": "unproven",
+        }
+    except InventoryError as error:
+        print(f"coreos-inventory: ERROR: {error}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2, sort_keys=True))
+    elif differences:
+        print(f"coreos-inventory: FAIL: {len(differences)} unapproved change(s)")
+        for difference in differences:
+            print(f"{difference['kind']}: {difference['path']}")
+    else:
+        print("coreos-inventory: PASS: source-declared inventory matches accepted baseline")
+        print("installed-artifact inventory: UNPROVEN")
+    return 1 if differences else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

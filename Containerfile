@@ -1,5 +1,12 @@
+# Release invocations provide independent intent through tools/build-release-oci.
+# Direct developer builds retain the current source identity as their default.
+ARG RELEASE_INTENT=developer
+ARG PLANNED_OS_VERSION=
+
 # Reject inconsistent release identity before installing build tools or compiling.
 FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS release-preflight
+ARG RELEASE_INTENT
+ARG PLANNED_OS_VERSION
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
@@ -12,10 +19,20 @@ COPY remote-worker ./remote-worker
 COPY remoted ./remoted
 COPY console ./console
 COPY Containerfile ./Containerfile
+COPY config ./config
+COPY image/platform ./image/platform
 COPY image/build ./image/build
 COPY docs/releases ./docs/releases
+COPY tools/coreos-inventory ./tools/coreos-inventory
 COPY tools/release-preflight ./tools/release-preflight
-RUN python3 tools/release-preflight 0.0.3.1
+RUN python3 tools/coreos-inventory --root .
+RUN set -eu; \
+    case "$RELEASE_INTENT" in \
+        developer) planned=0.0.3.1 ;; \
+        release) test -n "$PLANNED_OS_VERSION" || { echo 'Release intent requires PLANNED_OS_VERSION.' >&2; exit 2; }; planned=$PLANNED_OS_VERSION ;; \
+        *) echo "Unknown RELEASE_INTENT: $RELEASE_INTENT" >&2; exit 2 ;; \
+    esac; \
+    python3 tools/release-preflight "$planned"
 
 # Native Rust tooling is confined to build stages, using the same pinned Fedora base.
 FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c AS platform-tools
@@ -24,9 +41,18 @@ WORKDIR /build
 ENV CARGO_HOME=/build/target/cargo-home
 
 FROM platform-tools AS platform-build
+ARG RELEASE_INTENT
+ARG PLANNED_OS_VERSION
 COPY --from=release-preflight /build /build
 # Repeat with Cargo present so Cargo's own parser validates the workspace.
-RUN python3 tools/release-preflight 0.0.3.1
+RUN python3 tools/coreos-inventory --root . && \
+    set -eu; \
+    case "$RELEASE_INTENT" in \
+        developer) planned=0.0.3.1 ;; \
+        release) test -n "$PLANNED_OS_VERSION" || { echo 'Release intent requires PLANNED_OS_VERSION.' >&2; exit 2; }; planned=$PLANNED_OS_VERSION ;; \
+        *) echo "Unknown RELEASE_INTENT: $RELEASE_INTENT" >&2; exit 2 ;; \
+    esac; \
+    python3 tools/release-preflight "$planned"
 RUN cargo fmt --all -- --check && cargo test --workspace --locked && cargo build --workspace --release --locked
 RUN ! grep -rEq 'Start(Update|Rollback|Reboot)|Command::new|std::process|systemctl|/bin/(sh|bash)' console/src && \
     test "$(grep -oE '"(EnableRemoteManagement|DisableRemoteManagement|ReenrollRemoteManagement|GetRemoteManagementEnrollment)"' console/src/lib.rs | sort -u | tr '\n' ' ')" = '"DisableRemoteManagement" "EnableRemoteManagement" "GetRemoteManagementEnrollment" "ReenrollRemoteManagement" '

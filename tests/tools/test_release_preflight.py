@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import textwrap
@@ -10,6 +11,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PREFLIGHT = REPO / "tools/release-preflight"
+RELEASE_OCI = REPO / "tools/build-release-oci"
 
 
 def write(path: Path, content: str) -> None:
@@ -112,6 +114,34 @@ class ReleasePreflightTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be N.N.N or N.N.N.N", result.stderr)
 
+    def test_planned_next_release_rejects_stale_consistent_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture(root, os_version="0.0.3.1")
+            result = self.run_preflight(root, "0.0.4")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Containerfile OCI version label", result.stderr)
+
+    def test_mismatched_oci_label_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture(root)
+            path = root / "Containerfile"
+            path.write_text(path.read_text().replace('image.version="0.0.3.1"', 'image.version="0.0.3"'))
+            result = self.run_preflight(root, "0.0.3.1")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Containerfile OCI version label", result.stderr)
+
+    def test_mismatched_embedded_release_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture(root)
+            path = root / "Containerfile"
+            path.write_text(path.read_text().replace("'VERSION=\"0.0.3.1\"'", "'VERSION=\"0.0.3\"'"))
+            result = self.run_preflight(root, "0.0.3.1")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("embedded release VERSION", result.stderr)
+
     def test_invalid_cargo_semver_fails(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -169,21 +199,95 @@ class ReleasePreflightTests(unittest.TestCase):
 
     def test_build_entrypoints_run_preflight_before_expensive_work(self) -> None:
         containerfile = (REPO / "Containerfile").read_text()
-        preflight = "RUN python3 tools/release-preflight 0.0.3.1"
+        inventory = "python3 tools/coreos-inventory --root ."
+        preflight = 'python3 tools/release-preflight "$planned"'
+        first_inventory = containerfile.index(inventory)
         first = containerfile.index(preflight)
         install_tools = containerfile.index("RUN dnf -y install", first)
+        second_inventory = containerfile.index(inventory, first_inventory + len(inventory))
         second = containerfile.index(preflight, first + len(preflight))
         compile_workspace = containerfile.index("RUN cargo fmt", second)
+        self.assertLess(first_inventory, first)
         self.assertLess(first, install_tools)
+        self.assertLess(second_inventory, second)
         self.assertLess(install_tools, second)
         self.assertLess(second, compile_workspace)
 
         builder = (REPO / "image/build/build-qcow2.sh").read_text()
-        gate = builder.index('python3 "$repo_root/tools/release-preflight" 0.0.3.1 --root "$repo_root"')
+        inventory_gate = builder.index('python3 "$repo_root/tools/coreos-inventory" --root "$repo_root"')
+        gate = builder.index('python3 "$repo_root/tools/release-preflight" "$planned_os_version" --root "$repo_root"')
         output = builder.index('mkdir -p "$build_dir/output"')
         podman = builder.index("podman image inspect")
+        self.assertLess(inventory_gate, gate)
         self.assertLess(gate, output)
         self.assertLess(gate, podman)
+        self.assertIn("--release-intent", builder[:gate])
+
+        wrapper = RELEASE_OCI.read_text()
+        wrapper_inventory = wrapper.index('python3 "$repo_root/tools/coreos-inventory" --root "$repo_root"')
+        wrapper_gate = wrapper.index('python3 "$repo_root/tools/release-preflight" "$planned_os_version"')
+        wrapper_podman = wrapper.index("exec podman build")
+        self.assertLess(wrapper_inventory, wrapper_gate)
+        self.assertLess(wrapper_gate, wrapper_podman)
+
+    def test_release_intent_requires_planned_version_before_podman(self) -> None:
+        result = subprocess.run(
+            [str(RELEASE_OCI)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("<planned-os-version>", result.stderr)
+
+    def test_release_intent_rejects_stale_tree_before_podman(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / "podman"
+            fake.write_text("#!/bin/sh\necho podman-must-not-run >&2\nexit 99\n")
+            fake.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
+            result = subprocess.run(
+                [str(RELEASE_OCI), "0.0.4", "."],
+                cwd=REPO,
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn("podman-must-not-run", result.stderr)
+            self.assertIn("Containerfile OCI version label", result.stderr)
+
+    def test_matching_release_intent_reaches_podman_with_owned_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "podman.args"
+            fake = Path(directory) / "podman"
+            fake.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > "{log}"\n')
+            fake.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
+            result = subprocess.run(
+                [str(RELEASE_OCI), "0.0.3.1", "."],
+                cwd=REPO,
+                env=environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            arguments = log.read_text().splitlines()
+            self.assertEqual(arguments[0], "build")
+            self.assertIn("RELEASE_INTENT=release", arguments)
+            self.assertIn("PLANNED_OS_VERSION=0.0.3.1", arguments)
+
+    def test_qcow2_release_intent_requires_version_before_any_build(self) -> None:
+        result = subprocess.run(
+            ["bash", str(REPO / "image/build/build-qcow2.sh"), "--release-intent"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--release-intent <planned-os-version>", result.stderr)
 
     def test_explicit_root_works_outside_repository(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
