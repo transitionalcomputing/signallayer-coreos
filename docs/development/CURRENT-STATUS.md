@@ -3,13 +3,20 @@
 **Snapshot:** 2026-10-23. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, Phase 1 Pass 2 design/feasibility boundary.
+**Current milestone:** **0.0.4 — Podman Foundation**, Candidate C feasibility accepted; production architecture approval pending.
 
 ## Done
 
 - **0.0.3** CoreOS Developer Preview published and validated. See [0.0.3 closure](../milestones/0.0.3-closure.md).
 - **0.0.4 Phase 0:** architecture investigation and reconciliation performed; the initial persistent immutable image-store approach exposed substitution concerns.
 - **Phase 1 Pass 1:** bounded genuine-KVM rootless bootstrap feasibility accepted: 37/37 runtime assertions and 11/11 offline checks. This **does not prove production Podman integration**. See [Pass 1 findings](0.0.4-phase1-pass1.md).
+- **Candidate C feasibility:** disposable Fedora 44 rootless `podman run --rootfs`
+  passed 28/28 assertions under genuine KVM. The root-owned read-only rootfs,
+  fixed rootless service, negative missing-rootfs case and native recovery were
+  measured without changing the CoreOS image. See
+  [Candidate C findings](0.0.4-phase1-pass2-candidate-c.md). Production
+  packaging, reset/oracle behavior, dedicated SELinux policy, networking and
+  A-to-B-to-A lifecycle remain unproven.
 - **Build safeguards:** GitHub PR #34 merged into main, commit `d1c5368e7aedc8e5cb0fbeaf53f865050e594ce9`. This improved release/inventory checks; it did not implement 0.0.4 runtime.
 
 ## Current design direction — not runtime proof
@@ -22,14 +29,21 @@
 
 ## Not done / unproven
 
-- **Phase 1 Pass 2 candidate experiments:** not executed.
-- Podman Candidate C on actual Fedora 44 rootless `--rootfs`, teardown/activation enforcement, SELinux, subordinate-ID resource attribution, content verification and independent recovery: **UNPROVEN**.
+- Production Candidate C packaging and content-verification oracle: **UNPROVEN**.
+- Trusted teardown/reset, permanent spawn exclusion, dedicated production
+  SELinux types, approved networking, epoch compatibility and A-to-B-to-A
+  lifecycle: **UNPROVEN**.
 - 0.0.4 production packages/services and OS integration: **NOT IMPLEMENTED**.
 - Full 0.0.4 KVM acceptance, A→B→A lifecycle, artifact and release: **NOT DONE**.
 
 ## Next engineering action
 
-**Move from design to measured implementation evidence:** after the specific product-owner approval required by `ENGINEERING.md` for the proposed experimental scope and any CoreOS inventory/security changes, run a **bounded, disposable Fedora 44 Candidate C feasibility experiment**. Measure whether rootless Podman can launch from the approved read-only rootfs and whether CoreOS can stop it and remain independently recoverable. Record real positive and negative results. Do not claim full trusted reset or production readiness from mere container startup.
+Review and approve the bounded
+[Phase 1 Pass 3 execution plan](0.0.4-phase1-pass3-plan.md). Before production
+implementation, reconcile the runtime contract around Candidate C and approve
+the exact package/service inventory, immutable rootfs/oracle format, SELinux
+boundary, network policy, reset transaction and compatibility-epoch behavior.
+Candidate C's startup result alone does not authorize those changes.
 
 The four open *contract wording* corrections should be handled in a single bounded documentation change, not repeated redesign rounds. No repository document or status note itself authorizes installing runtime packages, changing CoreOS policy, merging, tagging, or publishing.
 
