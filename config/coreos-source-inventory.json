@@ -2,6 +2,48 @@
   "accepted_source": "d1860e8ffa6a385beb3632ecdfc40e916eeaaf67",
   "approval_status": "accepted",
   "inventory": {
+    "cargo_binaries": {
+      "corectl/corectl": {
+        "name": "corectl",
+        "package": "corectl",
+        "source": "corectl/src/main.rs"
+      },
+      "sl-authd/sl-authd": {
+        "name": "sl-authd",
+        "package": "sl-authd",
+        "source": "authd/src/main.rs"
+      },
+      "sl-console/sl-console": {
+        "name": "sl-console",
+        "package": "sl-console",
+        "source": "console/src/main.rs"
+      },
+      "sl-network-observer/sl-network-observer": {
+        "name": "sl-network-observer",
+        "package": "sl-network-observer",
+        "source": "network-observer/src/main.rs"
+      },
+      "sl-platformd/sl-platformd": {
+        "name": "sl-platformd",
+        "package": "sl-platformd",
+        "source": "platformd/src/main.rs"
+      },
+      "sl-remote-worker/sl-remote-worker": {
+        "name": "sl-remote-worker",
+        "package": "sl-remote-worker",
+        "source": "remote-worker/src/main.rs"
+      },
+      "sl-remoted/sl-remoted": {
+        "name": "sl-remoted",
+        "package": "sl-remoted",
+        "source": "remoted/src/main.rs"
+      },
+      "sl-sessiond/sl-sessiond": {
+        "name": "sl-sessiond",
+        "package": "sl-sessiond",
+        "source": "sessiond/src/main.rs"
+      }
+    },
     "cargo_components": {
       "corectl": {
         "path": "corectl",
@@ -616,7 +658,234 @@
         "sha256": "54bc3d6e37bfbba4d83395f257a920c33a5f24d7bed09a33b9f86777b55ba92b",
         "source": "image/platform/sl-sessiond.sysusers"
       }
+    },
+    "tmpfiles_files": {
+      "/usr/lib/tmpfiles.d/sl-bootc-runtime.conf": {
+        "destination": "/usr/lib/tmpfiles.d/sl-bootc-runtime.conf",
+        "sha256": "b9b288a3286cb030fe0541df86cc6429f3a0c2c65afb3f1d6c56811b12aedf62",
+        "source": "image/platform/sl-bootc-runtime.conf"
+      }
     }
+  },
+  "planned_inventory": {
+    "authorization": "https://github.com/transitionalcomputing/signallayer-coreos/issues/38#issuecomment-6380394809",
+    "base_rpm_evidence": {
+      "count": 543,
+      "path": "docs/development/0.0.4-phase1-pass3-installed-nevras.txt",
+      "scope": "pinned-base-only",
+      "sha256": "8c1fdfa9d787355b1dcca8ec65dc838856290ee09f5c0a6afa7bba0afcb249b4"
+    },
+    "engine_security_acceptance": "reserved; upstream engine risk not waived",
+    "final_image_inventory": {
+      "path": "config/coreos-installed-rpms-0.0.4.txt",
+      "required": true,
+      "status": "unproven"
+    },
+    "implementation_gate": "P3-1a safeguards only; later gates require separate authorization",
+    "inventory": {
+      "binfmt_masks": {
+        "/etc/binfmt.d/qemu-aarch64-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-aarch64_be-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-alpha-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-arm-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-armeb-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-hexagon-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-hppa-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-loongarch64-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-m68k-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-microblaze-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-microblazeel-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-mips-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-mips64-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-mips64el-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-mipsel-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-mipsn32-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-mipsn32el-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-or1k-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-ppc-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-ppc64-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-ppc64le-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-riscv32-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-riscv64-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-s390x-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-sh4-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-sh4eb-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-sparc-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-sparc32plus-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-sparc64-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-xtensa-static.conf": "/dev/null",
+        "/etc/binfmt.d/qemu-xtensaeb-static.conf": "/dev/null"
+      },
+      "build_only_packages": [
+        "glibc-static-0:2.43-9.fc44.x86_64"
+      ],
+      "cargo_binaries": {
+        "sl-management-fixture": {
+          "package": "sl-management-fixture",
+          "source": "management-fixture/src/main.rs"
+        },
+        "sl-management-reset": {
+          "package": "sl-management-lifecycle",
+          "source": "management-lifecycle/src/bin/sl-management-reset.rs"
+        },
+        "sl-management-runtime-guard": {
+          "package": "sl-management-lifecycle",
+          "source": "management-lifecycle/src/bin/sl-management-runtime-guard.rs"
+        },
+        "sl-management-verify": {
+          "package": "sl-management-lifecycle",
+          "source": "management-lifecycle/src/bin/sl-management-verify.rs"
+        }
+      },
+      "cargo_components": {
+        "sl-management-fixture": {
+          "path": "management-fixture",
+          "version": "0.0.3"
+        },
+        "sl-management-lifecycle": {
+          "path": "management-lifecycle",
+          "version": "0.0.3"
+        }
+      },
+      "config_files": {
+        "/usr/lib/signallayer/management/compatibility-epoch": {
+          "source": "image/management/compatibility-epoch"
+        },
+        "/usr/lib/signallayer/management/containers.conf": {
+          "source": "image/management/containers.conf"
+        },
+        "/usr/lib/signallayer/management/policy.json": {
+          "source": "image/management/policy.json"
+        },
+        "/usr/lib/signallayer/management/registries.conf": {
+          "source": "image/management/registries.conf"
+        },
+        "/usr/lib/signallayer/management/storage.conf": {
+          "source": "image/management/storage.conf"
+        }
+      },
+      "coreos_executables": {
+        "/usr/lib/signallayer/management-rootfs/usr/bin/sl-management-fixture": {
+          "source": "/build/target/release/sl-management-fixture"
+        },
+        "/usr/libexec/signallayer/sl-management-reset": {
+          "source": "/build/target/release/sl-management-reset"
+        },
+        "/usr/libexec/signallayer/sl-management-runtime-guard": {
+          "source": "/build/target/release/sl-management-runtime-guard"
+        },
+        "/usr/libexec/signallayer/sl-management-verify": {
+          "source": "/build/target/release/sl-management-verify"
+        }
+      },
+      "installed_files": {
+        "/etc/audit/rules.d/90-sl-management.rules": {
+          "kind": "symlink",
+          "target": "/usr/lib/signallayer/management/sl-management.rules"
+        },
+        "/usr/lib/signallayer/management-rootfs": {
+          "builder": "tools/build-management-rootfs",
+          "kind": "generated-directory"
+        },
+        "/usr/lib/signallayer/management-rootfs.manifest.json": {
+          "builder": "tools/build-management-rootfs",
+          "kind": "generated-manifest"
+        },
+        "/usr/lib/signallayer/management/oci-hooks.d": {
+          "kind": "empty-directory"
+        },
+        "/usr/lib/signallayer/management/sl-management.rules": {
+          "source": "image/management/sl-management-audit.rules"
+        },
+        "/usr/share/selinux/packages/sl_management.pp": {
+          "kind": "generated-policy",
+          "source": "image/management/selinux/sl_management.te"
+        }
+      },
+      "runtime_packages_declared": [],
+      "runtime_packages_inherited": [
+        "podman",
+        "crun",
+        "conmon",
+        "container-selinux",
+        "containers-common",
+        "containers-common-extra",
+        "netavark",
+        "aardvark-dns",
+        "passt",
+        "passt-selinux",
+        "shadow-utils",
+        "shadow-utils-subid",
+        "systemd",
+        "selinux-policy-targeted",
+        "fuse-overlayfs"
+      ],
+      "selinux_policy_inputs": [
+        "image/management/selinux/sl_management.te",
+        "image/management/selinux/sl_management.fc",
+        "image/management/selinux/sl_management.if"
+      ],
+      "systemd_operations": [
+        "enable sl-management-reset.service"
+      ],
+      "systemd_units": {
+        "/usr/lib/systemd/system/sl-management-reset.service": {
+          "source": "image/management/sl-management-reset.service"
+        },
+        "/usr/lib/systemd/system/sl-management-runtime.service": {
+          "source": "image/management/sl-management-runtime.service"
+        },
+        "/usr/lib/systemd/system/sl-management-verify.service": {
+          "source": "image/management/sl-management-verify.service"
+        }
+      },
+      "sysusers_files": {
+        "/usr/lib/sysusers.d/sl-management.conf": {
+          "source": "image/management/sl-management.sysusers"
+        }
+      },
+      "tmpfiles_files": {
+        "/usr/lib/tmpfiles.d/sl-management-audit.conf": {
+          "source": "image/management/sl-management-audit.tmpfiles"
+        },
+        "/usr/lib/tmpfiles.d/sl-management.conf": {
+          "source": "image/management/sl-management.tmpfiles"
+        }
+      },
+      "unit_masks": {
+        "/etc/systemd/system/podman-auto-update.service": "/dev/null",
+        "/etc/systemd/system/podman-auto-update.timer": "/dev/null",
+        "/etc/systemd/system/podman-clean-transient.service": "/dev/null",
+        "/etc/systemd/system/podman-kube@.service": "/dev/null",
+        "/etc/systemd/system/podman-restart.service": "/dev/null",
+        "/etc/systemd/system/podman.service": "/dev/null",
+        "/etc/systemd/system/podman.socket": "/dev/null",
+        "/etc/systemd/user/podman-auto-update.service": "/dev/null",
+        "/etc/systemd/user/podman-auto-update.timer": "/dev/null",
+        "/etc/systemd/user/podman-clean-transient.service": "/dev/null",
+        "/etc/systemd/user/podman-kube@.service": "/dev/null",
+        "/etc/systemd/user/podman-restart.service": "/dev/null",
+        "/etc/systemd/user/podman-user-wait-network-online.service": "/dev/null",
+        "/etc/systemd/user/podman.service": "/dev/null",
+        "/etc/systemd/user/podman.socket": "/dev/null"
+      }
+    },
+    "milestone": "0.0.4 P3-1",
+    "runtime_directive_assertions": "deferred-until-reviewed-P3-1d",
+    "runtime_network": "none; 0.0.5 authenticated Management Plane networking; 0.0.6 workload networking",
+    "source_roots": [
+      "management-lifecycle",
+      "management-fixture",
+      "image/management",
+      "tools/build-management-rootfs",
+      "tools/verify-management-rootfs",
+      "tools/install-management-masks",
+      "config/coreos-installed-rpms-0.0.4.txt",
+      "docs/development/0.0.4-phase1-pass3-installed-nevras.txt",
+      "docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt",
+      "docs/development/0.0.4-phase1-pass3-package-closure.txt"
+    ],
+    "status": "planned-not-installed"
   },
   "schema_version": 1,
   "scope": "source-declared CoreOS inventory; installed-artifact inventory is UNPROVEN"

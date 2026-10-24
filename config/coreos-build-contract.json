@@ -3,7 +3,7 @@
     "build_context_inputs": {
       "Cargo.lock": "9a2aa5638d35f1234152bb4b0a707676cac777199988722c2194cd81584dc698",
       "Cargo.toml": "80d92c0f477cf1866c31f29538f74c161d98b510889fb08966697285a8729c7b",
-      "Containerfile": "97b20e899838c15c8565b65dccf3e251f7c965ead9577128db129c024f377013",
+      "Containerfile": "1b49af97b533dfa618179356648514566c65fc4282184830a875fe0a932e2331",
       "authd/Cargo.toml": "3da3945f555c9d866d7b8e7ddcc321735205f583e6560899b0462a23b5621f54",
       "authd/src/checked_interface.rs": "ef525b07190735b372187130a54c2f414728ee1f2f4c978ee8cf406ec783cfcd",
       "authd/src/codes.rs": "96deaac4ce4e92c0692d1cd006b3fc3eced1ede975ed2ff54d11403e4690a076",
@@ -31,6 +31,9 @@
       "crates/protocol/src/lib.rs": "ea14e85c90ddbd41634d180d5dc0d1c9260110a423e2c858ca7ed557c09185af",
       "crates/remote-state/Cargo.toml": "fd8abe50884a9554e6bf8b288f39badcbeec34652937346efcd8c6e90ffc1942",
       "crates/remote-state/src/lib.rs": "cfc314c1f9addf671de515307e69f5d66f01ad9c4626ee8f5ab82aad1405c3f7",
+      "docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt": "070dfe3711c57cbb764db1b036506203dccbb467aa265b1d1d2f6b9d434743d2",
+      "docs/development/0.0.4-phase1-pass3-installed-nevras.txt": "8c1fdfa9d787355b1dcca8ec65dc838856290ee09f5c0a6afa7bba0afcb249b4",
+      "docs/development/0.0.4-phase1-pass3-package-closure.txt": "e287ca5b49455a71155b913e7fe01466fe557b90b581c204e1cb54934272ef4e",
       "docs/releases/0.0.1-provenance.md": "779bbeea47031f5dfb9341b8d949bce8943b4a333a6e8ca01645295a24e5c821",
       "docs/releases/0.0.1.md": "1c857db796c76f6be4c3068cd3a1ff43932be7530985f66cc740b82a6f9fa25b",
       "docs/releases/0.0.3-provenance.md": "351f4be2cbc78a98fc4e283112f5b410e599ec469ee61bdb7a7fad50f6e371c8",
@@ -101,7 +104,7 @@
       "remoted/static/index.html": "23870de1cfa928a21fe5d3e65a100562c2d2e248385c0541be758d074bd8f978",
       "sessiond/Cargo.toml": "71eda11f86adcc4780b163500db43ef82be0edfc849b39300131fc6288b9d0b1",
       "sessiond/src/main.rs": "0f93579106527c7129dc6d12cab39f4efe87e8c4dffdb968aac6257bddfcadc7",
-      "tools/coreos-inventory": "3f44ec791fb57a08a25c9bf816aaa24768b72d0bce0035481059b04fa6813e8a",
+      "tools/coreos-inventory": "498727d299d862a49db5c075f73b35fccfbb2558a12bf5edbe6db58168db9472",
       "tools/release-preflight": "c51e8e9b1d2e224eb2757ea26d996804d176b343900025a446228deff8d3f346"
     },
     "copy_provenance": [
@@ -199,6 +202,16 @@
         "from": null,
         "sources": [
           "config"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./docs/development/",
+        "from": null,
+        "sources": [
+          "docs/development/0.0.4-phase1-pass3-installed-nevras.txt",
+          "docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt",
+          "docs/development/0.0.4-phase1-pass3-package-closure.txt"
         ],
         "stage": "release-preflight"
       },
@@ -535,6 +548,45 @@
       "ARG RELEASE_INTENT=developer",
       "ARG PLANNED_OS_VERSION="
     ],
+    "planned_inventory_sha256": "f94ecdd475aebf2458f60e51be89bbf0640fc41f449dc633ac2e5af95ac1f247",
+    "planned_source_inputs": {
+      "config/coreos-installed-rpms-0.0.4.txt": {
+        "state": "absent"
+      },
+      "docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt": {
+        "mode": "0o644",
+        "sha256": "070dfe3711c57cbb764db1b036506203dccbb467aa265b1d1d2f6b9d434743d2",
+        "state": "file"
+      },
+      "docs/development/0.0.4-phase1-pass3-installed-nevras.txt": {
+        "mode": "0o644",
+        "sha256": "8c1fdfa9d787355b1dcca8ec65dc838856290ee09f5c0a6afa7bba0afcb249b4",
+        "state": "file"
+      },
+      "docs/development/0.0.4-phase1-pass3-package-closure.txt": {
+        "mode": "0o644",
+        "sha256": "e287ca5b49455a71155b913e7fe01466fe557b90b581c204e1cb54934272ef4e",
+        "state": "file"
+      },
+      "image/management": {
+        "state": "absent"
+      },
+      "management-fixture": {
+        "state": "absent"
+      },
+      "management-lifecycle": {
+        "state": "absent"
+      },
+      "tools/build-management-rootfs": {
+        "state": "absent"
+      },
+      "tools/install-management-masks": {
+        "state": "absent"
+      },
+      "tools/verify-management-rootfs": {
+        "state": "absent"
+      }
+    },
     "stages": [
       {
         "alias": "release-preflight",
@@ -555,6 +607,7 @@
           "COPY console ./console",
           "COPY Containerfile ./Containerfile",
           "COPY config ./config",
+          "COPY docs/development/0.0.4-phase1-pass3-installed-nevras.txt docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt docs/development/0.0.4-phase1-pass3-package-closure.txt ./docs/development/",
           "COPY image/platform ./image/platform",
           "COPY image/build ./image/build",
           "COPY docs/releases ./docs/releases",
@@ -653,5 +706,5 @@
   },
   "recorded_from": "d3de793191126dc92bb0e23e0ee9c37e65e38fb5",
   "schema_version": 1,
-  "scope": "exact Containerfile instructions, COPY provenance, and maintained build-context inputs"
+  "scope": "exact Containerfile instructions, COPY provenance, maintained build inputs and planned-source state; no installed-artifact certification"
 }

@@ -1,0 +1,91 @@
+# SignalLayer CoreOS 0.0.4 P3-0 inherited runtime surfaces
+
+Status: MEASURED, read-only, 2026-10-24 UTC
+Base: ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c
+Host: slit-coreosdev-01, Fedora 44 x86_64
+Method: disposable network-disabled container; no package installation or image mutation.
+
+Records below enumerate inherited Podman/container units and configuration, qemu binfmt files and qemu-user-static package identities.
+UNIT /usr/lib/systemd/system/container-getty@.service
+UNIT /usr/lib/systemd/system/podman-auto-update.service
+UNIT /usr/lib/systemd/system/podman-auto-update.timer
+UNIT /usr/lib/systemd/system/podman-clean-transient.service
+UNIT /usr/lib/systemd/system/podman-kube@.service
+UNIT /usr/lib/systemd/system/podman-restart.service
+UNIT /usr/lib/systemd/system/podman.service
+UNIT /usr/lib/systemd/system/podman.socket
+UNIT /usr/lib/systemd/user/podman-auto-update.service
+UNIT /usr/lib/systemd/user/podman-auto-update.timer
+UNIT /usr/lib/systemd/user/podman-clean-transient.service
+UNIT /usr/lib/systemd/user/podman-kube@.service
+UNIT /usr/lib/systemd/user/podman-restart.service
+UNIT /usr/lib/systemd/user/podman-user-wait-network-online.service
+UNIT /usr/lib/systemd/user/podman.service
+UNIT /usr/lib/systemd/user/podman.socket
+CONFIG /etc/containers/policy.json f
+CONFIG /etc/containers/registries.conf f
+CONFIG /etc/containers/registries.conf.d/000-shortnames.conf f
+CONFIG /etc/containers/registries.d/default.yaml f
+CONFIG /etc/containers/registries.d/registry.access.redhat.com.yaml f
+CONFIG /etc/containers/registries.d/registry.redhat.io.yaml f
+CONFIG /etc/containers/toolbox.conf f
+CONFIG /usr/lib/containers/storage/overlay-images/images.lock f
+CONFIG /usr/lib/containers/storage/overlay-layers/layers.lock f
+CONFIG /usr/share/containers/containers.conf f
+CONFIG /usr/share/containers/mounts.conf f
+CONFIG /usr/share/containers/podman-sequoia/gosequoia.c f
+CONFIG /usr/share/containers/podman-sequoia/gosequoia.h f
+CONFIG /usr/share/containers/podman-sequoia/gosequoiafuncs.h f
+CONFIG /usr/share/containers/podman-sequoia/sequoia.h f
+CONFIG /usr/share/containers/seccomp.json f
+CONFIG /usr/share/containers/selinux/contexts f
+CONFIG /usr/share/containers/storage.conf f
+BINFMT /usr/lib/binfmt.d/qemu-aarch64-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-aarch64_be-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-alpha-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-arm-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-armeb-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-hexagon-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-hppa-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-loongarch64-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-m68k-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-microblaze-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-microblazeel-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-mips-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-mips64-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-mips64el-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-mipsel-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-mipsn32-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-mipsn32el-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-or1k-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-ppc-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-ppc64-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-ppc64le-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-riscv32-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-riscv64-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-s390x-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-sh4-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-sh4eb-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-sparc-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-sparc32plus-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-sparc64-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-xtensa-static.conf f
+BINFMT /usr/lib/binfmt.d/qemu-xtensaeb-static.conf f
+QEMU qemu-user-static-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-aarch64-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-alpha-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-arm-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-hexagon-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-hppa-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-loongarch64-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-m68k-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-microblaze-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-mips-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-or1k-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-ppc-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-riscv-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-s390x-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-sh4-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-sparc-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-x86-2:10.2.2-1.fc44.x86_64
+QEMU qemu-user-static-xtensa-2:10.2.2-1.fc44.x86_64

@@ -268,12 +268,77 @@ def build_contract(root: Path) -> dict[str, object]:
                     "destination": values[-1],
                 }
             )
-    return {
+    contract = {
         "global_instructions": globals_,
         "stages": stages,
         "copy_provenance": copies,
         "build_context_inputs": build_context_inputs(root, stages),
     }
+    # Planned inventory is review metadata, never an allowlist for runtime COPY
+    # or a substitute for measuring the installed image. Pin its exact content
+    # and the current (including absent) state of every reserved source tree.
+    planned = planned_inventory(root)
+    if planned is not None:
+        contract["planned_inventory_sha256"] = hashlib.sha256(
+            json.dumps(planned, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        contract["planned_source_inputs"] = planned_source_inputs(root, planned)
+    return contract
+
+
+def planned_inventory(root: Path) -> dict[str, object] | None:
+    path = root / DEFAULT_BASELINE
+    if not path.exists():
+        return None
+    try:
+        planned = json.loads(read(path)).get("planned_inventory")
+    except (ValueError, AttributeError) as error:
+        raise InventoryError(f"invalid source inventory: {error}") from error
+    if planned is None:
+        return None
+    if not isinstance(planned, dict) or planned.get("status") != "planned-not-installed":
+        raise InventoryError("planned inventory must be explicitly planned-not-installed")
+    if not isinstance(planned.get("inventory"), dict):
+        raise InventoryError("planned inventory lacks declared inventory")
+    roots = planned.get("source_roots")
+    if not isinstance(roots, list) or not roots:
+        raise InventoryError("planned inventory lacks source roots")
+    for source in roots:
+        if (not isinstance(source, str) or not source or source.startswith("/")
+                or any(part in ("", ".", "..") for part in source.split("/"))
+                or any(char in source for char in "*?[")):
+            raise InventoryError(f"invalid planned source root: {source!r}")
+    evidence = planned.get("base_rpm_evidence", {})
+    if (not isinstance(evidence, dict) or evidence.get("scope") != "pinned-base-only"
+            or planned.get("final_image_inventory") != {
+                "status": "unproven", "required": True,
+                "path": "config/coreos-installed-rpms-0.0.4.txt"}):
+        raise InventoryError("base evidence cannot certify the required final-image inventory")
+    if planned.get("runtime_directive_assertions") != "deferred-until-reviewed-P3-1d":
+        raise InventoryError("runtime directives are deferred pending the corrected P3-1d specification")
+    return planned
+
+
+def planned_source_inputs(root: Path, planned: dict[str, object]) -> dict[str, object]:
+    inputs: dict[str, object] = {}
+    for source in planned["source_roots"]:
+        path = root / source
+        # Reject symlink ancestors too, including a symlink to an absent target.
+        if any(parent.is_symlink() for parent in (path, *path.parents)
+               if parent != root and parent.is_relative_to(root)):
+            raise InventoryError(f"symlink in planned source input: {source}")
+        if not path.exists():
+            inputs[source] = {"state": "absent"}
+            continue
+        for entry in [path, *sorted(path.rglob("*"))] if path.is_dir() else [path]:
+            relative = str(entry.relative_to(root))
+            if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
+                raise InventoryError(f"unsupported planned source input: {relative}")
+            inputs[relative] = {"state": "directory"} if entry.is_dir() else {
+                "state": "file", "sha256": digest(entry),
+                "mode": oct(entry.stat().st_mode & 0o7777),
+            }
+    return dict(sorted(inputs.items()))
 
 
 def installed_files(root: Path, mappings: list[dict[str, str]], prefix: str) -> dict[str, dict[str, str]]:
@@ -334,6 +399,30 @@ def cargo_components(root: Path) -> dict[str, dict[str, str]]:
             result[str(package["name"])] = {"path": str(member), "version": version}
         except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
             raise InventoryError(f"cannot read Cargo component {member}: {error}") from error
+    return dict(sorted(result.items()))
+
+
+def cargo_binaries(root: Path) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for package, component in cargo_components(root).items():
+        directory = root / component["path"]
+        try:
+            manifest = tomllib.loads(read(directory / "Cargo.toml"))
+            binaries = {item["name"]: item.get("path", f"src/bin/{item['name']}.rs")
+                        for item in manifest.get("bin", [])}
+            if manifest["package"].get("autobins", True):
+                if (directory / "src/main.rs").is_file():
+                    binaries.setdefault(package, "src/main.rs")
+                for path in sorted((directory / "src/bin").glob("*.rs")):
+                    binaries.setdefault(path.stem, str(path.relative_to(directory)))
+                for path in sorted((directory / "src/bin").glob("*/main.rs")):
+                    binaries.setdefault(path.parent.name, str(path.relative_to(directory)))
+            for name, source in binaries.items():
+                key = f"{package}/{name}"
+                result[key] = {"package": package, "name": name,
+                               "source": f"{component['path']}/{source}"}
+        except (KeyError, TypeError, tomllib.TOMLDecodeError) as error:
+            raise InventoryError(f"cannot read Cargo binaries for {package}: {error}") from error
     return dict(sorted(result.items()))
 
 
@@ -399,6 +488,8 @@ def collect(root: Path) -> dict[str, object]:
         "sysusers_files": dict(sorted(sysusers.items())),
         "sysusers_entries": sysusers_entries(root, sysusers),
         "cargo_components": cargo_components(root),
+        "cargo_binaries": cargo_binaries(root),
+        "tmpfiles_files": installed_files(root, mappings, "/usr/lib/tmpfiles.d/"),
         "selinux_policy_inputs": selinux_inputs(root),
         "coreos_executables": dict(sorted(executables.items())),
     }
@@ -433,13 +524,17 @@ def compare(expected: dict[str, object], actual: dict[str, object]) -> list[dict
 
 def document(root: Path, approval: str) -> dict[str, object]:
     key = "accepted_source" if approval == "accepted" else "candidate_source"
-    return {
+    result = {
         "schema_version": SCHEMA_VERSION,
         "approval_status": approval,
         key: source_commit(root),
         "scope": "source-declared CoreOS inventory; installed-artifact inventory is UNPROVEN",
         "inventory": collect(root),
     }
+    planned = planned_inventory(root)
+    if planned is not None:
+        result["planned_inventory"] = planned
+    return result
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -521,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
             "source": source_commit(root),
             "differences": differences,
             "installed_artifact_inventory": "unproven",
+            "planned_inventory": "not-installed" if planned_inventory(root) else "none",
         }
     except InventoryError as error:
         if args.format == "json":

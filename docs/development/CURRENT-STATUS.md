@@ -1,9 +1,9 @@
 # SignalLayer CoreOS — current engineering handoff
 
-**Snapshot:** 2026-10-23. Verify against the current repository and evidence before acting.
+**Snapshot:** 2026-10-24. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, Candidate C feasibility accepted; production architecture approval pending.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a safeguards implemented for review; production runtime integration has not begun.
 
 ## Done
 
@@ -18,6 +18,10 @@
   packaging, reset/oracle behavior, dedicated SELinux policy, networking and
   A-to-B-to-A lifecycle remain unproven.
 - **Build safeguards:** GitHub PR #34 merged into main, commit `d1c5368e7aedc8e5cb0fbeaf53f865050e594ce9`. This improved release/inventory checks; it did not implement 0.0.4 runtime.
+- **P3-1a:** issue #39 implements planned inventory/build-contract controls and
+  positive/negative tests under issue #38's owner authorization. See
+  [implementation evidence](0.0.4-phase1-pass3-p3-1a.md). This records proposed
+  surfaces without installing or accepting a 0.0.4 runtime.
 
 ## Current design direction — not runtime proof
 
@@ -25,7 +29,14 @@
 - **Candidate C**: prefer deployment-owned immutable rootfs via rootless `podman run --rootfs`; **Candidate B**: immutable OCI store/disposable writable graph, comparison only.
 - Trusted teardown/relaunch, no unauthorized executable persistence across trusted reset, independent native recovery, and application-data separation are required outcomes.
 - General OCI image lifecycle and workload orchestration are **0.0.5 or later**, not 0.0.4.
-- The current `main` contract at `docs/contracts/0.0.4-podman-runtime.md` predates the proposed Pass 2 reconciliation. Revised drafts and outside reviews **have not been adopted into main**. Latest independent review found four remaining textual contract corrections: name/constrain the runtime systemd unit; separate permanent spawn prohibitions from transaction inhibit; define verifier dependency activation; remove user-manager assumptions from cgroups.
+- This branch includes locally adopted contract commit `976aaf1`. Issue #38's
+  final owner decision approves A/C/D for starting P3-1a and B's development
+  direction; it reserves engine security risk acceptance and authorization for
+  later runtime gates. The fixed 0.0.4 fixture is offline; 0.0.5 must establish
+  authenticated Management Plane communications and 0.0.6 workload networking.
+- R1–R10 corrections remain required at their specified downstream gates.
+  Runtime-unit directive assertions are deferred to corrected P3-1d; the
+  superseded P3-0 sandbox list is not implemented or treated as approved code.
 
 ## Not done / unproven
 
@@ -38,14 +49,11 @@
 
 ## Next engineering action
 
-Review and approve the bounded
-[Phase 1 Pass 3 execution plan](0.0.4-phase1-pass3-plan.md). Before production
-implementation, reconcile the runtime contract around Candidate C and approve
-the exact package/service inventory, immutable rootfs/oracle format, SELinux
-boundary, network policy, reset transaction and compatibility-epoch behavior.
-Candidate C's startup result alone does not authorize those changes.
-
-The four open *contract wording* corrections should be handled in a single bounded documentation change, not repeated redesign rounds. No repository document or status note itself authorizes installing runtime packages, changing CoreOS policy, merging, tagging, or publishing.
+Review the P3-1a safeguards PR and its negative-control evidence. P3-1b onward,
+production runtime integration, builds and acceptance need their separate
+authorization; they are not started by this checkpoint. Preserve Candidate C's
+28/28 evidence. Do not restart general architecture planning or treat a source
+inventory PASS as installed-artifact proof.
 
 ## How to report checkpoints
 

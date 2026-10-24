@@ -21,7 +21,9 @@ The deterministic JSON inventory records:
 - installed system D-Bus policy/service files and parsed allow/deny rules,
   including machine-detectable method exposure;
 - installed sysusers files and identity declarations;
-- Cargo workspace package names, paths, and package versions;
+- installed tmpfiles inputs;
+- Cargo workspace package names, paths, package versions and explicit or
+  autodiscovered binary targets;
 - every maintained SELinux policy input and its hash; and
 - CoreOS-owned `/usr/bin` and `/usr/libexec/signallayer` entry points declared
   by Containerfile copies.
@@ -144,6 +146,49 @@ service is introduced here. Installed-artifact inventory and transitive payload
 proof remain **UNPROVEN** and require post-build inspection and runtime
 acceptance. Human product-owner approval remains separate from every executable
 check.
+
+## Planned 0.0.4 surfaces (P3-1a)
+
+The same source-inventory document now has a `planned_inventory` section,
+authorized for safeguards by [issue #38's owner decision](https://github.com/transitionalcomputing/signallayer-coreos/issues/38#issuecomment-6380394809).
+It records the exact proposed packages, component/binary names, installed paths,
+three fixed units, sysusers/tmpfiles, configuration/hooks, policy inputs and
+Podman/binfmt masks. `inventory` still measures only current source declarations.
+The planned section is explicitly `planned-not-installed`; it cannot authorize
+a COPY, RUN, workspace addition or file creation on its own.
+
+The existing build contract binds the canonical planned-section hash and the
+current state of its exact `source_roots`. Missing paths are recorded as absent;
+creating even a planned file or empty directory changes the contract. Existing
+files are bound by content and mode; symlink/special-file inputs fail. All
+descendants of each reserved source tree are checked, including unlisted hooks,
+configuration, policy or binary inputs that are not yet copied by Containerfile.
+Changes need an explicit reviewed contract diff through the existing candidate
+workflow. Candidate generation never approves an updated plan.
+
+The unchanged measured 169-package Requires closure is explanatory. The
+543-NEVRA lock is a complete **pinned-base-only** measurement; it does not include
+CoreOS's subsequent `audit` install and cannot certify the final image. Later
+image work requires a separate `config/coreos-installed-rpms-0.0.4.txt`, measured
+after construction, and a reviewed installed-artifact delta. Neither exists yet.
+The gate always reports installed-artifact inventory `unproven`, even when the
+base lock passes. The three measured companions are copied only into the OCI
+preflight/build context so these checks also work there; no final-image COPY or
+runtime change is introduced by P3-1a.
+
+Runtime directive assertions are deferred to the R1/R2-corrected P3-1d
+specification. The superseded P3-0 directive list is not encoded. Networking
+scope is the owner's offline 0.0.4 fixture, authenticated Management Plane
+communications in 0.0.5, and workload networking in 0.0.6. Engine security risk
+acceptance and downstream runtime gates remain reserved.
+
+P3-1a extends measured inventory with already-existing binary/tmpfiles
+declarations and preserves every prior inventory value and `accepted_source`.
+The reviewed build-contract diff adds the planned digest/source states,
+preflight-only evidence COPY and exact changed checker hash. It does not approve
+future implementation content. These repository-controlled records still rely
+on owner authorization and independent PR review; a writer changing both the
+baseline and contract can bypass them.
 
 Known nonblocking review observations are that the release wrapper checks the
 worktree before, but not again after, the OCI build; release intent is recorded
