@@ -1,16 +1,31 @@
 # SignalLayer CoreOS — current engineering handoff
 
-**Snapshot:** 2026-10-23. Verify against the current repository and evidence before acting.
+**Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, Phase 1 Pass 2 design/feasibility boundary.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a safeguards implemented for review; production runtime integration has not begun.
 
 ## Done
 
 - **0.0.3** CoreOS Developer Preview published and validated. See [0.0.3 closure](../milestones/0.0.3-closure.md).
 - **0.0.4 Phase 0:** architecture investigation and reconciliation performed; the initial persistent immutable image-store approach exposed substitution concerns.
 - **Phase 1 Pass 1:** bounded genuine-KVM rootless bootstrap feasibility accepted: 37/37 runtime assertions and 11/11 offline checks. This **does not prove production Podman integration**. See [Pass 1 findings](0.0.4-phase1-pass1.md).
+- **Candidate C feasibility:** disposable Fedora 44 rootless `podman run --rootfs`
+  passed 28/28 assertions under genuine KVM. The root-owned read-only rootfs,
+  fixed rootless service and negative missing-rootfs case were measured,
+  followed by a restart of that same service. This Pass 1 base has no
+  `sl-platformd` or appliance console, so independent native recovery was not
+  measured. The hostile-config control is inconclusive, the negative controls
+  are synthetic, and the pause process was created outside the unit cgroup
+  (A4). The CoreOS image was unchanged. See
+  [Candidate C findings](0.0.4-phase1-pass2-candidate-c.md). Production
+  packaging, reset/oracle behavior, dedicated SELinux policy, networking and
+  A-to-B-to-A lifecycle remain unproven.
 - **Build safeguards:** GitHub PR #34 merged into main, commit `d1c5368e7aedc8e5cb0fbeaf53f865050e594ce9`. This improved release/inventory checks; it did not implement 0.0.4 runtime.
+- **P3-1a:** issue #39 implements planned inventory/build-contract controls and
+  positive/negative tests under issue #38's owner authorization. See
+  [implementation evidence](0.0.4-phase1-pass3-p3-1a.md). This records proposed
+  surfaces without installing or accepting a 0.0.4 runtime.
 
 ## Current design direction — not runtime proof
 
@@ -18,20 +33,43 @@
 - **Candidate C**: prefer deployment-owned immutable rootfs via rootless `podman run --rootfs`; **Candidate B**: immutable OCI store/disposable writable graph, comparison only.
 - Trusted teardown/relaunch, no unauthorized executable persistence across trusted reset, independent native recovery, and application-data separation are required outcomes.
 - General OCI image lifecycle and workload orchestration are **0.0.5 or later**, not 0.0.4.
-- The current `main` contract at `docs/contracts/0.0.4-podman-runtime.md` predates the proposed Pass 2 reconciliation. Revised drafts and outside reviews **have not been adopted into main**. Latest independent review found four remaining textual contract corrections: name/constrain the runtime systemd unit; separate permanent spawn prohibitions from transaction inhibit; define verifier dependency activation; remove user-manager assumptions from cgroups.
+- This branch includes locally adopted contract commit `976aaf1`. Issue #38's
+  final owner decision approves A/C/D for starting P3-1a and B's development
+  direction; it reserves engine security risk acceptance and authorization for
+  later runtime gates. The fixed 0.0.4 fixture is offline; 0.0.5 must establish
+  authenticated Management Plane communications and 0.0.6 workload networking.
+- R1–R10 corrections remain required at their specified downstream gates.
+  Runtime-unit directive assertions are deferred to corrected P3-1d; the
+  superseded P3-0 sandbox list is not implemented or treated as approved code.
+
+## PR #40 correction checkpoint
+
+- Checkout permissions are normalized to content plus owner-executable state;
+  special permission bits, executable drift, content drift and symlinks fail.
+- Candidate C narrative corrections preserve all original 28/28 evidence bytes.
+  The old Pass 3 plan is explicitly superseded by issue #38 / P3-0 decisions.
+- The adopted contract's older private-network passages still need a separate
+  approved amendment; they do not prescribe `pasta` for the offline fixture.
+  Required Management Plane communications are in 0.0.5 and workload networking
+  in 0.0.6. No production networking or full P3-0 implementation is deployed.
+- See [correction results and remaining limitations](0.0.4-pr40-review-corrections.md).
 
 ## Not done / unproven
 
-- **Phase 1 Pass 2 candidate experiments:** not executed.
-- Podman Candidate C on actual Fedora 44 rootless `--rootfs`, teardown/activation enforcement, SELinux, subordinate-ID resource attribution, content verification and independent recovery: **UNPROVEN**.
+- Production Candidate C packaging and content-verification oracle: **UNPROVEN**.
+- Trusted teardown/reset, permanent spawn exclusion, dedicated production
+  SELinux types, approved networking, epoch compatibility and A-to-B-to-A
+  lifecycle: **UNPROVEN**.
 - 0.0.4 production packages/services and OS integration: **NOT IMPLEMENTED**.
 - Full 0.0.4 KVM acceptance, A→B→A lifecycle, artifact and release: **NOT DONE**.
 
 ## Next engineering action
 
-**Move from design to measured implementation evidence:** after the specific product-owner approval required by `ENGINEERING.md` for the proposed experimental scope and any CoreOS inventory/security changes, run a **bounded, disposable Fedora 44 Candidate C feasibility experiment**. Measure whether rootless Podman can launch from the approved read-only rootfs and whether CoreOS can stop it and remain independently recoverable. Record real positive and negative results. Do not claim full trusted reset or production readiness from mere container startup.
-
-The four open *contract wording* corrections should be handled in a single bounded documentation change, not repeated redesign rounds. No repository document or status note itself authorizes installing runtime packages, changing CoreOS policy, merging, tagging, or publishing.
+Review the P3-1a safeguards PR and its negative-control evidence. P3-1b onward,
+production runtime integration, builds and acceptance need their separate
+authorization; they are not started by this checkpoint. Preserve Candidate C's
+28/28 evidence. Do not restart general architecture planning or treat a source
+inventory PASS as installed-artifact proof.
 
 ## How to report checkpoints
 
