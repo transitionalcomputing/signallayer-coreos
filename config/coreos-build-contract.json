@@ -104,7 +104,7 @@
       "remoted/static/index.html": "23870de1cfa928a21fe5d3e65a100562c2d2e248385c0541be758d074bd8f978",
       "sessiond/Cargo.toml": "71eda11f86adcc4780b163500db43ef82be0edfc849b39300131fc6288b9d0b1",
       "sessiond/src/main.rs": "0f93579106527c7129dc6d12cab39f4efe87e8c4dffdb968aac6257bddfcadc7",
-      "tools/coreos-inventory": "498727d299d862a49db5c075f73b35fccfbb2558a12bf5edbe6db58168db9472",
+      "tools/coreos-inventory": "bb4481d27fb9c007153fb92d3cbce0e293ed961de776c5773892bf35449a275a",
       "tools/release-preflight": "c51e8e9b1d2e224eb2757ea26d996804d176b343900025a446228deff8d3f346"
     },
     "copy_provenance": [
@@ -554,17 +554,17 @@
         "state": "absent"
       },
       "docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt": {
-        "mode": "0o644",
+        "executable": false,
         "sha256": "070dfe3711c57cbb764db1b036506203dccbb467aa265b1d1d2f6b9d434743d2",
         "state": "file"
       },
       "docs/development/0.0.4-phase1-pass3-installed-nevras.txt": {
-        "mode": "0o644",
+        "executable": false,
         "sha256": "8c1fdfa9d787355b1dcca8ec65dc838856290ee09f5c0a6afa7bba0afcb249b4",
         "state": "file"
       },
       "docs/development/0.0.4-phase1-pass3-package-closure.txt": {
-        "mode": "0o644",
+        "executable": false,
         "sha256": "e287ca5b49455a71155b913e7fe01466fe557b90b581c204e1cb54934272ef4e",
         "state": "file"
       },

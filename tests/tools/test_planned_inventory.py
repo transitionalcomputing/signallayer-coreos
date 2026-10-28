@@ -6,6 +6,7 @@ import copy
 import importlib.machinery
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -86,7 +87,7 @@ class PlannedInventoryTests(unittest.TestCase):
         write(self.root / "image/management/unlisted.conf", "arbitrary\n")
         self.rejected("planned_source_inputs.image/management/unlisted.conf")
 
-    def test_reviewed_future_inputs_are_bound_by_content_and_mode(self):
+    def test_reviewed_future_inputs_are_bound_by_content_and_executable(self):
         paths = ["image/management/storage.conf", "image/management/oci-hooks.d/empty", "image/management/selinux/sl_management.fc", "tools/build-management-rootfs"]
         for path in paths:
             write(self.root / path, "reviewed fixture\n")
@@ -101,7 +102,65 @@ class PlannedInventoryTests(unittest.TestCase):
                 path.write_text(original)
         helper = self.root / paths[-1]
         helper.chmod(0o755)
-        self.rejected("planned_source_inputs.tools/build-management-rootfs.mode")
+        self.rejected("planned_source_inputs.tools/build-management-rootfs.executable")
+
+    def test_nonexecutable_checkout_permissions_are_portable(self):
+        path = self.root / "tools/build-management-rootfs"
+        write(path, "reviewed fixture\n")
+        path.chmod(0o644)
+        self.accept_fixture()
+        for mode in (0o644, 0o664, 0o600):
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                result = self.run_gate()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_executable_checkout_permissions_are_portable(self):
+        path = self.root / "tools/build-management-rootfs"
+        write(path, "reviewed fixture\n")
+        path.chmod(0o755)
+        self.accept_fixture()
+        for mode in (0o755, 0o775, 0o700):
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                result = self.run_gate()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_owner_executable_gain_and_loss_are_rejected(self):
+        path = self.root / "tools/build-management-rootfs"
+        write(path, "reviewed fixture\n")
+        for before, after in ((0o644, 0o744), (0o755, 0o655)):
+            with self.subTest(before=oct(before), after=oct(after)):
+                path.chmod(before)
+                self.accept_fixture()
+                path.chmod(after)
+                self.rejected("planned_source_inputs.tools/build-management-rootfs.executable")
+
+    def test_file_symlink_substitution_is_rejected(self):
+        path = self.root / "tools/build-management-rootfs"
+        write(path, "reviewed fixture\n")
+        self.accept_fixture()
+        target = self.root / "identical-content"
+        target.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(target)
+        self.rejected("symlink in planned source input")
+
+    def test_fresh_fixture_checkout_under_umask_002(self):
+        path = self.root / "tools/build-management-rootfs"
+        write(path, "reviewed fixture\n")
+        path.chmod(0o644)
+        self.accept_fixture()
+        content = path.read_bytes()
+        path.unlink()
+        previous = os.umask(0o002)
+        try:
+            path.write_bytes(content)
+        finally:
+            os.umask(previous)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o664)
+        result = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_empty_hook_directory_addition_is_detected(self):
         (self.root / "image/management/oci-hooks.d").mkdir(parents=True)
@@ -224,7 +283,7 @@ class PlannedInventoryTests(unittest.TestCase):
         self.assertEqual(len(planned["inventory"]["binfmt_masks"]), 31)
         self.assertFalse((REPO / planned["final_image_inventory"]["path"]).exists())
 
-    def test_oci_preflight_copy_context_contains_all_required_safeguards(self):
+    def preflight_copy_context(self):
         # Reproduce file copies only, not RUN instructions or an image build.
         # This catches a gate that passes on the host but lacks its inputs in OCI.
         _, stages = inv.parse_stages((REPO / "Containerfile").read_text())
@@ -246,10 +305,40 @@ class PlannedInventoryTests(unittest.TestCase):
                     output = target / path.name if paths[-1].endswith("/") else target
                     output.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(path, output)
-        result = subprocess.run([sys.executable, str(destination / "tools/coreos-inventory"),
-                                 "--root", str(destination), "--format", "json"],
-                                capture_output=True, text=True)
+        return destination
+
+    def run_context_gate(self, destination):
+        return subprocess.run([sys.executable, str(destination / "tools/coreos-inventory"),
+                               "--root", str(destination), "--format", "json"],
+                              capture_output=True, text=True)
+
+    def test_oci_preflight_copy_context_contains_all_required_safeguards(self):
+        result = self.run_context_gate(self.preflight_copy_context())
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_oci_preflight_copy_context_tolerates_checkout_permissions(self):
+        destination = self.preflight_copy_context()
+        contract = json.loads((destination / inv.DEFAULT_BUILD_CONTRACT).read_text())["contract"]
+        files = [destination / name for name, value in contract["planned_source_inputs"].items()
+                 if value["state"] == "file"]
+        self.assertTrue(files)
+        for mode in (0o664, 0o600):
+            with self.subTest(mode=oct(mode)):
+                for path in files:
+                    path.chmod(mode)
+                result = self.run_context_gate(destination)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_oci_preflight_copy_context_rejects_owner_executable_drift(self):
+        destination = self.preflight_copy_context()
+        contract = json.loads((destination / inv.DEFAULT_BUILD_CONTRACT).read_text())["contract"]
+        name = next(name for name, value in contract["planned_source_inputs"].items()
+                    if value["state"] == "file")
+        path = destination / name
+        path.chmod(path.stat().st_mode ^ 0o100)
+        result = self.run_context_gate(destination)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("planned_source_inputs." + name + ".executable", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
