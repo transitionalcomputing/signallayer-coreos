@@ -136,6 +136,31 @@ class PlannedInventoryTests(unittest.TestCase):
                 path.chmod(after)
                 self.rejected("planned_source_inputs.tools/build-management-rootfs.executable")
 
+    def test_special_permission_bits_are_rejected(self):
+        path = self.root / "tools/build-management-rootfs"
+        write(path, "reviewed fixture\n")
+        path.chmod(0o644)
+        self.accept_fixture()
+        for mode in (0o4644, 0o2644, 0o1644):
+            with self.subTest(mode=oct(mode)):
+                path.chmod(mode)
+                self.rejected("special permission bits in planned source input")
+        path.chmod(0o644)
+        directory = self.root / "image/management"
+        directory.mkdir(parents=True)
+        self.accept_fixture()
+        directory.chmod(0o2755)
+        self.rejected("special permission bits in planned source input")
+
+    def test_contract_candidate_scope_matches_reviewed_scope(self):
+        output = self.root / "unapproved-contract.json"
+        result = subprocess.run([sys.executable, str(REPO / "tools/coreos-inventory"),
+                                 "--root", str(self.root), "--contract-candidate-output", str(output)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        reviewed = json.loads((REPO / inv.DEFAULT_BUILD_CONTRACT).read_text())
+        self.assertEqual(json.loads(output.read_text())["scope"], reviewed["scope"])
+
     def test_file_symlink_substitution_is_rejected(self):
         path = self.root / "tools/build-management-rootfs"
         write(path, "reviewed fixture\n")

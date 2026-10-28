@@ -334,6 +334,8 @@ def planned_source_inputs(root: Path, planned: dict[str, object]) -> dict[str, o
             relative = str(entry.relative_to(root))
             if entry.is_symlink() or not (entry.is_file() or entry.is_dir()):
                 raise InventoryError(f"unsupported planned source input: {relative}")
+            if entry.stat().st_mode & 0o7000:
+                raise InventoryError(f"special permission bits in planned source input: {relative}")
             inputs[relative] = {"state": "directory"} if entry.is_dir() else {
                 "state": "file", "sha256": digest(entry),
                 # Git preserves owner-executable status, not checkout umask bits.
@@ -569,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
                     {
                         "schema_version": 1,
                         "recorded_from": source_commit(root),
-                        "scope": "exact Containerfile instructions, COPY provenance, and maintained build-context inputs",
+                        "scope": "exact Containerfile instructions, COPY provenance, maintained build inputs and planned-source state; no installed-artifact certification",
                         "contract": build_contract(root),
                     },
                     indent=2,
