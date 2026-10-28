@@ -160,7 +160,9 @@ a COPY, RUN, workspace addition or file creation on its own.
 The existing build contract binds the canonical planned-section hash and the
 current state of its exact `source_roots`. Missing paths are recorded as absent;
 creating even a planned file or empty directory changes the contract. Existing
-files are bound by content and mode; symlink/special-file inputs fail. All
+files are bound by content and Git's owner-executable state, independently of
+checkout read/write permission bits. Setuid, setgid and sticky bits are rejected
+on planned files/directories; symlink/special-file inputs fail. All
 descendants of each reserved source tree are checked, including unlisted hooks,
 configuration, policy or binary inputs that are not yet copied by Containerfile.
 Changes need an explicit reviewed contract diff through the existing candidate
@@ -174,7 +176,10 @@ after construction, and a reviewed installed-artifact delta. Neither exists yet.
 The gate always reports installed-artifact inventory `unproven`, even when the
 base lock passes. The three measured companions are copied only into the OCI
 preflight/build context so these checks also work there; no final-image COPY or
-runtime change is introduced by P3-1a.
+runtime change is introduced by P3-1a. A future reviewed reserved source must
+also be copied into preflight: otherwise it is present on the host but absent
+in that context, and the gate correctly fails. The copy-context regression
+test must stay green as P3-1b/c introduce new reviewed inputs.
 
 Runtime directive assertions are deferred to the R1/R2-corrected P3-1d
 specification. The superseded P3-0 directive list is not encoded. Networking

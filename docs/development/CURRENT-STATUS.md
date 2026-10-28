@@ -1,6 +1,6 @@
 # SignalLayer CoreOS — current engineering handoff
 
-**Snapshot:** 2026-10-24. Verify against the current repository and evidence before acting.
+**Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
 **Current milestone:** **0.0.4 — Podman Foundation**, P3-1a safeguards implemented for review; production runtime integration has not begun.
@@ -12,8 +12,12 @@
 - **Phase 1 Pass 1:** bounded genuine-KVM rootless bootstrap feasibility accepted: 37/37 runtime assertions and 11/11 offline checks. This **does not prove production Podman integration**. See [Pass 1 findings](0.0.4-phase1-pass1.md).
 - **Candidate C feasibility:** disposable Fedora 44 rootless `podman run --rootfs`
   passed 28/28 assertions under genuine KVM. The root-owned read-only rootfs,
-  fixed rootless service, negative missing-rootfs case and native recovery were
-  measured without changing the CoreOS image. See
+  fixed rootless service and negative missing-rootfs case were measured,
+  followed by a restart of that same service. This Pass 1 base has no
+  `sl-platformd` or appliance console, so independent native recovery was not
+  measured. The hostile-config control is inconclusive, the negative controls
+  are synthetic, and the pause process was created outside the unit cgroup
+  (A4). The CoreOS image was unchanged. See
   [Candidate C findings](0.0.4-phase1-pass2-candidate-c.md). Production
   packaging, reset/oracle behavior, dedicated SELinux policy, networking and
   A-to-B-to-A lifecycle remain unproven.
@@ -37,6 +41,18 @@
 - R1–R10 corrections remain required at their specified downstream gates.
   Runtime-unit directive assertions are deferred to corrected P3-1d; the
   superseded P3-0 sandbox list is not implemented or treated as approved code.
+
+## PR #40 correction checkpoint
+
+- Checkout permissions are normalized to content plus owner-executable state;
+  special permission bits, executable drift, content drift and symlinks fail.
+- Candidate C narrative corrections preserve all original 28/28 evidence bytes.
+  The old Pass 3 plan is explicitly superseded by issue #38 / P3-0 decisions.
+- The adopted contract's older private-network passages still need a separate
+  approved amendment; they do not prescribe `pasta` for the offline fixture.
+  Required Management Plane communications are in 0.0.5 and workload networking
+  in 0.0.6. No production networking or full P3-0 implementation is deployed.
+- See [correction results and remaining limitations](0.0.4-pr40-review-corrections.md).
 
 ## Not done / unproven
 
