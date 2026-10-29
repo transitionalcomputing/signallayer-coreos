@@ -112,9 +112,9 @@ def validate_output(directory):
 
 
 def compile_once(builder, lock, destination):
-    name = 'sl-f5-compile-' + uuid.uuid4().hex
+    container_name = 'sl-f5-compile-' + uuid.uuid4().hex
     try:
-        command = ['podman','run','--name',name,'--pull=never','--network=none',
+        command = ['podman','run','--name',container_name,'--pull=never','--network=none',
                    '--read-only','--cap-drop=all','-i','--entrypoint','/bin/sh',builder,'-c',
                    '( '+compile_script(lock)+' ) >&2; status=$?; test "$status" = 0 || exit "$status"; tar -cf - -C /tmp/sl-f5-compile out elf-header.txt elf-programs.txt elf-dynamic.txt symbols.txt undefined.txt']
         value = subprocess.run(command, input=prep.regular_bytes(ROOT/lock['source']['path']),
@@ -142,7 +142,7 @@ def compile_once(builder, lock, destination):
                     raise BuildError('unsupported compilation output')
         return validate_output(destination/'out')
     finally:
-        subprocess.run(['podman','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        subprocess.run(['podman','rm','-f',container_name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 
 def build(cache, output):

@@ -1,6 +1,9 @@
 """Offline lock/cache refusal tests. No package installation or image build."""
 import copy
 import hashlib
+import io
+import tarfile
+import subprocess
 import importlib.util
 import importlib.machinery
 import json
@@ -303,6 +306,23 @@ class StaticBuilderInputTests(unittest.TestCase):
             (self.cache / item["filename"]).write_bytes(data)
         self.patch = mock.patch.object(BUILDER, "ROOT", self.root)
         self.patch.start()
+
+    def test_compile_cleanup_keeps_generated_container_identity(self):
+        payload=io.BytesIO()
+        names={'out':None,'out/sl-management-fixture':b'fixture','elf-header.txt':b'',
+               'elf-programs.txt':b'','elf-dynamic.txt':b'','symbols.txt':b'','undefined.txt':b''}
+        with tarfile.open(fileobj=payload,mode='w') as archive:
+            for name,data in names.items():
+                member=tarfile.TarInfo(name)
+                if data is None:member.type=tarfile.DIRTYPE;archive.addfile(member)
+                else:member.size=len(data);archive.addfile(member,io.BytesIO(data))
+        destination=self.root/'compilation';destination.mkdir()
+        completed=subprocess.CompletedProcess([],0,stdout=payload.getvalue(),stderr=b'')
+        with mock.patch.object(BUILDER.subprocess,'run',return_value=completed) as run:
+            BUILDER.compile_once('sha256:'+'1'*64,self.lock,destination)
+        created=run.call_args_list[0].args[0][3]
+        self.assertTrue(created.startswith('sl-f5-compile-'))
+        self.assertEqual(run.call_args_list[-1].args[0],['podman','rm','-f',created])
 
     def tearDown(self):
         self.patch.stop()
