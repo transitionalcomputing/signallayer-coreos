@@ -1,0 +1,85 @@
+{
+  "base_commit": "33fed192565585bbc1023c201101188087f025dd",
+  "commands": [
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/rootfs -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/phase1-pass2-candidate-c -v",
+    "python3 tools/build-management-rootfs --offline-output /tmp/oracle-fixture/bundle",
+    "python3 tools/verify-management-rootfs --offline-bundle /tmp/oracle-fixture/bundle --expected-manifest-sha256 <trusted-build-record-hash>",
+    "python3 tools/coreos-inventory --root . --format json",
+    "python3 tools/release-preflight 0.0.3.1 --root .",
+    "bash -n image/build/build-qcow2.sh image/build/inspect-qcow2.sh",
+    "git diff --check"
+  ],
+  "date": "2026-10-28",
+  "environment": {
+    "base_config": "sha256:d312275bca51c0a0e28a30b5fe75d8027f540a21713934b84a35f77174e3ef7b",
+    "base_manifest": "sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+    "mode": "cached image; rootless container uid0; --rm --pull=never --network=none --read-only; no host-root mount",
+    "native_python": "3.14.7"
+  },
+  "limitations": [
+    "Actual SELinux context and label drift remain UNPROVEN; manifest context claims rejected, not loaded-policy proof.",
+    "Mount/capability/race negative hooks are simulations; device rejection recipe-only.",
+    "Source-only Rust fixture is not compiled or installed; runnable packaging BLOCKED by glibc2.43-8 base versus plannedstatic2.43-9 and unavailable cachedtoolchain.",
+    "No image builds, KVM, lifecycle/reset/recovery or immutable runtime proof.",
+    "Separately pinned expected hash is required; digest equality alone is not source authentication.",
+    "Historical unrelated boot72/73 is not rerun or reclassified."
+  ],
+  "native_evidence": "/tmp/sl-p31c.gXpASr/fixtures.log on development host",
+  "results": {
+    "bash_syntax": "PASS",
+    "candidate_c_harness": {
+      "failed": 0,
+      "passed": 5,
+      "run": 5
+    },
+    "cli_build": {
+      "binary_packaging": "BLOCKED",
+      "build_id": "e99edd54d6f803a30338b6036d6f4eb096c28ecf90cf92f8c1bb1d4c1c970e1d",
+      "manifest_sha256": "e5eb96e09cc1cacd3b8690f8c71885a0d6557f84a074d0fe7f695de8e66f41a6",
+      "runtime": "UNPROVEN",
+      "scope": "offline-source-fixture",
+      "selinux": "UNPROVEN",
+      "status": "PASS"
+    },
+    "git_diff_check": "PASS",
+    "independent_cli_verify": {
+      "build_id": "e99edd54d6f803a30338b6036d6f4eb096c28ecf90cf92f8c1bb1d4c1c970e1d",
+      "runtime": "UNPROVEN",
+      "scope": "offline-source-fixture",
+      "selinux": "UNPROVEN",
+      "status": "PASS"
+    },
+    "python_compilation": "PASS",
+    "release_preflight": "PASS OS0.0.3.1/Cargo0.0.3 structural checks; actual Cargo parser unavailable",
+    "rootfs_fixtures": {
+      "failed": 0,
+      "passed": 68,
+      "run": 68,
+      "skipped": 0
+    },
+    "source_inventory": "PASS; zero differences; accepted source inventory unchanged",
+    "tooling": {
+      "failed": 0,
+      "passed": 111,
+      "run": 111
+    }
+  },
+  "schema_version": 1,
+  "scope": "source-only offline fixture tests; no installed/runtime acceptance",
+  "source_commit": "38ad8eeab33dcaa602abf26308c2cbd61fcaedee",
+  "source_sha256": {
+    "Containerfile": "dc3ecd35612328093ffaa656e41e7eb9baf15c0da073be06ae358b376baae479",
+    "config/coreos-build-contract.json": "6877de9b09641d81bbc8eec9511293315904e237094a6ea6a9ce131fd9a09242",
+    "management-fixture/inputs/message.txt": "81c32862e4daf9b5b55319683511aa7c551cc5ffcabcaaa753bca6045055a3c3",
+    "management-fixture/rootfs-spec.json": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676",
+    "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+    "tests/podman/rootfs/test_rootfs.py": "da3cd221492390960b483ce21d869dbd3f9a7f17cf0d9735540faa56577cb690",
+    "tests/tools/test_planned_inventory.py": "461d850c302a438a59fcf6692fc12e95cddfdcb47d6c4e7cfd32512b822c538e",
+    "tests/tools/test_rootfs_inventory.py": "d8a4f1bfbab36b061e457379656234aa4cd8e8572edea12fdb353bc27a7e3bd5",
+    "tools/build-management-rootfs": "e64a1b2ee7e826bda4347f67ec94ffdd7f96a0e9bb75d45a62b35632dffa7c0f",
+    "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96"
+  },
+  "transcript_sha256": "a36c14f6e6a267315f293f4e013bfcd71b299e02629ef76b4893f8f249b93bf9"
+}
