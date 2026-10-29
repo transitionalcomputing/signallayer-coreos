@@ -1,4 +1,8 @@
 {
+  "artifact": {
+    "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+    "size": 15725600
+  },
   "base": {
     "installed_nevras_sha256": "c9dc17f3fffacda161152e3741ba7c9e92b20a5923c5986d248aa4c2b9598204",
     "pinnedimage_id": "sha256:d312275bca51c0a0e28a30b5fe75d8027f540a21713934b84a35f77174e3ef7b",

@@ -11,8 +11,15 @@ fixture, produce a production rootfs, or authorize P3-1d integration.
 `config/static-fixture-toolchain.json` records the immutable base reference and
 image ID, base inventory digest, repository metadata digests, exact RPM
 transaction bodies and their hashes, expected complete builder inventory,
-compiler versions, fixed source digest and fixed compiler flags. These are
-expected inputs, not evidence that a build has passed.
+compiler versions, fixed source digest, fixed compiler flags, and the reviewed
+artifact SHA-256 and size. Every compilation must match that preexisting
+artifact identity before the independent ELF check, which receives the reviewed
+digest. Agreement between two newly measured hashes alone is insufficient.
+These are expected inputs, not evidence that a build has passed.
+
+Repository metadata hashes are recorded provenance, not enforced repository
+snapshot integrity: the offline build neither fetches nor revalidates metadata.
+It enforces the exact RPM byte hashes, NEVRAs and Fedora signatures instead.
 
 `tools/static-toolchain/Containerfile` is a separate development-only recipe.
 Its preparation helper refuses direct host installation, checks the rootless
@@ -42,11 +49,16 @@ python3 tools/build-static-fixture \
 The output directory must not already exist. A failed invocation retains
 diagnostic output and must not be described as accepted merely because it
 produced an intermediate binary or builder image. The build uses
-`--pull=never --network=none`, records preparation provenance, performs two
-compilations in separate disposable containers, compares their hashes, checks
+`--isolation=oci --pull=never --network=none --no-cache` for fresh preparation,
+records preparation provenance, performs two compilations in separate disposable
+containers from **one** prepared builder image, checks both against the reviewed
+digest/size, compares their hashes, checks
 the fixed output set, and runs missing-compiler/static-library controls in
 disposable writable container layers. It never deletes those files from the
-image or host.
+image or host. Container cleanup is scoped to each owned name. The prepared
+builder image is intentionally retained for provenance inspection and review;
+image pruning is not part of this tool. Builder-image byte reproducibility is
+not claimed.
 
 Inspect `preparation-evidence.json`, both `compile-*/static-check.json` records,
 the header/program/dynamic/symbol listings, negative controls and `result.json`.
@@ -66,6 +78,13 @@ recorded digest without executing it:
 python3 tools/verify-static-fixture \
   --artifact /path/to/sl-management-fixture \
   --expected-sha256 RECORDED_LOWERCASE_SHA256
+```
+
+The C2 mutation replay removes execution guards only in isolated source copies;
+syntax/import errors do not count as detection. Run it after the focused suite:
+
+```sh
+python3 tests/podman/static-toolchain/run-mutations.py --output /path/to/new-mutations.json
 ```
 
 ## Evidence limits and hostile controls

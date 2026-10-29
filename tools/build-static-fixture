@@ -153,6 +153,28 @@ def validate_output(directory):
     return path
 
 
+def validate_preparation(provenance, lock, lock_bytes):
+    if (not isinstance(provenance, dict)
+            or provenance.get('schema_version') != 1
+            or provenance.get('scope') != lock['scope']
+            or provenance.get('lock_sha256') != hashlib.sha256(lock_bytes).hexdigest()
+            or provenance.get('installed_nevras') != lock['installed_nevras']):
+        raise BuildError('prepared builder provenance drift or malformed evidence')
+    output = provenance.get('tool_output')
+    if (not isinstance(output, dict) or set(output) != set(lock['versions'])
+            or any(not isinstance(v, str) or not v.strip() for v in output.values())):
+        raise BuildError('prepared builder tool provenance is malformed')
+
+
+def verify_compilation(binary, lock, elf):
+    data = prep.regular_bytes(binary)
+    if len(data) != lock['artifact']['size']:
+        raise BuildError('compiled artifact size differs from the reviewed identity')
+    if hashlib.sha256(data).hexdigest() != lock['artifact']['sha256']:
+        raise BuildError('compiled artifact digest differs from the reviewed identity')
+    return elf.verify_elf(binary, lock['artifact']['sha256'])
+
+
 def compile_once(builder, lock, destination):
     container_name = 'sl-f5-compile-' + uuid.uuid4().hex
     try:
@@ -171,6 +193,12 @@ def compile_once(builder, lock, destination):
             members=archive.getmembers()
             if len(members)!=len(expected) or {m.name.rstrip('/') for m in members}!=expected:
                 raise BuildError('unlisted/missing compilation archive outputs')
+            # Validate the entire archive before materializing any member.
+            for member in members:
+                name = member.name.rstrip('/')
+                if not ((name == 'out' and member.isdir())
+                        or (name != 'out' and member.isfile() and 0 <= member.size <= 64*1024*1024)):
+                    raise BuildError('unsupported compilation output')
             for member in members:
                 name=member.name.rstrip('/')
                 target=destination/name
@@ -209,7 +237,7 @@ def build(cache, output):
     (context/'lock.json').write_bytes(lock_bytes)
     shutil.copyfile(PREPARE,context/'prepare.py')
     shutil.copyfile(ROOT/'tools/static-toolchain/Containerfile',context/'Containerfile')
-    result = run(['podman','build','--pull=never','--network=none','--no-cache',
+    result = run(['podman','build','--isolation=oci','--pull=never','--network=none','--no-cache',
                   '--iidfile',str(output/'builder.iid'),'-f',str(context/'Containerfile'),str(context)],timeout=900,log=output/'preparation.log')
     (output/'preparation.log').write_text(result.stdout+result.stderr)
     builder = image_id((output/'builder.iid').read_text().strip())
@@ -219,15 +247,15 @@ def build(cache, output):
         run(['podman','cp',probe+':/build/preparation-evidence.json',str(output/'preparation-evidence.json')])
     finally:
         subprocess.run(['podman','rm','-f',probe],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    provenance=json.loads((output/'preparation-evidence.json').read_text())
-    if provenance['lock_sha256'] != hashlib.sha256(lock_bytes).hexdigest() or provenance['installed_nevras'] != lock['installed_nevras']:
-        raise BuildError('prepared builder provenance drift')
+    provenance=json.loads(prep.regular_bytes(output/'preparation-evidence.json'),
+                          object_pairs_hook=prep.reject_duplicate_keys)
+    validate_preparation(provenance, lock, lock_bytes)
     binaries=[];elf=module('f5_elf',ROOT/'tools/verify-static-fixture')
     for number in (1,2):
         dest=output/f'compile-{number}';dest.mkdir()
         binary=compile_once(builder,lock,dest)
         binaries.append(binary)
-        (dest/'static-check.json').write_text(json.dumps(elf.verify_elf(binary,sha(binary)),sort_keys=True,indent=2)+'\n')
+        (dest/'static-check.json').write_text(json.dumps(verify_compilation(binary,lock,elf),sort_keys=True,indent=2)+'\n')
     hashes=[sha(p) for p in binaries]
     if hashes[0] != hashes[1]:
         raise BuildError('independent clean compilations are not byte reproducible')
@@ -258,11 +286,19 @@ def build(cache, output):
         input=data.getvalue(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,check=False)
     if runtime.returncode or runtime.stdout != b'SignalLayer Candidate C fixture\n' or runtime.stderr:
         raise BuildError('unprivileged pinned-base compatibility smoke failed')
+    revision_path = ROOT/'SOURCE_REVISION'
+    revision = prep.regular_bytes(revision_path).decode('ascii').strip() if revision_path.exists() else None
+    if revision is not None and not re.fullmatch(r'[0-9a-f]{40}',revision):
+        raise BuildError('invalid recorded source revision')
     report=dict(status='PASS',scope=lock['scope'],lock_sha256=hashlib.sha256(lock_bytes).hexdigest(),
         builder_image_id=builder,base=lock['base'],source=lock['source'],target=lock['target'],compiler_flags=lock['compiler_flags'],
         installed_nevras=lock['installed_nevras'],versions=provenance['tool_output'],artifact_sha256=hashes[0],
+        reviewed_artifact=lock['artifact'],source_revision=revision,
+        source_files_sha256={str(p.relative_to(ROOT)):sha(p) for p in
+            (ROOT/'tools/build-static-fixture',PREPARE,LOCK,ROOT/'tools/verify-static-fixture',ROOT/'tools/static-toolchain/Containerfile',ROOT/lock['source']['path'])},
         missing_tool_static_library_controls=failures,
-        reproducible_clean_compilations=2,runtime=dict(exit=0,stdout=runtime.stdout.decode(),uid=65532,network='none',base=lock['base']['reference']),
+        reproducible_clean_compilations=2,reproducibility_scope='two separate compilation containers from one freshly prepared builder image; builder-image byte reproducibility unproven',
+        runtime=dict(exit=0,stdout=runtime.stdout.decode(),uid=65532,network='none',base=lock['base']['reference']),
         installed_coreos='UNPROVEN; not integrated',selinux_runtime='UNPROVEN',general_glibc_nss_dlopen='UNPROVEN')
     (output/'result.json').write_text(json.dumps(report,sort_keys=True,indent=2)+'\n')
     return report

@@ -78,6 +78,13 @@ class ToolchainLockTests(unittest.TestCase):
         self.rejected(lambda lock: lock["source"].__setitem__("path", "attacker.rs"), "source identity")
         self.rejected(lambda lock: lock.__setitem__("compiler_flags", []), "compiler flags")
 
+    def test_reviewed_artifact_identity_is_required_and_well_formed(self):
+        self.rejected(lambda lock: lock.pop('artifact'), 'reviewed artifact')
+        for field,value in [('sha256','bad'),('size',0),('size',True),('size','15725600')]:
+            with self.subTest(field=field,value=value):
+                self.rejected(lambda lock: lock['artifact'].__setitem__(field,value), 'reviewed artifact')
+        self.assertEqual(self.lock['artifact'], {'sha256':'deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093','size':15725600})
+
     def test_nonfixed_dynamic_or_extra_compiler_flags_are_rejected(self):
         self.rejected(lambda lock: lock["compiler_flags"].append("-Clink-arg=-ldl"), "compiler flags")
         self.rejected(lambda lock: lock["compiler_flags"].remove("-Ctarget-feature=+crt-static"), "compiler flags")
@@ -183,8 +190,10 @@ class OfflineRPMCacheTests(unittest.TestCase):
             self.assertIn("-qp", argv)
             return self.package["name"] + "\n" + self.package["nevra"] + "\n"
         self.assertIn("--checksig", argv)
-        return (str(self.path) + ": digests signatures OK\nSignature fingerprint "
-                + self.lock["signing_key_fingerprint"] + "\n")
+        if '-v' in argv:
+            return (str(self.path) + ":\n    Header OpenPGP V4 RSA/SHA256 signature, key fingerprint: "
+                    + self.lock["signing_key_fingerprint"] + ": OK\n    Header SHA256 digest: OK\n")
+        return str(self.path) + ': digests signatures OK\n'
 
     def test_exact_verified_cache_is_accepted_without_installing(self):
         with mock.patch.object(PREP, "run", side_effect=self.rpm_query):
@@ -246,6 +255,17 @@ class OfflineRPMCacheTests(unittest.TestCase):
         with mock.patch.object(PREP, "run", side_effect=query):
             with self.assertRaisesRegex(PREP.PreparationError, "signing key|signature"):
                 PREP.verify_rpms(self.lock)
+
+    def test_fingerprint_on_unrelated_or_non_ok_line_does_not_authenticate(self):
+        fingerprint=self.lock['signing_key_fingerprint']
+        for verbose in [f'Comment: {fingerprint}\nHeader OpenPGP V4 RSA/SHA256 signature, key fingerprint: '+ '0'*40 + ': OK\n',
+                        f'Header OpenPGP V4 RSA/SHA256 signature, key fingerprint: {fingerprint}: UNKNOWN\nHeader SHA256 digest: OK\n',
+                        f'prefix Header OpenPGP V4 RSA/SHA256 signature, key fingerprint: {fingerprint}: OK\n']:
+            def query(argv, **kwargs):
+                return verbose if '-v' in argv else self.rpm_query(argv,**kwargs)
+            with self.subTest(verbose=verbose),mock.patch.object(PREP,'run',side_effect=query):
+                with self.assertRaisesRegex(PREP.PreparationError,'signing key'):
+                    PREP.verify_rpms(self.lock)
 
 
 class DisposableSigningKeyTests(unittest.TestCase):

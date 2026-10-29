@@ -141,6 +141,10 @@ def validate_lock(lock: dict) -> None:
         raise PreparationError("missing fixed fixture source identity")
     if lock.get("compiler_flags") != EXPECTED_FLAGS:
         raise PreparationError("compiler flags differ from the fixed static fixture recipe")
+    artifact = lock.get('artifact')
+    if (not isinstance(artifact, dict) or not HEX.fullmatch(str(artifact.get('sha256', '')))
+            or type(artifact.get('size')) is not int or artifact['size'] <= 0):
+        raise PreparationError('missing or invalid reviewed artifact identity')
     repositories = lock.get("repositories")
     if not isinstance(repositories, list) or not repositories:
         raise PreparationError("missing repository provenance")
@@ -200,7 +204,8 @@ def initialize_signing_key(lock: dict) -> str:
         raise PreparationError('pinned-base signing key file digest mismatch')
     run(['rpmkeys', '--import', lock['signing_key_path']])
     keys = run(['rpmkeys', '--list'])
-    if lock['signing_key_fingerprint'] not in keys.lower():
+    if not re.search(r'^' + re.escape(lock['signing_key_fingerprint']) + r'(?:\s|$)', keys,
+                     flags=re.MULTILINE | re.IGNORECASE):
         raise PreparationError('imported signing key fingerprint mismatch')
     return keys
 
@@ -225,7 +230,9 @@ def verify_rpms(lock: dict) -> tuple[list[str], dict[str, str]]:
         if not re.search(r"\bsignatures\s+OK\b", signature) or re.search(r"NOKEY|NOT OK|NOTOK|BAD", signature):
             raise PreparationError(f"RPM signature not verified with existing trusted keys: {path.name}")
         verbose = run(["rpmkeys", "--checksig", "-v", str(path)])
-        if lock["signing_key_fingerprint"] not in verbose or "signature" not in verbose.lower() or re.search(r"NOKEY|NOT OK|NOTOK|BAD", verbose):
+        signature_line = (r'^\s*Header OpenPGP V4 RSA/SHA256 signature, key fingerprint: '
+                          + re.escape(lock['signing_key_fingerprint']) + r': OK\s*$')
+        if not re.search(signature_line, verbose, re.MULTILINE) or re.search(r"NOKEY|NOT OK|NOTOK|BAD", verbose):
             raise PreparationError("RPM signing key differs from the pinned Fedora44 key")
         signatures[path.name] = verbose
         paths.append(str(path))
