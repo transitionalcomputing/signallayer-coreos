@@ -681,7 +681,14 @@
       "required": true,
       "status": "unproven"
     },
-    "implementation_gate": "P3-1a safeguards only; later gates require separate authorization",
+    "identity_provisioning_source": {
+      "authorization": "https://github.com/transitionalcomputing/signallayer-coreos/issues/41",
+      "path": "management-lifecycle/identity.py",
+      "public_entry": "provision() takes no arguments; fixed paths; host-root only",
+      "runtime_integration": "not authorized in P3-1b",
+      "status": "source-only-not-installed"
+    },
+    "implementation_gate": "P3-1a safeguards accepted; P3-1b identity source-only authorized by issue #41; later gates require separate authorization",
     "inventory": {
       "binfmt_masks": {
         "/etc/binfmt.d/qemu-aarch64-static.conf": "/dev/null",

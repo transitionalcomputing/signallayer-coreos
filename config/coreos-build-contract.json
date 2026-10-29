@@ -3,7 +3,7 @@
     "build_context_inputs": {
       "Cargo.lock": "9a2aa5638d35f1234152bb4b0a707676cac777199988722c2194cd81584dc698",
       "Cargo.toml": "80d92c0f477cf1866c31f29538f74c161d98b510889fb08966697285a8729c7b",
-      "Containerfile": "1b49af97b533dfa618179356648514566c65fc4282184830a875fe0a932e2331",
+      "Containerfile": "81595cd26ca703411f11211e23c484bb66317d1f0323a5631afbe345932fb4d7",
       "authd/Cargo.toml": "3da3945f555c9d866d7b8e7ddcc321735205f583e6560899b0462a23b5621f54",
       "authd/src/checked_interface.rs": "ef525b07190735b372187130a54c2f414728ee1f2f4c978ee8cf406ec783cfcd",
       "authd/src/codes.rs": "96deaac4ce4e92c0692d1cd006b3fc3eced1ede975ed2ff54d11403e4690a076",
@@ -72,6 +72,8 @@
       "image/platform/sl-sessiond.sysusers": "54bc3d6e37bfbba4d83395f257a920c33a5f24d7bed09a33b9f86777b55ba92b",
       "image/platform/sl-update.service": "2a59ebf66e4b0321dda360745e2969286ce8667746747d20e198337237403e82",
       "image/platform/udisks2-polkit.conf": "7798a6fe37e70c0e442b0ff84813662d5285624aaf3b4dc275c0e3542dfe0172",
+      "management-lifecycle/README.md": "341bf610bb58e96cb316f6af16639a21f3cace46da8f340e5b29a69a2138f92d",
+      "management-lifecycle/identity.py": "3419f6fdccf210e7c92490b4adbe59c02167785664f8051a7b5c8f2bb34793df",
       "network-observer/Cargo.toml": "221efbd4dd2a422157da5ae28fff65fdf0cbea51c54d82045499d1ce477271b6",
       "network-observer/src/main.rs": "6d30bf8da26c3edfe2142c84fb49ed3ef773c764932642d18b5fa1ca5a862719",
       "platformd/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -202,6 +204,14 @@
         "from": null,
         "sources": [
           "config"
+        ],
+        "stage": "release-preflight"
+      },
+      {
+        "destination": "./management-lifecycle",
+        "from": null,
+        "sources": [
+          "management-lifecycle"
         ],
         "stage": "release-preflight"
       },
@@ -548,7 +558,7 @@
       "ARG RELEASE_INTENT=developer",
       "ARG PLANNED_OS_VERSION="
     ],
-    "planned_inventory_sha256": "f94ecdd475aebf2458f60e51be89bbf0640fc41f449dc633ac2e5af95ac1f247",
+    "planned_inventory_sha256": "1e4aed6a9fe84e12af91f6b59d606a7d99546e8b87c5fa74345051f052eea519",
     "planned_source_inputs": {
       "config/coreos-installed-rpms-0.0.4.txt": {
         "state": "absent"
@@ -575,7 +585,17 @@
         "state": "absent"
       },
       "management-lifecycle": {
-        "state": "absent"
+        "state": "directory"
+      },
+      "management-lifecycle/README.md": {
+        "executable": false,
+        "sha256": "341bf610bb58e96cb316f6af16639a21f3cace46da8f340e5b29a69a2138f92d",
+        "state": "file"
+      },
+      "management-lifecycle/identity.py": {
+        "executable": false,
+        "sha256": "3419f6fdccf210e7c92490b4adbe59c02167785664f8051a7b5c8f2bb34793df",
+        "state": "file"
       },
       "tools/build-management-rootfs": {
         "state": "absent"
@@ -607,6 +627,7 @@
           "COPY console ./console",
           "COPY Containerfile ./Containerfile",
           "COPY config ./config",
+          "COPY management-lifecycle ./management-lifecycle",
           "COPY docs/development/0.0.4-phase1-pass3-installed-nevras.txt docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt docs/development/0.0.4-phase1-pass3-package-closure.txt ./docs/development/",
           "COPY image/platform ./image/platform",
           "COPY image/build ./image/build",
@@ -704,7 +725,7 @@
       }
     ]
   },
-  "recorded_from": "d3de793191126dc92bb0e23e0ee9c37e65e38fb5",
+  "recorded_from": "fea70df88d2b72a9af0e9d06035e98f9c9c37e63",
   "schema_version": 1,
   "scope": "exact Containerfile instructions, COPY provenance, maintained build inputs and planned-source state; no installed-artifact certification"
 }
