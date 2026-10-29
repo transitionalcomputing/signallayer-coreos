@@ -1,0 +1,160 @@
+{
+  "dynamic_mounts": [],
+  "entries": [
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": ".",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "dev",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "etc",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 511,
+      "path": "etc/mtab",
+      "source": null,
+      "target": "/proc/mounts",
+      "type": "symlink"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "proc",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "run",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 292,
+      "path": "run/.containerenv",
+      "source": null,
+      "target": null,
+      "type": "file"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "sys",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "tmp",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "usr",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "usr/bin",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "usr/share",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "usr/share/signallayer",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 292,
+      "path": "usr/share/signallayer/fixture-copy.txt",
+      "source": "inputs/message.txt",
+      "target": null,
+      "type": "file"
+    },
+    {
+      "hardlink_to": "usr/share/signallayer/fixture-copy.txt",
+      "mode": 292,
+      "path": "usr/share/signallayer/fixture.txt",
+      "source": null,
+      "target": null,
+      "type": "file"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "var",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "var/lib",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "var/lib/sl-management",
+      "source": null,
+      "target": null,
+      "type": "directory"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "inputs/message.txt",
+      "sha256": "81c32862e4daf9b5b55319683511aa7c551cc5ffcabcaaa753bca6045055a3c3"
+    },
+    {
+      "path": "src/main.rs",
+      "sha256": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5"
+    }
+  ],
+  "schema": 1
+}

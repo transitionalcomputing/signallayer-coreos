@@ -22,6 +22,9 @@ COPY Containerfile ./Containerfile
 COPY config ./config
 # Source-only identity code is measured by preflight, not installed in runtime.
 COPY management-lifecycle ./management-lifecycle
+# P3-1c source-only oracle inputs; never copied into the final runtime stage.
+COPY management-fixture ./management-fixture
+COPY tools/build-management-rootfs tools/verify-management-rootfs ./tools/
 COPY docs/development/0.0.4-phase1-pass3-installed-nevras.txt docs/development/0.0.4-phase1-pass3-inherited-surfaces.txt docs/development/0.0.4-phase1-pass3-package-closure.txt ./docs/development/
 COPY image/platform ./image/platform
 COPY image/build ./image/build

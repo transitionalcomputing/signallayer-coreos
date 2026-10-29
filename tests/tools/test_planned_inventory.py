@@ -344,13 +344,15 @@ class PlannedInventoryTests(unittest.TestCase):
     def test_oci_preflight_copy_context_tolerates_checkout_permissions(self):
         destination = self.preflight_copy_context()
         contract = json.loads((destination / inv.DEFAULT_BUILD_CONTRACT).read_text())["contract"]
-        files = [destination / name for name, value in contract["planned_source_inputs"].items()
+        files = [(destination / name, value["executable"])
+                 for name, value in contract["planned_source_inputs"].items()
                  if value["state"] == "file"]
         self.assertTrue(files)
         for mode in (0o664, 0o600):
             with self.subTest(mode=oct(mode)):
-                for path in files:
-                    path.chmod(mode)
+                for path, executable in files:
+                    # A checkout changes rw permissions, never Git's +x bit.
+                    path.chmod(mode | (0o111 if executable else 0))
                 result = self.run_context_gate(destination)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

@@ -3,7 +3,7 @@
 **Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a merged; P3-1b identity provisioning source implemented for draft review; production runtime integration has not begun.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b merged; P3-1c rootfs/oracle source implemented for draft review; production runtime integration has not begun.
 
 ## Done
 
@@ -37,8 +37,8 @@
 
 N1/N2 source corrections check subordinate-ID providers and effective
 supplementary membership, accept only the precise local-profile merge syntax,
-and return path-specific policy-read errors. The source-only draft remains
-unmerged. N3 measured the exact cached pinned base read-only: it enables
+and return path-specific policy-read errors. PR #42 merged at `33fed192565585bbc1023c201101188087f025dd`; the
+source remains uninstalled. N3 measured the exact cached pinned base read-only: it enables
 `altfiles` and uses an authselect-owned `nsswitch.conf` symlink. Both remain
 refused; **that actual image is not compatible with live provisioning yet**.
 Image-supplied `/usr/lib/passwd`/`group` and update/rollback collisions need a
@@ -84,12 +84,18 @@ are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Next engineering action
 
-Review the P3-1b draft source PR and its parser/transaction negative controls.
-PR #40 is merged at `fea70df`; issue #41 authorized this source-only gate.
-Installed integration, P3-1c/1d, builds and acceptance still need their separate
-authorization. Actual NSS/SELinux, power-loss and reboot/A→B→A behavior remain
-UNPROVEN. Preserve Candidate C's 28/28 evidence; source inventory PASS is not
-installed-artifact proof.
+Request the changed-lines-only R1 independent recheck on draft PR #44.
+Source tooling remains under issue #43. Rootfs fixtures pass
+**76/76** inside the exact cached Fedora base after the R1 prepublication verifier
+correction and real default-ACL rejection; tooling **111/111** and Candidate C
+harness **5/5** pass. See [P3-1c evidence and limits](0.0.4-phase1-pass3-p3-1c.md).
+Binary packaging is **BLOCKED**: base glibc `2.43-8`, planned static package
+`2.43-9`, no compatible cached metadata/toolchain. Owner review is needed before
+selecting a matching build-only closure or separately pinned isolated stage.
+No package pin, accepted inventory, runtime unit or security policy changed.
+Exact installed SELinux labels, immutable mounts, trusted reset, native recovery
+and A→B→A remain UNPROVEN. Do not begin P3-1d automatically. Preserve original
+Candidate C evidence; source PASS is not installed-artifact acceptance.
 
 ## How to report checkpoints
 

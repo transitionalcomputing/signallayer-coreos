@@ -1,0 +1,120 @@
+{
+  "corrected_source_reference": "enclosing Git commit; source_sha256 binds files executed before commit",
+  "environment": {
+    "acl": "acl-2.4.0-1.fc44.x86_64",
+    "base_manifest": "sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+    "libacl": "libacl-2.4.0-1.fc44.x86_64",
+    "mode": "cached read-only image; rootless container uid0; --rm --pull=never --network=none; temporary filesystem only"
+  },
+  "golden_source_identity": {
+    "build_id": "e99edd54d6f803a30338b6036d6f4eb096c28ecf90cf92f8c1bb1d4c1c970e1d",
+    "manifest_sha256": "e5eb96e09cc1cacd3b8690f8c71885a0d6557f84a074d0fe7f695de8e66f41a6"
+  },
+  "limitations": [
+    "Installed ancestor ownership/writability, immutable deployment and exact loaded SELinux labels are deferred/unproven (R3).",
+    "Real ACL test uses existing filesystem/acl tooling; injected subprocess refusals/errors remain simulations, separate from real ACL proof.",
+    "Binary packaging blocked by unchanged glibc2.43-8/static2.43-9 mismatch. No package installation/toolchain/image/KVM/runtime changes.",
+    "Historical unrelated boot72/73 not rerun or reclassified; earlier source evidence preserved.",
+    "Expected fixture hashes are reviewed source-gate records, not cryptographic signatures or installed acceptance."
+  ],
+  "native_evidence": [
+    "/tmp/sl-p31c-r1-before.AduNj5/reproduction.log",
+    "/tmp/sl-p31c-r1-after.cWTyyn/fixtures.log"
+  ],
+  "real_default_acl": {
+    "after": {
+      "builder_exit": 1,
+      "case": "real-default-ACL-after-fix",
+      "parent_acl": "user::rwx\ngroup::---\nother::---\ndefault:user::rwx\ndefault:user:nobody:rwx\ndefault:group::---\ndefault:mask::rwx\ndefault:other::---\n\n",
+      "published": false,
+      "staging_left": false,
+      "stderr": "rootfs build rejected: independent staged verification refused",
+      "stdout": ""
+    },
+    "before": {
+      "builder_exit": 0,
+      "builder_status": "PASS",
+      "case": "real-default-ACL-before-fix",
+      "inherited_xattrs": {
+        "manifest.json": [
+          "system.posix_acl_access",
+          "security.selinux"
+        ],
+        "rootfs": [
+          "system.posix_acl_access",
+          "system.posix_acl_default",
+          "security.selinux"
+        ]
+      },
+      "parent_acl": "user::rwx\ngroup::---\nother::---\ndefault:user::rwx\ndefault:user:nobody:rwx\ndefault:group::---\ndefault:mask::rwx\ndefault:other::---\n\n",
+      "published": true,
+      "verifier_exit": 1,
+      "verifier_stderr": "{\"error\": \"unexpected xattr or file capability\", \"status\": \"FAIL\"}"
+    },
+    "command": "setfacl -d -m u:nobody:rwx <root-owned0700-disposable-parent>"
+  },
+  "recorded_at_utc": "2026-10-29T04:21:51.506670+00:00",
+  "reproduction_commands": [
+    "setfacl -d -m u:nobody:rwx <disposable-parent>",
+    "getfacl -cp <disposable-parent>",
+    "python3 tools/build-management-rootfs --offline-output <disposable-parent>/bundle",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/rootfs -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/phase1-pass2-candidate-c -v"
+  ],
+  "reviewed_parent_commit": "60e38e25bdd7e00357d432379ca46a570a23b682",
+  "schema_version": 1,
+  "scope": "P3-1c R1 source-only prepublication correction; installed/runtime UNPROVEN",
+  "source_sha256": {
+    "config/coreos-build-contract.json": "93112620505b528d5cff5881e2d61d8d4f3c1e1351c83a78729a0a46b87fa922",
+    "config/coreos-source-inventory.json": "54c57e0dc8975bbf362758b5411cf483462acd4f38ac5b411fd7de66971f2325",
+    "management-fixture/rootfs-spec.json": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676",
+    "tests/podman/rootfs/expected-source-identity.json": "a4029aa065df7a50b0bf1e93ff16651376031db2b3e68d892f3bbb47becdfac2",
+    "tests/podman/rootfs/test_rootfs.py": "e96595d2aa8c0f99d6ad2f1ff81f22424885f16c127481c95d7a03abd7127897",
+    "tools/build-management-rootfs": "0f8bd2de258cb7f7211626c8f6e50ed8be3411c1ec9bc8b4cec043fe9700032d",
+    "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96"
+  },
+  "static": {
+    "bash_syntax": "PASS",
+    "diff_check": "PASS",
+    "inventory": "PASS; zero differences; accepted baseline unchanged",
+    "python_compilation": "PASS",
+    "release_preflight": "PASS OS0.0.3.1/Cargo0.0.3 structural checks; actual local Cargo unavailable"
+  },
+  "tests": {
+    "candidate_c_harness": {
+      "failed": 0,
+      "passed": 5,
+      "run": 5
+    },
+    "rootfs": {
+      "failed": 0,
+      "passed": 76,
+      "run": 76,
+      "skipped": 0
+    },
+    "tooling": {
+      "failed": 0,
+      "passed": 111,
+      "run": 111
+    }
+  },
+  "transcripts": {
+    "acl-before.log": {
+      "path": "image/build/output/p3-1c-r1/acl-before.log",
+      "sha256": "1d89e19f605832b058fe95082611ab616547a837b816c7852bc7fd16f69d84d5"
+    },
+    "candidate-c-harness.log": {
+      "path": "image/build/output/p3-1c-r1/candidate-c-harness.log",
+      "sha256": "5ebbc8490053168ee42ee5dd880978527340c6fd665dd1a88c8bca5d1851e20a"
+    },
+    "fixtures-after.log": {
+      "path": "image/build/output/p3-1c-r1/fixtures-after.log",
+      "sha256": "c5df4358f74be27be52fefc142edfb3b98dc567b5eea9b38cc003cadcad0ba4b"
+    },
+    "tooling.log": {
+      "path": "image/build/output/p3-1c-r1/tooling.log",
+      "sha256": "38aa60aca3e8f893958435247557d11df6194e01f34be8343c7e1e2893b21656"
+    }
+  }
+}
