@@ -1,0 +1,6 @@
+# authselect 1.7.1 local identity lines, with-altfiles disabled.
+# The measured pinned base enables altfiles and is NOT this positive case.
+passwd:     files systemd
+shadow:     files systemd
+group:      files [SUCCESS=merge] systemd
+gshadow:    files systemd

@@ -3,7 +3,7 @@
 **Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a safeguards implemented for review; production runtime integration has not begun.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a merged; P3-1b identity provisioning source implemented for draft review; production runtime integration has not begun.
 
 ## Done
 
@@ -26,6 +26,25 @@
   positive/negative tests under issue #38's owner authorization. See
   [implementation evidence](0.0.4-phase1-pass3-p3-1a.md). This records proposed
   surfaces without installing or accepting a 0.0.4 runtime.
+
+- **P3-1b:** [issue #41](https://github.com/transitionalcomputing/signallayer-coreos/issues/41)
+  authorizes source-only identity provisioning. Library, executable negative
+  fixtures and preflight binding are implemented: **69/69** Fedora fixture
+  tests and **107/107** tooling tests pass after the NSS review correction. See [results and remaining gates](0.0.4-phase1-pass3-p3-1b.md).
+  No account, service or runtime integration is installed; no image was built.
+
+## PR #42 NSS review checkpoint
+
+N1/N2 source corrections check subordinate-ID providers and effective
+supplementary membership, accept only the precise local-profile merge syntax,
+and return path-specific policy-read errors. The source-only draft remains
+unmerged. N3 measured the exact cached pinned base read-only: it enables
+`altfiles` and uses an authselect-owned `nsswitch.conf` symlink. Both remain
+refused; **that actual image is not compatible with live provisioning yet**.
+Image-supplied `/usr/lib/passwd`/`group` and update/rollback collisions need a
+separately reviewed integration, as does any symlink policy path. Recovery,
+stale temporaries, UID floor and sysusers/tmpfiles/native integration limitations
+are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Current design direction — not runtime proof
 
@@ -65,11 +84,12 @@
 
 ## Next engineering action
 
-Review the P3-1a safeguards PR and its negative-control evidence. P3-1b onward,
-production runtime integration, builds and acceptance need their separate
-authorization; they are not started by this checkpoint. Preserve Candidate C's
-28/28 evidence. Do not restart general architecture planning or treat a source
-inventory PASS as installed-artifact proof.
+Review the P3-1b draft source PR and its parser/transaction negative controls.
+PR #40 is merged at `fea70df`; issue #41 authorized this source-only gate.
+Installed integration, P3-1c/1d, builds and acceptance still need their separate
+authorization. Actual NSS/SELinux, power-loss and reboot/A→B→A behavior remain
+UNPROVEN. Preserve Candidate C's 28/28 evidence; source inventory PASS is not
+installed-artifact proof.
 
 ## How to report checkpoints
 
