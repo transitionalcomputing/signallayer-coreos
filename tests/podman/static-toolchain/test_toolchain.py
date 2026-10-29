@@ -296,6 +296,49 @@ class ImmutableImageIDTests(unittest.TestCase):
                 BUILDER.image_id(value)
 
 
+class MissingInputControlTests(unittest.TestCase):
+    """Synthetic refusal controls, distinct from the native deleted-file runs."""
+    def result(self, missing, returncode=None, stderr=None):
+        token, code, cause = BUILDER.NEGATIVE_CASES[missing]
+        if stderr is None:
+            stderr = '\n'.join([f'SL_F5_CONTROL_READY:{token}', f'SL_F5_CONTROL_REMOVED:{token}',
+                                cause, f'SL_F5_CONTROL_RESULT:{token}:{code}', '']).encode()
+        return subprocess.CompletedProcess([], code if returncode is None else returncode,
+                                           stdout=b'fixture source: OK\n', stderr=stderr)
+
+    def test_both_exact_missing_input_causes_are_accepted(self):
+        for missing in BUILDER.NEGATIVE_CASES:
+            with self.subTest(missing=missing):
+                report = BUILDER.validate_negative_control(missing, self.result(missing))
+                self.assertEqual(report['status'], 'EXPECTED_FAILURE')
+                self.assertEqual(report['missing'], missing)
+
+    def test_infrastructure_or_unrelated_failure_is_not_a_passing_control(self):
+        missing = '/usr/bin/rustc'
+        for code in (0, 1, 125, 126, 127, -9):
+            with self.subTest(exit=code), self.assertRaisesRegex(BUILDER.BuildError, 'missing-input failure evidence'):
+                BUILDER.validate_negative_control(missing, self.result(missing, returncode=code))
+        with self.assertRaises(BUILDER.BuildError):
+            BUILDER.validate_negative_control(missing, self.result(missing, stderr=b'Error: storage unavailable\n'))
+
+    def test_missing_duplicate_reordered_or_wrong_cause_witnesses_fail(self):
+        missing = '/usr/bin/rustc'
+        lines = self.result(missing).stderr.decode().splitlines()
+        variants = [lines[:index] + lines[index + 1:] for index in range(len(lines))]
+        variants += [lines + [lines[0]], list(reversed(lines)),
+                     [line.replace('SL_F5_MISSING_RUSTC', 'SL_F5_MISSING_LIBC_STATIC') for line in lines]]
+        for index, variant in enumerate(variants):
+            with self.subTest(case=index), self.assertRaises(BUILDER.BuildError):
+                BUILDER.validate_negative_control(missing, self.result(missing, stderr=('\n'.join(variant)+'\n').encode()))
+
+    def test_only_the_two_fixed_missing_paths_are_authorized(self):
+        lock=json.loads(LOCK_PATH.read_bytes())
+        with self.assertRaisesRegex(BUILDER.BuildError, 'unreviewed'):
+            BUILDER.negative_script(lock, '/usr/bin/other')
+        with self.assertRaisesRegex(BUILDER.BuildError, 'unreviewed'):
+            BUILDER.validate_negative_control('/etc/passwd', self.result('/usr/bin/rustc'))
+
+
 class StaticBuilderInputTests(unittest.TestCase):
     """Synthetic byte cache only; never RPM parsing, installation or compilation."""
     def setUp(self):

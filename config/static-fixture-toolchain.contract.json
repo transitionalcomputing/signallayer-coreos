@@ -2,7 +2,7 @@
   "inputs_sha256": {
     "config/static-fixture-toolchain.json": "8dbd33a40a3b4730ba041a7db9397d183e0fd989c2e25108be47b36a6eee6183",
     "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
-    "tools/build-static-fixture": "ca0cd4118bd833a8e4c9e0ef0dd52c6f271f460d95e2fd449a778e40740b2e22",
+    "tools/build-static-fixture": "9a2d033b3bf92493edfc7fd8cfbf0f1882026e3730c02266bc8259fb0e89653b",
     "tools/static-toolchain/Containerfile": "a6a2c988a807faf10d10bb933efbf189726167cda320547444c5f608e5f6b0a4",
     "tools/static-toolchain/prepare.py": "10c3d10cd78b88cd5fe9c053df215ea533e9eaa57947dbbe130d4be88ba66888",
     "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"

@@ -25,6 +25,10 @@ ROOT = Path(__file__).absolute().parent.parent
 LOCK = ROOT / 'config/static-fixture-toolchain.json'
 PREPARE = ROOT / 'tools/static-toolchain/prepare.py'
 BINARY_NAME = 'sl-management-fixture'
+NEGATIVE_CASES = {
+    '/usr/bin/rustc': ('rustc', 72, 'SL_F5_MISSING_RUSTC'),
+    '/usr/lib64/libc.a': ('libc-static', 73, 'SL_F5_MISSING_LIBC_STATIC'),
+}
 
 
 class BuildError(ValueError):
@@ -88,8 +92,9 @@ unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS LD_PRELOAD LD_LIBRARY_PATH
 mkdir -p /tmp/sl-f5-compile/out
 cat > /tmp/sl-f5-compile/main.rs
 printf '%s  %s\\n' '{lock['source']['sha256']}' /tmp/sl-f5-compile/main.rs | sha256sum -c -
-test -f /usr/lib64/libc.a
-command -v rustc; command -v cc
+test -f /usr/lib64/libc.a || {{ echo SL_F5_MISSING_LIBC_STATIC >&2; exit 73; }}
+command -v rustc >/dev/null || {{ echo SL_F5_MISSING_RUSTC >&2; exit 72; }}
+command -v cc
 rustc --version
 rustc /tmp/sl-f5-compile/main.rs {flags} -o /tmp/sl-f5-compile/out/{BINARY_NAME}
 test "$(find /tmp/sl-f5-compile/out -mindepth 1 -maxdepth 1 -printf '%f\\n')" = {BINARY_NAME}
@@ -100,6 +105,43 @@ readelf -dW /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/elf-dynami
 nm -a /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/symbols.txt
 nm -u /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/undefined.txt
 '''
+
+
+def negative_script(lock, missing):
+    if missing not in NEGATIVE_CASES:
+        raise BuildError('unreviewed negative-control path')
+    token = NEGATIVE_CASES[missing][0]
+    return f'''set -eu
+test -x /usr/bin/rustc
+test -f /usr/lib64/libc.a
+echo SL_F5_CONTROL_READY:{token} >&2
+rm -- {missing}
+test ! -e {missing}
+test ! -L {missing}
+echo SL_F5_CONTROL_REMOVED:{token} >&2
+set +e
+( {compile_script(lock)} )
+status=$?
+echo SL_F5_CONTROL_RESULT:{token}:$status >&2
+exit "$status"
+'''
+
+
+def validate_negative_control(missing, result):
+    if missing not in NEGATIVE_CASES:
+        raise BuildError('unreviewed negative-control path')
+    token, expected_exit, cause = NEGATIVE_CASES[missing]
+    stdout, stderr = result.stdout.decode(), result.stderr.decode()
+    lines = stderr.splitlines()
+    witnesses = [f'SL_F5_CONTROL_READY:{token}', f'SL_F5_CONTROL_REMOVED:{token}',
+                 cause, f'SL_F5_CONTROL_RESULT:{token}:{expected_exit}']
+    if (result.returncode != expected_exit
+            or any(lines.count(witness) != 1 for witness in witnesses)
+            or [lines.index(witness) for witness in witnesses] != sorted(lines.index(witness) for witness in witnesses)
+            or any(other_cause in lines for _, _, other_cause in NEGATIVE_CASES.values() if other_cause != cause)):
+        raise BuildError('negative control lacks exact in-container missing-input failure evidence')
+    return dict(missing=missing, exit=result.returncode, cause=cause,
+                stdout=stdout, stderr=stderr, status='EXPECTED_FAILURE')
 
 
 def validate_output(directory):
@@ -192,16 +234,17 @@ def build(cache, output):
     failures=[]
     # Delete only inside disposable writable container layers, never the image
     # or host. These exercise real missing-tool/static-library failures.
-    for missing in ('/usr/bin/rustc','/usr/lib64/libc.a'):
+    for missing in NEGATIVE_CASES:
         negative=subprocess.run(['podman','run','--rm','--pull=never','--network=none',
             '--cap-drop=all','--entrypoint','/bin/sh','-i',builder,'-c',
-            'rm -- '+missing+'; '+compile_script(lock)],
+            negative_script(lock, missing)],
             input=prep.regular_bytes(ROOT/lock['source']['path']),
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=180,check=False)
-        if negative.returncode==0:
-            raise BuildError('missing required tool/static library did not fail closed')
-        failures.append(dict(missing=missing,exit=negative.returncode,
-                             stdout=negative.stdout.decode(),stderr=negative.stderr.decode()))
+        (output/f'negative-{NEGATIVE_CASES[missing][0]}.json').write_text(json.dumps(
+            dict(missing=missing, exit=negative.returncode,
+                 stdout=negative.stdout.decode(errors='replace'), stderr=negative.stderr.decode(errors='replace')),
+            sort_keys=True, indent=2)+'\n')
+        failures.append(validate_negative_control(missing, negative))
     (output/'negative-build-controls.json').write_text(json.dumps(failures,sort_keys=True,indent=2)+'\n')
     # Actual runtime smoke uses the original approved base, not the toolchain.
     # No installation: unprivileged fixed execution from disposable tmpfs only.
