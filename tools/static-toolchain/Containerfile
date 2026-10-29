@@ -1,0 +1,7 @@
+# Development-only static fixture builder. Never a CoreOS runtime stage.
+FROM ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c
+WORKDIR /build
+COPY lock.json /build/lock.json
+COPY rpms /build/rpms
+COPY prepare.py /build/prepare.py
+RUN python3 /build/prepare.py

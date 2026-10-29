@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Offline, rootless development-only toolchain preparation and fixed compilation.
+
+Consumes a reviewed lock and exact RPM cache. Never downloads, installs on the
+host, calls a production build, selects arbitrary source, or installs outputs.
+"""
+import argparse
+import hashlib
+import io
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import tarfile
+import uuid
+
+ROOT = Path(__file__).absolute().parent.parent
+LOCK = ROOT / 'config/static-fixture-toolchain.json'
+PREPARE = ROOT / 'tools/static-toolchain/prepare.py'
+BINARY_NAME = 'sl-management-fixture'
+
+
+class BuildError(ValueError):
+    pass
+
+
+def module(name, path):
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_loader(name, loader)
+    value = importlib.util.module_from_spec(spec)
+    loader.exec_module(value)
+    return value
+
+
+prep = module('f5_prep', PREPARE)
+
+
+def sha(path):
+    return hashlib.sha256(prep.regular_bytes(path)).hexdigest()
+
+
+def validate_inputs(lock, cache=None):
+    prep.validate_lock(lock)
+    if sha(ROOT / lock['source']['path']) != lock['source']['sha256']:
+        raise BuildError('fixed fixture source hash drift')
+    if cache is not None:
+        if cache.is_symlink() or not cache.is_dir():
+            raise BuildError('RPM cache must be a real directory')
+        expected = {p['filename'] for p in lock['packages']}
+        if {p.name for p in cache.iterdir()} != expected:
+            raise BuildError('unlisted or missing RPM cache input')
+        for item in lock['packages']:
+            path = cache / item['filename']
+            if path.is_symlink() or path.stat().st_size != item['size'] or sha(path) != item['sha256']:
+                raise BuildError('RPM cache size/hash drift')
+
+
+def run(argv, timeout=600, log=None):
+    value = subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=timeout, check=False)
+    if log is not None:
+        log.write_text(value.stdout+value.stderr)
+    if value.returncode:
+        raise BuildError(f'command failed {argv[0:3]}: {(value.stdout + value.stderr)[-4000:]}')
+    return value
+
+
+def compile_script(lock):
+    # Constants/flags have been checked against the fixed reviewed recipe.
+    flags = ' '.join(lock['compiler_flags'])
+    return f'''set -eu
+export PATH=/usr/bin:/bin LC_ALL=C LANG=C TZ=UTC SOURCE_DATE_EPOCH=0
+unset RUSTFLAGS CARGO_ENCODED_RUSTFLAGS LD_PRELOAD LD_LIBRARY_PATH
+mkdir -p /tmp/sl-f5-compile/out
+cat > /tmp/sl-f5-compile/main.rs
+printf '%s  %s\\n' '{lock['source']['sha256']}' /tmp/sl-f5-compile/main.rs | sha256sum -c -
+test -f /usr/lib64/libc.a
+command -v rustc; command -v cc
+rustc --version
+rustc /tmp/sl-f5-compile/main.rs {flags} -o /tmp/sl-f5-compile/out/{BINARY_NAME}
+test "$(find /tmp/sl-f5-compile/out -mindepth 1 -maxdepth 1 -printf '%f\\n')" = {BINARY_NAME}
+chmod 0555 /tmp/sl-f5-compile/out/{BINARY_NAME}
+readelf -hW /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/elf-header.txt
+readelf -lW /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/elf-programs.txt
+readelf -dW /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/elf-dynamic.txt
+nm -a /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/symbols.txt
+nm -u /tmp/sl-f5-compile/out/{BINARY_NAME} > /tmp/sl-f5-compile/undefined.txt
+'''
+
+
+def validate_output(directory):
+    if {p.name for p in directory.iterdir()} != {BINARY_NAME}:
+        raise BuildError('unlisted or missing compiled output')
+    path = directory / BINARY_NAME
+    if path.is_symlink() or not stat.S_ISREG(path.lstat().st_mode):
+        raise BuildError('compiled output is not a regular file')
+    return path
+
+
+def compile_once(builder, lock, destination):
+    name = 'sl-f5-compile-' + uuid.uuid4().hex
+    try:
+        command = ['podman','run','--name',name,'--pull=never','--network=none',
+                   '--read-only','--cap-drop=all','-i','--entrypoint','/bin/sh',builder,'-c',
+                   '( '+compile_script(lock)+' ) >&2; status=$?; test "$status" = 0 || exit "$status"; tar -cf - -C /tmp/sl-f5-compile out elf-header.txt elf-programs.txt elf-dynamic.txt symbols.txt undefined.txt']
+        value = subprocess.run(command, input=prep.regular_bytes(ROOT/lock['source']['path']),
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180, check=False)
+        (destination/'compile.log').write_bytes(value.stderr)
+        if value.returncode:
+            raise BuildError('fixed compilation failed; see compile.log')
+        # Stream results before the read-only container's tmpfs disappears.
+        expected={'out','out/'+BINARY_NAME,'elf-header.txt','elf-programs.txt',
+                  'elf-dynamic.txt','symbols.txt','undefined.txt'}
+        with tarfile.open(fileobj=io.BytesIO(value.stdout),mode='r:') as archive:
+            members=archive.getmembers()
+            if len(members)!=len(expected) or {m.name.rstrip('/') for m in members}!=expected:
+                raise BuildError('unlisted/missing compilation archive outputs')
+            for member in members:
+                name=member.name.rstrip('/')
+                target=destination/name
+                if name=='out' and member.isdir():
+                    target.mkdir()
+                elif member.isfile() and 0<=member.size<=64*1024*1024:
+                    target.parent.mkdir(exist_ok=True)
+                    target.write_bytes(archive.extractfile(member).read())
+                    target.chmod(0o555 if name=='out/'+BINARY_NAME else 0o444)
+                else:
+                    raise BuildError('unsupported compilation output')
+        return validate_output(destination/'out')
+    finally:
+        subprocess.run(['podman','rm','-f',name],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+
+
+def build(cache, output):
+    lock_bytes = prep.regular_bytes(LOCK)
+    lock = json.loads(lock_bytes, object_pairs_hook=prep.reject_duplicate_keys)
+    validate_inputs(lock, cache)
+    if output.exists() or output.is_symlink() or not output.parent.is_dir():
+        raise BuildError('new output directory with existing parent required')
+    info = json.loads(run(['podman','info','--format','json']).stdout)
+    if info.get('host',{}).get('security',{}).get('rootless') is not True:
+        raise BuildError('rootless Podman is required')
+    base = json.loads(run(['podman','image','inspect',lock['base']['reference']]).stdout)[0]
+    if base.get('Id') != lock['base']['pinnedimage_id']:
+        raise BuildError('cached immutable base image identity mismatch')
+    # Development-only diagnostic output is retained on failure; never accepted
+    # as PASS until every independent check and both compilations finish.
+    output.mkdir(mode=0o700)
+    context = output/'context';context.mkdir()
+    (context/'rpms').mkdir()
+    for item in lock['packages']:
+        shutil.copyfile(cache/item['filename'],context/'rpms'/item['filename'])
+    (context/'lock.json').write_bytes(lock_bytes)
+    shutil.copyfile(PREPARE,context/'prepare.py')
+    shutil.copyfile(ROOT/'tools/static-toolchain/Containerfile',context/'Containerfile')
+    result = run(['podman','build','--pull=never','--network=none','--no-cache',
+                  '--iidfile',str(output/'builder.iid'),'-f',str(context/'Containerfile'),str(context)],timeout=900,log=output/'preparation.log')
+    (output/'preparation.log').write_text(result.stdout+result.stderr)
+    builder = (output/'builder.iid').read_text().strip()
+    if re.fullmatch(r'sha256:[0-9a-f]{64}',builder) is None:
+        raise BuildError('builder is not an immutable image ID')
+    probe='sl-f5-provenance-'+uuid.uuid4().hex
+    try:
+        run(['podman','create','--name',probe,'--network=none','--entrypoint','/bin/true',builder])
+        run(['podman','cp',probe+':/build/preparation-evidence.json',str(output/'preparation-evidence.json')])
+    finally:
+        subprocess.run(['podman','rm','-f',probe],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    provenance=json.loads((output/'preparation-evidence.json').read_text())
+    if provenance['lock_sha256'] != hashlib.sha256(lock_bytes).hexdigest() or provenance['installed_nevras'] != lock['installed_nevras']:
+        raise BuildError('prepared builder provenance drift')
+    binaries=[];elf=module('f5_elf',ROOT/'tools/verify-static-fixture')
+    for number in (1,2):
+        dest=output/f'compile-{number}';dest.mkdir()
+        binary=compile_once(builder,lock,dest)
+        binaries.append(binary)
+        (dest/'static-check.json').write_text(json.dumps(elf.verify_elf(binary,sha(binary)),sort_keys=True,indent=2)+'\n')
+    hashes=[sha(p) for p in binaries]
+    if hashes[0] != hashes[1]:
+        raise BuildError('independent clean compilations are not byte reproducible')
+    failures=[]
+    # Delete only inside disposable writable container layers, never the image
+    # or host. These exercise real missing-tool/static-library failures.
+    for missing in ('/usr/bin/rustc','/usr/lib64/libc.a'):
+        negative=subprocess.run(['podman','run','--rm','--pull=never','--network=none',
+            '--cap-drop=all','--entrypoint','/bin/sh','-i',builder,'-c',
+            'rm -- '+missing+'; '+compile_script(lock)],
+            input=prep.regular_bytes(ROOT/lock['source']['path']),
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=180,check=False)
+        if negative.returncode==0:
+            raise BuildError('missing required tool/static library did not fail closed')
+        failures.append(dict(missing=missing,exit=negative.returncode,
+                             stdout=negative.stdout.decode(),stderr=negative.stderr.decode()))
+    (output/'negative-build-controls.json').write_text(json.dumps(failures,sort_keys=True,indent=2)+'\n')
+    # Actual runtime smoke uses the original approved base, not the toolchain.
+    # No installation: unprivileged fixed execution from disposable tmpfs only.
+    data=io.BytesIO()
+    with tarfile.open(fileobj=data,mode='w') as archive:
+        entry=tarfile.TarInfo(BINARY_NAME);payload=prep.regular_bytes(binaries[0]);entry.size=len(payload);entry.mode=0o555
+        archive.addfile(entry,io.BytesIO(payload))
+    runtime=subprocess.run(['podman','run','--rm','--pull=never','--network=none','--read-only',
+        '--user','65532:65532','--cap-drop=all','--entrypoint','/bin/sh','-i',lock['base']['reference'],
+        '-c','set -eu; mkdir /tmp/sl-f5-runtime; tar --no-same-owner -xf - -C /tmp/sl-f5-runtime; exec /tmp/sl-f5-runtime/sl-management-fixture'],
+        input=data.getvalue(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30,check=False)
+    if runtime.returncode or runtime.stdout != b'SignalLayer Candidate C fixture\n' or runtime.stderr:
+        raise BuildError('unprivileged pinned-base compatibility smoke failed')
+    report=dict(status='PASS',scope=lock['scope'],lock_sha256=hashlib.sha256(lock_bytes).hexdigest(),
+        builder_image_id=builder,base=lock['base'],source=lock['source'],target=lock['target'],compiler_flags=lock['compiler_flags'],
+        installed_nevras=lock['installed_nevras'],versions=provenance['tool_output'],artifact_sha256=hashes[0],
+        missing_tool_static_library_controls=failures,
+        reproducible_clean_compilations=2,runtime=dict(exit=0,stdout=runtime.stdout.decode(),uid=65532,network='none',base=lock['base']['reference']),
+        installed_coreos='UNPROVEN; not integrated',selinux_runtime='UNPROVEN',general_glibc_nss_dlopen='UNPROVEN')
+    (output/'result.json').write_text(json.dumps(report,sort_keys=True,indent=2)+'\n')
+    return report
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--rpm-cache',type=Path,required=True)
+    parser.add_argument('--output',type=Path,required=True)
+    args=parser.parse_args()
+    try:
+        result=build(args.rpm_cache.absolute(),args.output.absolute())
+    except (BuildError,prep.PreparationError,OSError,ValueError,subprocess.SubprocessError) as error:
+        parser.exit(1,f'F5 build refused: {error}\n')
+    print(json.dumps({k:result[k] for k in ('status','builder_image_id','artifact_sha256','reproducible_clean_compilations')},sort_keys=True))
+
+
+if __name__=='__main__':
+    main()
