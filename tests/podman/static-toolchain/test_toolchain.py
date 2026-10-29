@@ -60,6 +60,12 @@ class ToolchainLockTests(unittest.TestCase):
         self.rejected(lambda lock: lock.__setitem__("signing_key_fingerprint", "0" * 40), "signing")
         self.rejected(lambda lock: lock.pop("signing_key_fingerprint"), "signing")
 
+    def test_signing_key_path_and_file_digest_are_required(self):
+        self.rejected(lambda lock: lock.pop("signing_key_path"), "key|signing")
+        self.rejected(lambda lock: lock.__setitem__("signing_key_path", "/tmp/untrusted-key"), "key|signing")
+        self.rejected(lambda lock: lock.pop("signing_key_sha256"), "key|signing")
+        self.rejected(lambda lock: lock.__setitem__("signing_key_sha256", "bad"), "key|signing")
+
     def test_floating_nevra_and_version_are_rejected(self):
         self.rejected(lambda lock: lock["packages"][0].__setitem__("nevra", "binutils-latest"))
         self.rejected(lambda lock: lock["versions"].__setitem__("rust", "latest"), "numeric")
@@ -229,6 +235,41 @@ class OfflineRPMCacheTests(unittest.TestCase):
         with mock.patch.object(PREP, "run", side_effect=query):
             with self.assertRaisesRegex(PREP.PreparationError, "signing key|signature"):
                 PREP.verify_rpms(self.lock)
+
+
+class DisposableSigningKeyTests(unittest.TestCase):
+    """Mocked RPM6 keyring bootstrap; never imports into any actual keyring."""
+    def setUp(self):
+        self.lock = json.loads(LOCK_PATH.read_bytes())
+        self.key = b"synthetic signing-key fixture; not a real public key\n"
+        # Bootstrap behavior is isolated from the separately tested reviewed
+        # lock. Synthetic bytes cannot stand in for measured Fedora key bytes.
+        self.fixture_lock = copy.deepcopy(self.lock)
+        self.fixture_lock["signing_key_sha256"] = hashlib.sha256(self.key).hexdigest()
+
+    def test_matching_pinned_file_is_imported_then_fingerprint_checked(self):
+        fingerprint = self.fixture_lock["signing_key_fingerprint"]
+        with mock.patch.object(PREP, "regular_bytes", return_value=self.key) as read, \
+                mock.patch.object(PREP, "run", side_effect=["", fingerprint + "\n"]) as run:
+            PREP.initialize_signing_key(self.fixture_lock)
+        read.assert_called_once_with(Path(self.fixture_lock["signing_key_path"]))
+        self.assertEqual(run.call_args_list, [
+            mock.call(["rpmkeys", "--import", self.fixture_lock["signing_key_path"]]),
+            mock.call(["rpmkeys", "--list"]),
+        ])
+
+    def test_changed_key_file_refuses_before_import(self):
+        with mock.patch.object(PREP, "regular_bytes", return_value=b"changed key"), \
+                mock.patch.object(PREP, "run") as run:
+            with self.assertRaisesRegex(PREP.PreparationError, "signing|key|digest"):
+                PREP.initialize_signing_key(self.lock)
+            run.assert_not_called()
+
+    def test_imported_keyring_without_pinned_fingerprint_refuses(self):
+        with mock.patch.object(PREP, "regular_bytes", return_value=self.key), \
+                mock.patch.object(PREP, "run", side_effect=["", "0" * 40 + "\n"]):
+            with self.assertRaisesRegex(PREP.PreparationError, "signing|key|fingerprint"):
+                PREP.initialize_signing_key(self.fixture_lock)
 
 
 class ImmutableImageIDTests(unittest.TestCase):

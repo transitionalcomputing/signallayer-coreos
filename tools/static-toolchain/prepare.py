@@ -46,7 +46,7 @@ def run(argv: list[str], *, timeout: int = 120) -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         timeout=timeout,
-        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"},
+        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/root", "LANG": "C", "LC_ALL": "C"},
     )
     if result.returncode:
         raise PreparationError(f"command failed ({result.returncode}): {argv!r}\n{result.stdout}")
@@ -126,6 +126,8 @@ def validate_lock(lock: dict) -> None:
         raise PreparationError("unsupported fixture target")
     if lock.get("signing_key_fingerprint") != "36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6":
         raise PreparationError("Fedora44 signing key identity mismatch")
+    if lock.get("signing_key_path") != "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-44-primary" or not HEX.fullmatch(lock.get("signing_key_sha256", "")):
+        raise PreparationError("missing pinned-base Fedora44 key file identity")
     versions = lock.get("versions", {})
     if set(versions) != set(COMMANDS) or any(not isinstance(v, str) or not v for v in versions.values()):
         raise PreparationError("all four compiler/tool version strings are required")
@@ -188,6 +190,18 @@ def validate_lock(lock: dict) -> None:
             raise PreparationError('toolchain package/version mismatch')
 
 
+def initialize_signing_key(lock: dict) -> str:
+    """Initialize only the disposable builder keyring from its pinned key file."""
+    data = regular_bytes(Path(lock['signing_key_path']))
+    if hashlib.sha256(data).hexdigest() != lock['signing_key_sha256']:
+        raise PreparationError('pinned-base signing key file digest mismatch')
+    run(['rpmkeys', '--import', lock['signing_key_path']])
+    keys = run(['rpmkeys', '--list'])
+    if lock['signing_key_fingerprint'] not in keys.lower():
+        raise PreparationError('imported signing key fingerprint mismatch')
+    return keys
+
+
 def verify_rpms(lock: dict) -> tuple[list[str], dict[str, str]]:
     directory = BUILD / "rpms"
     if not stat.S_ISDIR(directory.lstat().st_mode):
@@ -223,6 +237,7 @@ def main() -> None:
     before = installed_nevras()
     if inventory_digest(before) != lock["base"]["installed_nevras_sha256"]:
         raise PreparationError("actual base RPM inventory differs from the pinned base")
+    trusted_keys = initialize_signing_key(lock)
     paths, signatures = verify_rpms(lock)
     command = ["dnf", "-y", "--disablerepo=*", "--setopt=install_weak_deps=False", "install", *paths]
     install_output = run(command, timeout=600)
@@ -253,6 +268,9 @@ def main() -> None:
         "gcc_verbose": run(["gcc", "--version"]),
         "rustc_verbose": run(["rustc", "-vV"]),
         "rpm_signatures": signatures,
+        "trusted_keys": trusted_keys,
+        "signing_key_path": lock['signing_key_path'],
+        "signing_key_sha256": lock['signing_key_sha256'],
         "installation_command": command,
         "installation_output": install_output,
         "production_coreos_changed": False,

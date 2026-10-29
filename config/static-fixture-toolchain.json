@@ -835,6 +835,8 @@
   "schema_version": 1,
   "scope": "development-only-static-toolchain",
   "signing_key_fingerprint": "36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6",
+  "signing_key_path": "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-44-primary",
+  "signing_key_sha256": "93642aec521a1e5e96dd715f7ae0ec0850ebc9de09a94ce03cae5263f26cc18a",
   "source": {
     "path": "management-fixture/src/main.rs",
     "sha256": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5"
