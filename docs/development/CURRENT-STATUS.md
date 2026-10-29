@@ -29,9 +29,22 @@
 
 - **P3-1b:** [issue #41](https://github.com/transitionalcomputing/signallayer-coreos/issues/41)
   authorizes source-only identity provisioning. Library, executable negative
-  fixtures and preflight binding are implemented: **53/53** Fedora fixture
-  tests and **107/107** tooling tests pass. See [results and remaining gates](0.0.4-phase1-pass3-p3-1b.md).
+  fixtures and preflight binding are implemented: **69/69** Fedora fixture
+  tests and **107/107** tooling tests pass after the NSS review correction. See [results and remaining gates](0.0.4-phase1-pass3-p3-1b.md).
   No account, service or runtime integration is installed; no image was built.
+
+## PR #42 NSS review checkpoint
+
+N1/N2 source corrections check subordinate-ID providers and effective
+supplementary membership, accept only the precise local-profile merge syntax,
+and return path-specific policy-read errors. The source-only draft remains
+unmerged. N3 measured the exact cached pinned base read-only: it enables
+`altfiles` and uses an authselect-owned `nsswitch.conf` symlink. Both remain
+refused; **that actual image is not compatible with live provisioning yet**.
+Image-supplied `/usr/lib/passwd`/`group` and update/rollback collisions need a
+separately reviewed integration, as does any symlink policy path. Recovery,
+stale temporaries, UID floor and sysusers/tmpfiles/native integration limitations
+are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Current design direction — not runtime proof
 

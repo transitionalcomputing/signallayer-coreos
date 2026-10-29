@@ -72,8 +72,8 @@
       "image/platform/sl-sessiond.sysusers": "54bc3d6e37bfbba4d83395f257a920c33a5f24d7bed09a33b9f86777b55ba92b",
       "image/platform/sl-update.service": "2a59ebf66e4b0321dda360745e2969286ce8667746747d20e198337237403e82",
       "image/platform/udisks2-polkit.conf": "7798a6fe37e70c0e442b0ff84813662d5285624aaf3b4dc275c0e3542dfe0172",
-      "management-lifecycle/README.md": "341bf610bb58e96cb316f6af16639a21f3cace46da8f340e5b29a69a2138f92d",
-      "management-lifecycle/identity.py": "3419f6fdccf210e7c92490b4adbe59c02167785664f8051a7b5c8f2bb34793df",
+      "management-lifecycle/README.md": "c7161131d09e1f53002d72b4e1cb2db43b57ac5c676c1800cb07d711c606095b",
+      "management-lifecycle/identity.py": "235c04c75d0951449032dd8d56ab67dca5e077892180ee6356430223c253f71f",
       "network-observer/Cargo.toml": "221efbd4dd2a422157da5ae28fff65fdf0cbea51c54d82045499d1ce477271b6",
       "network-observer/src/main.rs": "6d30bf8da26c3edfe2142c84fb49ed3ef773c764932642d18b5fa1ca5a862719",
       "platformd/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -589,12 +589,12 @@
       },
       "management-lifecycle/README.md": {
         "executable": false,
-        "sha256": "341bf610bb58e96cb316f6af16639a21f3cace46da8f340e5b29a69a2138f92d",
+        "sha256": "c7161131d09e1f53002d72b4e1cb2db43b57ac5c676c1800cb07d711c606095b",
         "state": "file"
       },
       "management-lifecycle/identity.py": {
         "executable": false,
-        "sha256": "3419f6fdccf210e7c92490b4adbe59c02167785664f8051a7b5c8f2bb34793df",
+        "sha256": "235c04c75d0951449032dd8d56ab67dca5e077892180ee6356430223c253f71f",
         "state": "file"
       },
       "tools/build-management-rootfs": {

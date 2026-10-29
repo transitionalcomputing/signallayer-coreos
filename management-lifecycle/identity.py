@@ -385,22 +385,45 @@ class _Store:
 def _nss_policy(data):
     if data is None:
         raise IdentityError("missing NSS policy; local identity authority unproven")
+    guarded = {"passwd", "group", "shadow", "gshadow", "subid", "initgroups"}
     try:
         entries = {}
         for line in data.decode("ascii").splitlines():
             line = line.split("#", 1)[0].strip()
             if not line:
                 continue
-            key, _, value = line.partition(":")
-            if key in ("passwd", "group", "shadow"):
-                if key in entries:
-                    raise IdentityError("duplicate NSS identity policy")
-                entries[key] = value.split()
-        for key in ("passwd", "group", "shadow"):
-            allowed = {"files"} if key == "shadow" else {"files", "systemd"}
-            if (not entries.get(key) or entries[key][0] != "files"
-                    or not set(entries[key]) <= allowed or len(entries[key]) != len(set(entries[key]))):
-                raise IdentityError("unsupported NSS identity provider; integration review required")
+            key, separator, value = line.partition(":")
+            database = key.strip().lower()
+            if database in guarded:
+                if not separator or database in entries:
+                    raise IdentityError(f"malformed or duplicate NSS {database} policy")
+                # libsubid recognizes subid case-insensitively; never ignore a
+                # case variant that another NSS consumer might interpret.
+                if key.strip() != database:
+                    raise IdentityError(f"unsupported NSS database casing: {database}")
+                entries[database] = value.split()
+                if any(token.lower() == "altfiles" for token in entries[database]):
+                    raise IdentityError(
+                        f"NSS altfiles in {database} requires /usr/lib/passwd and "
+                        "/usr/lib/group integration and deployment collision checks")
+            elif not separator and line.split()[0].lower() in guarded:
+                raise IdentityError("malformed NSS identity declaration")
+        ordinary = (("files",), ("files", "systemd"))
+        for database in ("passwd", "group", "shadow", "gshadow"):
+            if database == "gshadow" and database not in entries:
+                continue
+            supported = ordinary + (("files", "[SUCCESS=merge]", "systemd"),) if database == "group" else ordinary
+            if tuple(entries.get(database, ())) not in supported:
+                raise IdentityError(f"unsupported NSS {database} provider/action; integration review required")
+        # shadow-utils 4.19 lib/nss.c returns its built-in files backend when
+        # subid is absent. Unknown plugins/actions must still be refused.
+        if "subid" in entries and entries["subid"] != ["files"]:
+            raise IdentityError("NSS subid must be absent or exactly files")
+        if "initgroups" in entries:
+            sources = entries["initgroups"]
+            group_sources = {token for token in entries["group"] if not token.startswith("[")}
+            if not sources or len(sources) != len(set(sources)) or not set(sources) <= group_sources:
+                raise IdentityError("NSS initgroups must be a unique subset of configured group sources")
     except UnicodeError as error:
         raise IdentityError("malformed NSS identity policy") from error
 
@@ -412,7 +435,15 @@ class _HostStore(_Store):
     def check_sources(self):
         # Do not allocate against an incomplete remote/directory-service view.
         # No provider configuration is changed; unsupported policy fails closed.
-        _nss_policy(self.read("etc/nsswitch.conf"))
+        try:
+            policy = self.read("etc/nsswitch.conf")
+        except OSError as error:
+            raise IdentityError(
+                f"cannot safely read etc/nsswitch.conf (errno {error.errno}); "
+                "authselect symlinks remain unsupported") from error
+        except IdentityError as error:
+            raise IdentityError(f"untrusted etc/nsswitch.conf: {error}") from error
+        _nss_policy(policy)
 
     def check_choice(self, chosen):
         users, groups = pwd.getpwall(), grp.getgrall()
@@ -438,6 +469,14 @@ class _HostStore(_Store):
             raise IdentityError("NSS primary identity overlaps proposed mappings")
         if any(NAME in entry.gr_mem for entry in groups):
             raise IdentityError("NSS supplementary membership refused")
+        # NSS group enumeration does not implement SUCCESS=merge semantics.
+        # glibc accepts a supplied name even before the local account exists.
+        try:
+            effective = os.getgrouplist(NAME, chosen.gid)
+        except OSError as error:
+            raise IdentityError("NSS effective membership lookup failed for sl-management") from error
+        if any(type(gid) is not int for gid in effective) or set(effective) != {chosen.gid}:
+            raise IdentityError("NSS effective supplementary membership refused")
 
 
 def _encode(record):
@@ -517,6 +556,8 @@ def _provision(store: _Store) -> Identity:
             store.replace(path, final[path], record["files"][path]["before"])
     # Verify the complete transaction before publishing durable accepted values.
     _verify(read_validate({path: store.read(path) for path in FILES}), identity)
+    # Corroborate effective membership again now that the account exists.
+    store.check_choice(identity)
     committed = {"schema": 1, "phase": "committed", "identity": asdict(identity)}
     store.replace(METADATA, _encode(committed), _digest(_encode(record)))
     return identity

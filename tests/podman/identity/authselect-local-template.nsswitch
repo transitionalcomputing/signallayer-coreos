@@ -1,0 +1,4 @@
+passwd:     files {if "with-altfiles":altfiles }systemd
+shadow:     files systemd
+group:      files [SUCCESS=merge] {if "with-altfiles":altfiles [SUCCESS=merge] }systemd
+gshadow:    files systemd

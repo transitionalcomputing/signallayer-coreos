@@ -1,5 +1,7 @@
 """Executable P3-1b parser/transaction fixtures, never live account changes."""
 import importlib.util
+from contextlib import ExitStack, contextmanager
+import errno
 import json
 import os
 from pathlib import Path
@@ -18,6 +20,14 @@ spec.loader.exec_module(identity)
 
 class Interrupted(Exception):
     pass
+
+
+class NSSFixtureStore(identity._Store):
+    def check_sources(self):
+        identity._HostStore.check_sources(self)
+
+    def check_choice(self, chosen):
+        identity._HostStore.check_choice(self, chosen)
 
 
 class IdentityTests(unittest.TestCase):
@@ -495,6 +505,167 @@ class IdentityTests(unittest.TestCase):
         with mock.patch.object(identity.pwd, "getpwall", return_value=[]), mock.patch.object(identity.grp, "getgrall", return_value=[SimpleNamespace(gr_gid=10,gr_mem=[identity.NAME])]), mock.patch.object(identity.pwd, "getpwuid", side_effect=KeyError), mock.patch.object(identity.grp, "getgrgid", side_effect=KeyError), mock.patch.object(identity.pwd, "getpwnam", side_effect=KeyError), mock.patch.object(identity.grp, "getgrnam", side_effect=KeyError):
             with self.assertRaisesRegex(identity.IdentityError,"supplementary membership"):
                 identity._HostStore.check_choice(None,chosen)
+
+    def local_nss(self):
+        return (Path(__file__).parent/"authselect-local-files.nsswitch").read_bytes()
+
+    @contextmanager
+    def mocked_nss(self, effective=None):
+        with ExitStack() as stack:
+            for module, name in ((identity.pwd,"getpwall"),(identity.grp,"getgrall")):
+                stack.enter_context(mock.patch.object(module,name,return_value=[]))
+            for module, name in ((identity.pwd,"getpwuid"),(identity.pwd,"getpwnam"),
+                                 (identity.grp,"getgrgid"),(identity.grp,"getgrnam")):
+                stack.enter_context(mock.patch.object(module,name,side_effect=KeyError))
+            lookup=stack.enter_context(mock.patch.object(identity.os,"getgrouplist",
+                side_effect=effective or (lambda name,gid: [gid])))
+            yield lookup
+
+    def refuse_nss_before_mutation(self, policy, needle):
+        self.write("etc/nsswitch.conf",policy)
+        before=self.raw()
+        with self.mocked_nss(), self.assertRaisesRegex(identity.IdentityError,needle):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(self.raw(),before)
+        self.assertFalse((self.root/identity.METADATA).exists())
+
+    def test_verbatim_local_nss_profile_and_pre_post_creation_membership(self):
+        self.write("etc/nsswitch.conf",self.local_nss())
+        observed=[]
+        def membership(name,gid):
+            self.assertEqual(name,identity.NAME)
+            observed.append(identity.NAME in identity.read_validate(self.raw()).passwd)
+            return [gid]
+        with self.mocked_nss(membership):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(observed,[False,True])
+
+    def test_positive_fixture_matches_measured_authselect_template_without_altfiles(self):
+        template=(Path(__file__).parent/"authselect-local-template.nsswitch").read_bytes()
+        rendered=template.replace(b'{if "with-altfiles":altfiles }',b'').replace(
+            b'{if "with-altfiles":altfiles [SUCCESS=merge] }',b'')
+        fixture=b"\n".join(line for line in self.local_nss().splitlines() if not line.startswith(b"#"))+b"\n"
+        self.assertEqual(rendered,fixture)
+        identity._nss_policy(rendered)
+
+    def test_subid_files_or_documented_absence_and_safe_initgroups(self):
+        policy=self.local_nss()
+        for suffix in (b"",b"subid: files\n",b"initgroups: files\n",b"initgroups: systemd\n",
+                       b"subid: files\ninitgroups: files systemd\n"):
+            with self.subTest(suffix=suffix):
+                identity._nss_policy(policy+suffix)
+
+    def test_nonfiles_subid_refuses_before_mutation(self):
+        for line in (b"subid: sss\n",b"subid: ldap\n",b"subid: files systemd\n",
+                     b"subid: files files\n",b"subid: files [SUCCESS=merge]\n",b"subid:\n"):
+            with self.subTest(line=line):
+                self.refuse_nss_before_mutation(self.local_nss()+line,"subid")
+
+    def test_initgroups_remote_or_unknown_actions_refuse_before_mutation(self):
+        for line in (b"initgroups: sss\n",b"initgroups: ldap\n",b"initgroups: files files\n",
+                     b"initgroups: files [SUCCESS=merge] systemd\n",b"initgroups:\n"):
+            with self.subTest(line=line):
+                self.refuse_nss_before_mutation(self.local_nss()+line,"initgroups")
+
+    def test_initgroups_subset_uses_actual_configured_group_sources(self):
+        policy=self.local_nss().replace(b"group:      files [SUCCESS=merge] systemd",b"group: files")
+        self.refuse_nss_before_mutation(policy+b"initgroups: systemd\n","configured group sources")
+
+    def test_nss_duplicates_casing_and_whitespace_variants_do_not_bypass(self):
+        for line in (b"subid: files\nsubid: sss\n",b"subid: files\nSUBID: sss\n",
+                     b"SUBID: sss\n",b"subid : sss\n",b"initgroups : sss\n",
+                     b"initgroups: files\ninitgroups: files\n",b"subid files\n",
+                     b"gshadow: files\n"):
+            with self.subTest(line=line):
+                self.refuse_nss_before_mutation(self.local_nss()+line,"NSS")
+
+    def test_only_exact_group_merge_action_and_position_are_accepted(self):
+        policy=self.local_nss()
+        for value in (b"files [SUCCESS=return] systemd",b"[SUCCESS=merge] files systemd",
+                      b"files systemd [SUCCESS=merge]",b"files [success=merge] systemd",
+                      b"files [SUCCESS=merge] files",b"files [SUCCESS=merge] sss"):
+            with self.subTest(value=value):
+                self.refuse_nss_before_mutation(policy.replace(b"files [SUCCESS=merge] systemd",value),"group")
+        self.refuse_nss_before_mutation(policy.replace(b"shadow:     files systemd",
+            b"shadow: files [SUCCESS=merge] systemd"),"shadow")
+
+    def test_pinned_base_altfiles_is_explicit_refusal(self):
+        measured=(Path(__file__).parent/"pinned-base-effective.nsswitch").read_bytes()
+        self.refuse_nss_before_mutation(measured,"altfiles.*usr/lib/passwd.*usr/lib/group")
+
+    def test_altfiles_is_refused_in_each_guarded_database(self):
+        for key in (b"passwd",b"group",b"shadow",b"gshadow",b"subid",b"initgroups"):
+            with self.subTest(key=key):
+                policy=b"\n".join(line for line in self.local_nss().splitlines()
+                                  if not line.startswith(key+b":"))+b"\n"+key+b": files altfiles\n"
+                self.refuse_nss_before_mutation(policy,"altfiles")
+
+    def test_effective_membership_hidden_from_enumeration_refuses_before_writes(self):
+        self.write("etc/nsswitch.conf",self.local_nss())
+        before=self.raw()
+        class NoWrites(NSSFixtureStore):
+            def replace(inner,*args):
+                self.fail("effective group refusal must precede every replace")
+        with self.mocked_nss(lambda name,gid: [gid,10]), self.assertRaisesRegex(
+                identity.IdentityError,"effective supplementary membership"):
+            self.run_provision(NoWrites)
+        self.assertEqual(self.raw(),before)
+        self.assertFalse((self.root/identity.METADATA).exists())
+
+    def test_effective_membership_lookup_error_refuses_before_writes(self):
+        self.write("etc/nsswitch.conf",self.local_nss())
+        before=self.raw()
+        def failure(name,gid):
+            raise OSError(errno.EIO,"fixture NSS unavailable")
+        with self.mocked_nss(failure), self.assertRaisesRegex(identity.IdentityError,"effective membership lookup failed"):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(self.raw(),before)
+        self.assertFalse((self.root/identity.METADATA).exists())
+
+    def test_post_creation_membership_failure_never_commits_identity(self):
+        self.write("etc/nsswitch.conf",self.local_nss())
+        def membership(name,gid):
+            exists=identity.NAME in identity.read_validate(self.raw()).passwd
+            return [gid,10] if exists else [gid]
+        with self.mocked_nss(membership), self.assertRaisesRegex(identity.IdentityError,"effective supplementary membership"):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(json.loads((self.root/identity.METADATA).read_text())["phase"],"prepared")
+        before=self.raw()
+        with self.mocked_nss(lambda name,gid: [gid,10]), self.assertRaises(identity.IdentityError):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(self.raw(),before)
+        with self.mocked_nss():
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(json.loads((self.root/identity.METADATA).read_text())["phase"],"committed")
+
+    def test_committed_identity_effective_membership_drift_refuses_without_writes(self):
+        self.write("etc/nsswitch.conf",self.local_nss())
+        with self.mocked_nss():
+            self.run_provision(NSSFixtureStore)
+        before=self.raw()
+        record=(self.root/identity.METADATA).read_bytes()
+        with self.mocked_nss(lambda name,gid: [gid,10]), self.assertRaises(identity.IdentityError):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(self.raw(),before)
+        self.assertEqual((self.root/identity.METADATA).read_bytes(),record)
+
+    def test_nsswitch_read_errors_name_fixed_policy_path(self):
+        from types import SimpleNamespace
+        for failure in (OSError(errno.ELOOP,"symlink fixture"),OSError(errno.EACCES,"denied fixture")):
+            with self.subTest(errno=failure.errno):
+                store=SimpleNamespace(read=mock.Mock(side_effect=failure))
+                with self.assertRaisesRegex(identity.IdentityError,"etc/nsswitch.conf.*authselect symlinks"):
+                    identity._HostStore.check_sources(store)
+                store.read.assert_called_once_with("etc/nsswitch.conf")
+
+    def test_authselect_symlink_remains_incompatible_and_cannot_escape_fixture(self):
+        self.write("etc/authselect/nsswitch.conf",self.local_nss())
+        (self.root/"etc/nsswitch.conf").symlink_to("authselect/nsswitch.conf")
+        before=self.raw()
+        with self.mocked_nss(), self.assertRaisesRegex(identity.IdentityError,"etc/nsswitch.conf.*symlinks"):
+            self.run_provision(NSSFixtureStore)
+        self.assertEqual(self.raw(),before)
+        self.assertFalse((self.root/identity.METADATA).exists())
 
     def test_library_has_no_cli_process_or_service_execution(self):
         text=(ROOT/"management-lifecycle/identity.py").read_text()
