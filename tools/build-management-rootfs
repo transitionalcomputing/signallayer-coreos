@@ -12,12 +12,15 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unicodedata
 
 SOURCE_ROOT = Path(__file__).absolute().parent.parent / 'management-fixture'
 MAX_BYTES = 16 * 1024 * 1024
+VERIFIER = Path(__file__).absolute().with_name("verify-management-rootfs")
+VERIFY_TIMEOUT = 30
 
 
 class BuildError(ValueError):
@@ -49,6 +52,10 @@ def path_ok(value, root=False):
             or any(ord(c) < 32 or ord(c) == 127 for c in value)
             or any(c in ('', '.', '..') for c in value.split('/'))):
         raise BuildError('noncanonical path')
+    try:
+        value.encode('utf-8', 'strict')
+    except UnicodeError as error:
+        raise BuildError('invalid UTF-8 path') from error
 
 
 def mount_id(fd):
@@ -233,6 +240,29 @@ def expected_manifest(snapshot):
         raise BuildError('malformed recipe or missing pinned input') from error
 
 
+def verify_staged_bundle(stage, expected_manifest_sha256, build_id):
+    """A separate fixed verifier must approve source-pinned staging before rename."""
+    try:
+        result = subprocess.run(
+            [sys.executable, '-I', '-B', str(VERIFIER),
+             '--offline-bundle', str(stage),
+             '--expected-manifest-sha256', expected_manifest_sha256],
+            shell=False, capture_output=True, text=True, encoding='utf-8',
+            errors='strict', timeout=VERIFY_TIMEOUT, check=False,
+        )
+    except (OSError, UnicodeError, subprocess.SubprocessError) as error:
+        raise BuildError('independent staged verification unavailable or failed') from error
+    if result.returncode != 0 or result.stderr:
+        raise BuildError('independent staged verification refused')
+    try:
+        report = json.loads(result.stdout, object_pairs_hook=unique)
+    except (ValueError, TypeError, RecursionError) as error:
+        raise BuildError('malformed independent verifier result') from error
+    if report != {'status': 'PASS', 'scope': 'offline-source-fixture',
+                  'selinux': 'UNPROVEN', 'runtime': 'UNPROVEN', 'build_id': build_id}:
+        raise BuildError('unexpected independent verifier result')
+
+
 def publish(stage, output):
     """Only a complete private sibling bundle becomes visible, never overwrite."""
     # renameat2 RENAME_NOREPLACE would need a non-stdlib syscall binding. A
@@ -257,6 +287,9 @@ def build_bundle(output):
             raise BuildError('output parent must be root-owned and not group/world writable')
         source = source_snapshot(SOURCE_ROOT)
         expected = expected_manifest(source)
+        # Pin these bytes/digest from the source oracle BEFORE materialization.
+        blob = canonical(expected)
+        expected_digest = digest(blob)
         stage = Path(tempfile.mkdtemp(prefix='.sl-rootfs-', dir=output.parent))
         stage_stamp = stamp(os.stat(stage))
         try:
@@ -290,7 +323,6 @@ def build_bundle(output):
                 if entry['type'] != 'symlink':
                     path.chmod(entry['mode'])
                 os.utime(path, ns=(0,0), follow_symlinks=False)
-            blob = canonical(expected)
             fd = os.open(stage / 'manifest.json', os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o400)
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(blob)
@@ -299,11 +331,12 @@ def build_bundle(output):
             # Re-read fixed sources to reject an observed mid-build change.
             if source_snapshot(SOURCE_ROOT) != source:
                 raise BuildError('source changed during build')
+            verify_staged_bundle(stage, expected_digest, expected['build_id'])
             if stamp(os.fstat(parent_fd))[:2] != stamp(os.stat(output.parent))[:2] or stage.stat().st_ino != stage_stamp[1]:
                 raise BuildError('output parent/staging substituted')
             publish(stage, output)
             os.fsync(parent_fd)
-            return {'status':'PASS', 'scope':'offline-source-fixture', 'build_id':expected['build_id'], 'manifest_sha256':digest(blob), 'binary_packaging':'BLOCKED', 'selinux':'UNPROVEN', 'runtime':'UNPROVEN'}
+            return {'status':'PASS', 'scope':'offline-source-fixture', 'build_id':expected['build_id'], 'manifest_sha256':expected_digest, 'binary_packaging':'BLOCKED', 'selinux':'UNPROVEN', 'runtime':'UNPROVEN'}
         finally:
             if stage.exists():
                 shutil.rmtree(stage)

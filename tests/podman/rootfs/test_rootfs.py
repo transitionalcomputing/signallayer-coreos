@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,19 @@ def load_tool(name):
     sys.modules[spec.name] = module
     loader.exec_module(module)
     return module
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), 'requires Linux source fd/mount APIs')
+class SourceOracleFixture(unittest.TestCase):
+    def test_reviewed_source_has_explicit_golden_identity_without_materialization(self):
+        builder = load_tool('build-management-rootfs')
+        reviewed = json.loads((Path(__file__).with_name('expected-source-identity.json')).read_bytes())
+        with mock.patch.object(builder.tempfile, 'mkdtemp', side_effect=AssertionError('must not create a tree')):
+            expected = builder.expected_manifest(builder.source_snapshot(builder.SOURCE_ROOT))
+        self.assertEqual(reviewed, {
+            'build_id': expected['build_id'],
+            'manifest_sha256': hashlib.sha256(builder.canonical(expected)).hexdigest(),
+        })
 
 
 @unittest.skipUnless(sys.platform.startswith('linux') and os.geteuid() == 0,
@@ -90,6 +104,120 @@ class RootfsFixtures(unittest.TestCase):
             os.umask(previous)
         self.assertEqual(self.manifest_bytes, (other / 'manifest.json').read_bytes())
         self.verify(other)
+
+    def builder_cli(self, output):
+        return subprocess.run(
+            [sys.executable, str(ROOT / 'tools' / 'build-management-rootfs'),
+             '--offline-output', str(output)],
+            capture_output=True, text=True, timeout=30, check=False)
+
+    def test_clean_parent_cli_publishes_verified_bundle(self):
+        parent = self.base / 'clean-parent'
+        parent.mkdir(mode=0o700)
+        output = parent / 'bundle'
+        result = self.builder_cli(output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        response = json.loads(result.stdout)
+        self.assertEqual(response['status'], 'PASS')
+        self.assertEqual(response['manifest_sha256'], self.digest)
+        self.verify(output)
+
+    def test_real_default_acl_cli_refuses_publication(self):
+        setfacl, getfacl = shutil.which('setfacl'), shutil.which('getfacl')
+        self.assertIsNotNone(setfacl, 'real default-ACL regression requires existing setfacl; gate is not skipped')
+        self.assertIsNotNone(getfacl, 'real default-ACL regression requires existing getfacl; gate is not skipped')
+        parent = self.base / 'acl-parent'
+        parent.mkdir(mode=0o700)
+        acl = subprocess.run([setfacl, '-d', '-m', 'u:nobody:rwx', str(parent)],
+                             capture_output=True, text=True, timeout=10, check=False)
+        self.assertEqual(acl.returncode, 0, acl.stderr)
+        observed = subprocess.run([getfacl, '-cp', str(parent)],
+                                  capture_output=True, text=True, timeout=10, check=False)
+        self.assertEqual(observed.returncode, 0, observed.stderr)
+        self.assertIn('default:user:nobody:rwx', observed.stdout)
+        self.assertEqual(parent.stat().st_uid, 0)
+        self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o700)
+        output = parent / 'bundle'
+        result = self.builder_cli(output)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn('PASS', result.stdout + result.stderr)
+        self.assertFalse(output.exists())
+        self.assertEqual(list(parent.glob('.sl-rootfs-*')), [])
+
+    def test_external_verifier_receives_source_oracle_before_publish(self):
+        output = self.base / 'independently-verified'
+        real_run, real_publish = subprocess.run, self.builder.publish
+        reviewed = json.loads(Path(__file__).with_name('expected-source-identity.json').read_bytes())
+        events = []
+        def verified(command, **kwargs):
+            events.append('verify')
+            self.assertEqual(command[:3], [sys.executable, '-I', '-B'])
+            self.assertEqual(Path(command[3]), ROOT / 'tools' / 'verify-management-rootfs')
+            self.assertEqual(command[4], '--offline-bundle')
+            stage = Path(command[5])
+            self.assertEqual(stage.parent, output.parent)
+            self.assertTrue(stage.name.startswith('.sl-rootfs-'))
+            self.assertEqual(command[6:], ['--expected-manifest-sha256', reviewed['manifest_sha256']])
+            self.assertEqual(kwargs.get('timeout'), 30)
+            self.assertFalse(kwargs.get('shell', False))
+            self.assertFalse(output.exists())
+            return real_run(command, **kwargs)
+        def published(stage, destination):
+            events.append('publish')
+            self.assertEqual(events, ['verify', 'publish'])
+            return real_publish(stage, destination)
+        with mock.patch.object(self.builder.subprocess, 'run', side_effect=verified):
+            with mock.patch.object(self.builder, 'publish', side_effect=published):
+                self.builder.build_bundle(output)
+        self.assertEqual(events, ['verify', 'publish'])
+        self.verify(output)
+
+    def test_external_verifier_refusal_never_publishes(self):
+        output = self.base / 'verifier-refused'
+        refusal = subprocess.CompletedProcess([], 1, stdout='', stderr='injected verifier refusal')
+        with mock.patch.object(self.builder.subprocess, 'run', return_value=refusal):
+            with mock.patch.object(self.builder, 'publish') as publish:
+                with self.assertRaises(self.builder.BuildError):
+                    self.builder.build_bundle(output)
+        publish.assert_not_called()
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
+
+    def test_unexpected_external_verifier_response_never_publishes(self):
+        good = dict(status='PASS', scope='offline-source-fixture', selinux='UNPROVEN',
+                    runtime='UNPROVEN', build_id=self.manifest['build_id'])
+        responses = [
+            ('', ''),
+            ('{"status":', ''),
+            ('{"status":"PASS","status":"PASS"}', ''),
+            (json.dumps(dict(good, build_id='0' * 64)), ''),
+            (json.dumps(dict(good, scope='installed')), ''),
+            (json.dumps(dict(good, unexpected='extra')), ''),
+            (json.dumps(good), 'unexpected stderr'),
+        ]
+        for stdout, stderr in responses:
+            with self.subTest(stdout=stdout, stderr=stderr):
+                output = self.base / 'malformed-verifier'
+                response = subprocess.CompletedProcess([], 0, stdout=stdout, stderr=stderr)
+                with mock.patch.object(self.builder.subprocess, 'run', return_value=response):
+                    with mock.patch.object(self.builder, 'publish') as publish:
+                        with self.assertRaises(self.builder.BuildError):
+                            self.builder.build_bundle(output)
+                publish.assert_not_called()
+                self.assertFalse(output.exists())
+                self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
+
+    def test_unavailable_or_timed_out_external_verifier_never_publishes(self):
+        for error in (FileNotFoundError('verifier absent'), subprocess.TimeoutExpired([], 30)):
+            with self.subTest(error=type(error).__name__):
+                output = self.base / 'unavailable-verifier'
+                with mock.patch.object(self.builder.subprocess, 'run', side_effect=error):
+                    with mock.patch.object(self.builder, 'publish') as publish:
+                        with self.assertRaises(self.builder.BuildError):
+                            self.builder.build_bundle(output)
+                publish.assert_not_called()
+                self.assertFalse(output.exists())
+                self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
 
     def test_changed_file_bytes_fail(self):
         self.regular().write_bytes(b'hostile replacement\n')
@@ -442,6 +570,15 @@ class RootfsFixtures(unittest.TestCase):
                 snapshot['rootfs-spec.json'] = self.builder.canonical(recipe)
                 with self.assertRaises(self.builder.BuildError):
                     self.builder.expected_manifest(snapshot)
+
+    def test_recipe_lone_surrogate_path_has_controlled_build_error(self):
+        snapshot = self.builder.source_snapshot(self.builder.SOURCE_ROOT)
+        recipe = json.loads(snapshot['rootfs-spec.json'])
+        recipe['entries'][0]['path'] = 'etc/\ud800'
+        # JSON permits this escape; strict UTF-8 filesystem paths do not.
+        snapshot['rootfs-spec.json'] = json.dumps(recipe, ensure_ascii=True).encode()
+        with self.assertRaises(self.builder.BuildError):
+            self.builder.expected_manifest(snapshot)
 
     def test_recipe_duplicate_paths_rejected(self):
         snapshot = self.builder.source_snapshot(self.builder.SOURCE_ROOT)

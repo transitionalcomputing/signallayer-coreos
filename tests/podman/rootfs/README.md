@@ -71,3 +71,40 @@ that must not be group/world writable. Existing outputs are refused. One
 trusted builder owns that parent; concurrent hostile root writers are outside
 this model. Atomic rename is not a general no-replace or crash-durability
 protocol. The independent verifier rejects an incomplete/mismatched bundle.
+
+## R1 prepublication gate and R2 source identity
+
+The builder now invokes the fixed sibling `verify-management-rootfs` as an
+external isolated Python process **on staging before rename**. The digest is
+compiled from the reviewed recipe before any tree is created. A missing,
+timed-out, nonzero, malformed or unexpected verifier result refuses publication;
+only the exact matching offline PASS result permits rename and builder PASS.
+The verifier remains a separate implementation; its functions are not imported
+into the builder.
+
+The Linux suite requires the already installed `setfacl`/`getfacl`. It creates a
+root-owned `0700` disposable output parent with `setfacl -d -m u:nobody:rwx`, checks
+that the default ACL is real, and asserts CLI refusal with no PASS, target or
+leftover staging. Lack of ACL tooling/filesystem support fails this gate rather
+than silently simulating or skipping it. Clean-parent publication and injected
+verifier failures are separate controls.
+
+`expected-source-identity.json` pins the independently reviewed canonical
+manifest hash and build ID. A test derives these from source without creating a
+tree and compares exact values. Updating the fixture is an explicit reviewed
+content-identity change, not an automatic regeneration step or a signature.
+
+## R3 installed-path gate and R4 checkout paths
+
+Offline fixture ancestors may include `/tmp`; this does not certify a trusted
+installed ancestry. Before any installed integration, require fd-anchored proof
+of the exact booted-deployment rootfs/manifest paths, root ownership and absence
+of runtime-UID-writable/group/world-writable ancestors, no symlink/mount escape,
+read-only deployment origin and the approved loaded SELinux labels. Those
+installed checks remain UNPROVEN; no production verifier mode is added here.
+
+The source builder intentionally refuses checkout paths traversing symlinks,
+including image-mode hosts' `/home -> /var/home`. Invoke it through the physical
+checkout path (for example `/var/home/...`), not a symlink spelling. There is no
+implicit `resolve()` fallback. A JSON lone-surrogate recipe path now fails with
+controlled `BuildError` instead of an encoding traceback.

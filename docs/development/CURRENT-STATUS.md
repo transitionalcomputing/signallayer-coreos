@@ -84,8 +84,10 @@ are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Next engineering action
 
-Review the P3-1c draft source tooling under issue #43. Rootfs fixtures pass
-**68/68** inside the exact cached Fedora base; tooling **111/111** and Candidate C
+Request the changed-lines-only R1 independent recheck on draft PR #44.
+Source tooling remains under issue #43. Rootfs fixtures pass
+**76/76** inside the exact cached Fedora base after the R1 prepublication verifier
+correction and real default-ACL rejection; tooling **111/111** and Candidate C
 harness **5/5** pass. See [P3-1c evidence and limits](0.0.4-phase1-pass3-p3-1c.md).
 Binary packaging is **BLOCKED**: base glibc `2.43-8`, planned static package
 `2.43-9`, no compatible cached metadata/toolchain. Owner review is needed before
