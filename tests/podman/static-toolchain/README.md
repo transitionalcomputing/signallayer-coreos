@@ -52,8 +52,12 @@ Inspect `preparation-evidence.json`, both `compile-*/static-check.json` records,
 the header/program/dynamic/symbol listings, negative controls and `result.json`.
 Only a completed `result.json` with `status=PASS` reports this bounded workflow
 as passing. Preserve the lock hash, exact source commit, raw logs and binary
-hash alongside it. Native execution is pending until that evidence exists;
-the offline tests alone do not establish a successful compilation.
+hash alongside it. The [F5 evidence record](../../../docs/evidence/0.0.4-f5-static-toolchain.json)
+records the completed native run and the later strengthened negative-control
+replay against the same builder. Offline tests alone do not establish a
+successful compilation. A negative control requires ordered in-container
+readiness/removal/cause/result witnesses and its exact reserved failure exit;
+an arbitrary Podman or infrastructure error must fail evaluation.
 
 The independent checker can also inspect an artifact against a separately
 recorded digest without executing it:

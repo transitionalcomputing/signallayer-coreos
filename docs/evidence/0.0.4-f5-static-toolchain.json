@@ -1,0 +1,385 @@
+{
+  "artifact": {
+    "compiler_flags": [
+      "--edition=2021",
+      "--target=x86_64-unknown-linux-gnu",
+      "-Ctarget-feature=+crt-static",
+      "-Crelocation-model=static",
+      "-Copt-level=2",
+      "-Cpanic=abort",
+      "-Ccodegen-units=1",
+      "-Cdebuginfo=0",
+      "-Clink-arg=-Wl,--build-id=none",
+      "--remap-path-prefix=/tmp/sl-f5-compile=/usr/src/signallayer-fixture"
+    ],
+    "fixed_source": {
+      "path": "management-fixture/src/main.rs",
+      "sha256": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5"
+    },
+    "independent_clean_compilations": 2,
+    "installed": false,
+    "original_base_smoke": {
+      "base": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+      "exit": 0,
+      "network": "none",
+      "stdout": "SignalLayer Candidate C fixture\n",
+      "uid": 65532
+    },
+    "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+    "size": 15725600,
+    "static_checks": [
+      {
+        "binary_selfcontained": "UNPROVEN-general-NSS/dlopen",
+        "bytes": 15725600,
+        "dt_needed": [],
+        "dynamic_segment": false,
+        "elf_type": "ET_EXEC",
+        "entrypoint": 4227136,
+        "installed_security_and_execution": "UNPROVEN",
+        "load_segments": 4,
+        "machine": "x86_64",
+        "pt_interp": false,
+        "schema": 1,
+        "scope": "development-static-ELF-only",
+        "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+        "status": "PASS"
+      },
+      {
+        "binary_selfcontained": "UNPROVEN-general-NSS/dlopen",
+        "bytes": 15725600,
+        "dt_needed": [],
+        "dynamic_segment": false,
+        "elf_type": "ET_EXEC",
+        "entrypoint": 4227136,
+        "installed_security_and_execution": "UNPROVEN",
+        "load_segments": 4,
+        "machine": "x86_64",
+        "pt_interp": false,
+        "schema": 1,
+        "scope": "development-static-ELF-only",
+        "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+        "status": "PASS"
+      }
+    ],
+    "target": "x86_64-unknown-linux-gnu"
+  },
+  "base": {
+    "installed_nevras_sha256": "c9dc17f3fffacda161152e3741ba7c9e92b20a5923c5986d248aa4c2b9598204",
+    "pinnedimage_id": "sha256:d312275bca51c0a0e28a30b5fe75d8027f540a21713934b84a35f77174e3ef7b",
+    "reference": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c"
+  },
+  "builder": {
+    "actual_inventory_equality": "PASS",
+    "base_count": 543,
+    "complete_expected_nevras": "config/static-fixture-toolchain.json:installed_nevras",
+    "downloaded_transitive_rpms": 155,
+    "exact_transaction_rpms": 23,
+    "host_installs": false,
+    "image_config_id": "sha256:b9ae6819081694488629707814df7415ade1f3d492e0e959ea0b72c7335dde80",
+    "installed_nevras_count": 563,
+    "installed_nevras_sha256": "fd9e6a9eac06bccb6f02d6cb7b331859bb39ebd8d7fa422e038e5a72ca9863e3",
+    "key_bootstrap_records": 1,
+    "manifest_digest": "sha256:ec5c37401f92604eb844e9628db51b84eb97f05429626e340b5a76a8de47bfc9",
+    "network_during_preparation_and_compilation": "none",
+    "new_packages": 19,
+    "provenance": "locked signed RPMs plus pinned base; not a source-build attestation",
+    "replaced_base_packages": 4,
+    "rpm_signature_count": 23,
+    "signing_key_file_sha256": "93642aec521a1e5e96dd715f7ae0ec0850ebc9de09a94ce03cae5263f26cc18a",
+    "signing_key_fingerprint": "36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6",
+    "versions_measured": {
+      "binutils": "GNU ld version 2.46.1-1.fc44",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Fedora 1.99.1-2.fc44)",
+      "gcc": "16.2.1",
+      "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Fedora 1.99.1-2.fc44)"
+    }
+  },
+  "commands": [
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/static-toolchain -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/rootfs -v [pinned base, read-only, rootless, network none]",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/phase1-pass2-candidate-c -v",
+    "python3 tools/build-static-fixture --rpm-cache <exact-23-RPM-cache> --output <new-output>",
+    "python3 tools/coreos-inventory --root .",
+    "python3 tools/release-preflight 0.0.3.1 --root .",
+    "bash -n image/build/build-qcow2.sh image/build/inspect-qcow2.sh",
+    "git diff --check"
+  ],
+  "documentation_commit": "enclosing Git commit; source fingerprints bind tested implementation",
+  "earlier_failures": [
+    {
+      "fix_commit": "231b32d049604309e8ac1bcf0e5d3c72e3f3e686",
+      "phase": "config identity",
+      "result": "bare vs prefixed Podman ID; pre-preparation refusal"
+    },
+    {
+      "fix_commit": "14b5433f8ed2604e3db4d104b4e0d5ae2cf8947b",
+      "phase": "RPM trust",
+      "result": "NOKEY before installation; pinned key needed initialization inside builder"
+    },
+    {
+      "phase": "detached preparation",
+      "result": "incomplete evidence during connectivity interruption; no success inferred"
+    },
+    {
+      "fix_commit": "792f6f7dd341039ba643df34b764b7f3fb4f6ea9",
+      "phase": "cleanup source review",
+      "result": "container-name collision caught before compilation"
+    },
+    {
+      "fix_commit": "caa841af9e32fb55adb1e19ca19e81dc5eefc393",
+      "phase": "exact inventory",
+      "result": "first installed closure rejected omitted signing-key record; independent key-only probe measured +1"
+    },
+    {
+      "fix_commit": "393fd4b1fae9a56e75b76ab142b7ec8949d4ba60",
+      "phase": "negative evaluator",
+      "result": "arbitrary nonzero Podman exit insufficient; strengthened witnesses then separately replayed"
+    }
+  ],
+  "limitations": [
+    "Repository metadata is HTTPS/hash-pinned but repo_gpgcheck=0; signed RPM inputs are not signed repo snapshot or source attestation.",
+    "Two reproducible fixture binaries do not prove reproducible OCI builder bytes.",
+    "Binary contains dlopen/dlsym and lookup-related source-unit symbols; nm -u reports __tls_get_addr. Fixed source makes no explicit NSS/plugin call, and fixed smoke passes; generic self-containedness remains unproven.",
+    "Smoke uses original-base libraries/configuration, not empty-root or installed management runtime.",
+    "Installed packaging/manifest integration, dedicated SELinux transition, ancestor/mount guarantees, reset/recovery and A-to-B-to-A remain UNPROVEN.",
+    "Local Cargo parser unavailable; no production OCI/qcow2/KVM run.",
+    "Source-held lock/contract records are review records, not independent signatures or owner acceptance."
+  ],
+  "native_preparation_compilation_source": "caa841af9e32fb55adb1e19ca19e81dc5eefc393",
+  "negative_controls_and_final_test_source": "393fd4b1fae9a56e75b76ab142b7ec8949d4ba60",
+  "real_missing_input_controls": {
+    "builder_reused": true,
+    "cases": [
+      {
+        "cause": "SL_F5_MISSING_RUSTC",
+        "exit": 72,
+        "missing": "/usr/bin/rustc",
+        "status": "EXPECTED_FAILURE"
+      },
+      {
+        "cause": "SL_F5_MISSING_LIBC_STATIC",
+        "exit": 73,
+        "missing": "/usr/lib64/libc.a",
+        "status": "EXPECTED_FAILURE"
+      }
+    ],
+    "command": "Python call negative_script(lock, fixed_missing) -> podman run --rm --pull=never --network=none --cap-drop=all <exact-builder-ID> -> validate_negative_control; driver preserved ignored",
+    "preparation_or_compilation_repeated": false,
+    "status": "PASS"
+  },
+  "recorded_at_utc": "2026-10-29T05:32:01.021751+00:00",
+  "review": {
+    "controller_preparation": "separate Codex review identified negative-evaluator issue; corrected and tested",
+    "independence_limit": "ELF checker/tests review author overlaps original author; draft PR still needs independent engineering review",
+    "lock_inventory": "separate read-only Codex review; no critical findings"
+  },
+  "schema_version": 1,
+  "scope": "F5 isolated development fixture only; no installed CoreOS acceptance",
+  "source_base": "58312d7e704934e18b274d7eb0c5bca8d3992c71",
+  "source_sha256": {
+    "config/coreos-build-contract.json": "da6e776a921ed7bdd6c0dc0cf10b22a8d486ea07a573667178bc10833c3217b4",
+    "config/coreos-source-inventory.json": "54c57e0dc8975bbf362758b5411cf483462acd4f38ac5b411fd7de66971f2325",
+    "config/static-fixture-toolchain.contract.json": "8af3687bd682355c0debacc40586d2c44dcfb58cba7624d917e9f6cff49eaea0",
+    "config/static-fixture-toolchain.json": "8dbd33a40a3b4730ba041a7db9397d183e0fd989c2e25108be47b36a6eee6183",
+    "docs/development/0.0.4-phase1-pass3-installed-nevras.txt": "8c1fdfa9d787355b1dcca8ec65dc838856290ee09f5c0a6afa7bba0afcb249b4",
+    "management-fixture/rootfs-spec.json": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676",
+    "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+    "tests/podman/rootfs/expected-source-identity.json": "a4029aa065df7a50b0bf1e93ff16651376031db2b3e68d892f3bbb47becdfac2",
+    "tests/podman/rootfs/test_rootfs.py": "e96595d2aa8c0f99d6ad2f1ff81f22424885f16c127481c95d7a03abd7127897",
+    "tests/podman/static-toolchain/test_elf.py": "d4d3dbdc2bd8206e2655ed39335653dfe5cb4d2c4043c8261d1f7765b22066b9",
+    "tests/podman/static-toolchain/test_toolchain.py": "11911fbb90999367b39cdcf08bcfbe0a329473bb405a7b56bd6e91fe3e81f82a",
+    "tools/build-management-rootfs": "0f8bd2de258cb7f7211626c8f6e50ed8be3411c1ec9bc8b4cec043fe9700032d",
+    "tools/build-static-fixture": "9a2d033b3bf92493edfc7fd8cfbf0f1882026e3730c02266bc8259fb0e89653b",
+    "tools/static-toolchain/Containerfile": "a6a2c988a807faf10d10bb933efbf189726167cda320547444c5f608e5f6b0a4",
+    "tools/static-toolchain/prepare.py": "10c3d10cd78b88cd5fe9c053df215ea533e9eaa57947dbbe130d4be88ba66888",
+    "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96",
+    "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+  },
+  "tests": {
+    "bash_syntax": "PASS",
+    "existing_candidate_c_harness": {
+      "failed": 0,
+      "passed": 5
+    },
+    "focused_local": {
+      "failed": 0,
+      "passed": 74,
+      "skipped": 0
+    },
+    "focused_original_fedora_base": {
+      "failed": 0,
+      "passed": 74,
+      "skipped": 0
+    },
+    "git_diff_check": "PASS",
+    "historical_boot_suite": "72/73 historical unrelated failure; not rerun or reclassified",
+    "python_compilation": "PASS",
+    "release_preflight": "PASS structural OS0.0.3.1/Cargo0.0.3; actual local cargo parser unavailable",
+    "rootfs_original_fedora_base": {
+      "applicability": "rootfs code/recipe/tests byte-identical to merged P3-1c",
+      "failed": 0,
+      "passed": 76,
+      "skipped": 0
+    },
+    "source_inventory": "PASS; zero differences, accepted baseline unchanged",
+    "tooling": {
+      "failed": 0,
+      "passed": 111
+    }
+  },
+  "transcripts": {
+    "SOURCE_REVISION": {
+      "path": "image/build/output/f5-static-toolchain/SOURCE_REVISION",
+      "sha256": "9fb15e807e626bc380045369dddca76dd24e25aa1ddc5619b42b5ecfda79cc05"
+    },
+    "accounted-build.exit": {
+      "path": "image/build/output/f5-static-toolchain/accounted-build.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "accounted-build.log": {
+      "path": "image/build/output/f5-static-toolchain/accounted-build.log",
+      "sha256": "4565d6ce7cf8bd36bc9ca36e3ba7ace724bd2bf6278ad9e2e5cefe8bd8a49e6d"
+    },
+    "base-nevras.txt": {
+      "path": "image/build/output/f5-static-toolchain/base-nevras.txt",
+      "sha256": "c9dc17f3fffacda161152e3741ba7c9e92b20a5923c5986d248aa4c2b9598204"
+    },
+    "build-result-accounted/builder.iid": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/builder.iid",
+      "sha256": "0950c6a325c5fa018168f064ce5ada43dfed753f5e508c8bc61827b8613ce15c"
+    },
+    "build-result-accounted/compile-1/compile.log": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/compile.log",
+      "sha256": "7d00f236a2b9ada7dab3a63db5fc74000c00f1880d6b2bf97dd7c196ce6f28dd"
+    },
+    "build-result-accounted/compile-1/elf-dynamic.txt": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/elf-dynamic.txt",
+      "sha256": "8f440b11aa34c5145152189d4391ece1272b24d2739a2a33ebcdb30fa0d8d29d"
+    },
+    "build-result-accounted/compile-1/elf-header.txt": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/elf-header.txt",
+      "sha256": "29e9deb8573fa2820ffd3da03d669a9e45282838afd0eaa0fa16bad3994207ad"
+    },
+    "build-result-accounted/compile-1/elf-programs.txt": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/elf-programs.txt",
+      "sha256": "aea7489b8d1f8dd68a32793381594438e12f1492a89a98a18927d50cd1dcc387"
+    },
+    "build-result-accounted/compile-1/static-check.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/static-check.json",
+      "sha256": "e92de0b5269a31a805ecb9bf26df4ab6f32e9b6639eb47eae2acc113e2ac5018"
+    },
+    "build-result-accounted/compile-1/symbols.txt": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/symbols.txt",
+      "sha256": "11aa5a9c6d2d87ec9901fac435f905110825a873b5fc5a27fa2b3296265b2734"
+    },
+    "build-result-accounted/compile-1/undefined.txt": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-1/undefined.txt",
+      "sha256": "f2c6f44c1a15091daeaaf660396e7e59cb488d8899d3ae0163d89cb280f874b9"
+    },
+    "build-result-accounted/compile-2/compile.log": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-2/compile.log",
+      "sha256": "7d00f236a2b9ada7dab3a63db5fc74000c00f1880d6b2bf97dd7c196ce6f28dd"
+    },
+    "build-result-accounted/compile-2/static-check.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/compile-2/static-check.json",
+      "sha256": "e92de0b5269a31a805ecb9bf26df4ab6f32e9b6639eb47eae2acc113e2ac5018"
+    },
+    "build-result-accounted/independent-artifact-identity.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/independent-artifact-identity.json",
+      "sha256": "0753c42296fdcba77246630006b689bdfee63e453b325b4f602438dd42c918b5"
+    },
+    "build-result-accounted/negative-build-controls.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/negative-build-controls.json",
+      "sha256": "95f0803bb48c08f0e6305e0b659fd840f114bdfa0a6f29bcf40bbede4a335df4"
+    },
+    "build-result-accounted/negative-review/libc-static.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/negative-review/libc-static.json",
+      "sha256": "1ecadcf98cc953d45af4b70e164bade5a79cec9eb0c716aa25eb41a5add9ea32"
+    },
+    "build-result-accounted/negative-review/result.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/negative-review/result.json",
+      "sha256": "5717b5e168cf8a54c0ebbee80c9a8e1443fd1cbdac8c5a1ccd93475af5590391"
+    },
+    "build-result-accounted/negative-review/rustc.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/negative-review/rustc.json",
+      "sha256": "75b89f2064d8cc5370b2c2e90d6eeea34b891707c5938f2f59bc9f0eb0c0da8c"
+    },
+    "build-result-accounted/preparation-evidence.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/preparation-evidence.json",
+      "sha256": "76f753086300d96b62cf7415e27d2b54d66b6c575951943a46ffa6a6c4bd7058"
+    },
+    "build-result-accounted/preparation.log": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/preparation.log",
+      "sha256": "6867a67b2fdc20b2250d7c4b12c53d4b22b5d7e9f54c0cf311e17cb92a7fc602"
+    },
+    "build-result-accounted/result.json": {
+      "path": "image/build/output/f5-static-toolchain/build-result-accounted/result.json",
+      "sha256": "e6b293d738ffeaa0008264afe135d461e59958d477975e98abedfda734655f5e"
+    },
+    "candidate-c-reviewed.log": {
+      "path": "image/build/output/f5-static-toolchain/candidate-c-reviewed.log",
+      "sha256": "ca9ac654d613ab9b7860067c72a5c52aca1472e95a98a5028decb103a5f5f2d2"
+    },
+    "focused-local-reviewed.log": {
+      "path": "image/build/output/f5-static-toolchain/focused-local-reviewed.log",
+      "sha256": "e183561c0f977beff26b207a124b3bca0aa5d02e6f738e224a86e514b5b0163f"
+    },
+    "focused-tests.log": {
+      "path": "image/build/output/f5-static-toolchain/focused-tests.log",
+      "sha256": "8ec1f10ab391512bd31e302b589467ccd7450539db8f59de37491ee3015b1c6f"
+    },
+    "inventory-reviewed.txt": {
+      "path": "image/build/output/f5-static-toolchain/inventory-reviewed.txt",
+      "sha256": "7450e0c53694429b4cebe02028a274f4c9ae74197c173f1d2c4105ad93479917"
+    },
+    "key-bootstrap-inventory.json": {
+      "path": "image/build/output/f5-static-toolchain/key-bootstrap-inventory.json",
+      "sha256": "a56b1cc5567d0360a92ada0f409378856aedd8938624720fa75da0c8b3484ef8"
+    },
+    "native-reviewed-tests.log": {
+      "path": "image/build/output/f5-static-toolchain/native-reviewed-tests.log",
+      "sha256": "eb9d41d6a1ab46a5695ea3f76c1945627f7cfd025e4ea54d0b73002b8ae5c914"
+    },
+    "native-source-tests.log": {
+      "path": "image/build/output/f5-static-toolchain/native-source-tests.log",
+      "sha256": "7315744d5d7d2c5bf078b961d67c9b9a5db6687ce78a5265c89cc83e25080fb7"
+    },
+    "negative-review-driver.py": {
+      "path": "image/build/output/f5-static-toolchain/negative-review-driver.py",
+      "sha256": "95bd220d54f97285b0c32f5ed46972864fe8e51fd2c9f62fa3d911bec7fbe0a2"
+    },
+    "offline-exact-transaction-preview.txt": {
+      "path": "image/build/output/f5-static-toolchain/offline-exact-transaction-preview.txt",
+      "sha256": "39a6a92d5bc845e64bc16766e180b2410993a8bfeff75b7fe5831e164f67313b"
+    },
+    "release-preflight-reviewed.txt": {
+      "path": "image/build/output/f5-static-toolchain/release-preflight-reviewed.txt",
+      "sha256": "d0df6b7dde6b05af3e861fa40e007b97576635eca857c44d88d386caba5ecc14"
+    },
+    "repository-snapshot.json": {
+      "path": "image/build/output/f5-static-toolchain/repository-snapshot.json",
+      "sha256": "6d6845eb7980e28d23e03a8a64a559bcc5c2adea25a7c6f4f3bf9b5dd38c685e"
+    },
+    "resolved-closure.json": {
+      "path": "image/build/output/f5-static-toolchain/resolved-closure.json",
+      "sha256": "5a63ee6f530ba977ee12599a59033b55ebd97945a33c4427a9f2c8959f3819f1"
+    },
+    "reviewed-negative.log": {
+      "path": "image/build/output/f5-static-toolchain/reviewed-negative.log",
+      "sha256": "680eff0e032e80aee2e0ac647c72b117c6c5928ae3dc736771e3c4d8c3c6638a"
+    },
+    "rpm-signatures.txt": {
+      "path": "image/build/output/f5-static-toolchain/rpm-signatures.txt",
+      "sha256": "8d17922c1a7ec2bc01cc7b3f503db067fa88ebcd15000c0a025bde2225975c7b"
+    },
+    "tooling-reviewed.log": {
+      "path": "image/build/output/f5-static-toolchain/tooling-reviewed.log",
+      "sha256": "f61fc86d7108914bc52a41b5d78afd97c32db79da55b4c55782449d28b99791a"
+    },
+    "transaction-closure.json": {
+      "path": "image/build/output/f5-static-toolchain/transaction-closure.json",
+      "sha256": "74df350b655aacaecff0b801c8d9f60460bf4c7bf5de88e2c1e936519e8ab482"
+    }
+  }
+}
