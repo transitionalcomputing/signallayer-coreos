@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""Independent, source-only verifier for a pinned offline Candidate C bundle.
+
+This is deliberately not a runtime launch API: no-argument execution fails.
+Only a separately trusted manifest SHA-256 authorizes an offline comparison.
+Installed label, immutable mount and workload identity proof are later gates.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import unicodedata
+
+MAX_MANIFEST = 16 * 1024 * 1024
+MAX_FILES = 10000
+MAX_FILE_BYTES = 64 * 1024 * 1024
+MAX_TREE_BYTES = 256 * 1024 * 1024
+HEX = re.compile(r"[0-9a-f]{64}\Z")
+ENTRY_KEYS = {"path", "type", "uid", "gid", "mode", "xattrs", "selinux", "sha256", "target", "hardlink_to"}
+
+
+class VerificationError(ValueError):
+    """Untrusted, mismatched, unsupported or unstable offline evidence."""
+
+
+def _fail(reason):
+    raise VerificationError(reason)
+
+
+def _canonical(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            _fail("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _path(value, root=False):
+    if not isinstance(value, str) or not value or (value == "." and not root):
+        _fail("invalid relative path")
+    if root and value == ".":
+        return value
+    if (value.startswith("/") or unicodedata.normalize("NFC", value) != value
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)
+            or any(p in ("", ".", "..") for p in value.split("/"))):
+        _fail("noncanonical or escaping path")
+    try:
+        value.encode("utf-8", "strict")
+    except UnicodeError:
+        _fail("invalid UTF-8 path")
+    return value
+
+
+def _digest(value):
+    return isinstance(value, str) and HEX.fullmatch(value) is not None
+
+
+def _validate_manifest(raw):
+    try:
+        data = json.loads(raw, object_pairs_hook=_pairs, parse_constant=lambda _: _fail("nonfinite JSON"))
+    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise VerificationError("malformed manifest") from exc
+    if not isinstance(data, dict) or set(data) != {"schema", "scope", "source", "build_id", "entries", "dynamic_mounts"}:
+        _fail("unexpected manifest schema fields")
+    if type(data["schema"]) is not int or data["schema"] != 1 or data["scope"] != "offline-source-fixture":
+        _fail("unsupported manifest schema or scope")
+    if _canonical(data) != raw:
+        _fail("manifest is not canonical JSON")
+    source = data["source"]
+    if not isinstance(source, dict) or set(source) != {"recipe_sha256", "inputs"} or not _digest(source["recipe_sha256"]):
+        _fail("invalid reviewed source identity")
+    if not isinstance(source["inputs"], list) or not source["inputs"] or len(source["inputs"]) > MAX_FILES:
+        _fail("missing or excessive reviewed source inputs")
+    source_paths = []
+    for item in source["inputs"]:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"} or not _digest(item["sha256"]):
+            _fail("invalid reviewed source input")
+        source_paths.append(_path(item["path"]))
+    if source_paths != sorted(set(source_paths)):
+        _fail("source inputs not sorted and unique")
+    if data["dynamic_mounts"] != []:
+        _fail("offline source bundle cannot authorize dynamic exclusions")
+    entries = data["entries"]
+    if not isinstance(entries, list) or not entries or len(entries) > MAX_FILES:
+        _fail("missing or excessive manifest entries")
+    paths = []
+    by_path = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != ENTRY_KEYS:
+            _fail("unexpected entry fields")
+        path = _path(entry["path"], root=True)
+        paths.append(path)
+        by_path[path] = entry
+        if type(entry["uid"]) is not int or type(entry["gid"]) is not int or entry["uid"] != 0 or entry["gid"] != 0:
+            _fail("manifest ownership must be root:root")
+        mode = entry["mode"]
+        if type(mode) is not int or mode < 0 or mode > 0o7777 or mode & 0o7000:
+            _fail("special or invalid mode")
+        if entry["xattrs"] != {} or entry["selinux"] != "UNPROVEN":
+            _fail("unreviewed xattrs or installed SELinux claim")
+        kind = entry["type"]
+        if kind == "directory":
+            if mode & 0o022 or any(entry[k] is not None for k in ("sha256", "target", "hardlink_to")):
+                _fail("unsafe directory or invalid directory fields")
+        elif kind == "file":
+            if (not _digest(entry["sha256"]) or entry["target"] is not None
+                    or mode & 0o022 or (mode & 0o222 and mode & 0o111)):
+                _fail("unsafe executable or invalid file fields")
+            if entry["hardlink_to"] is not None:
+                _path(entry["hardlink_to"])
+                if entry["hardlink_to"] >= path:
+                    _fail("hardlink must name an earlier canonical file")
+        elif kind == "symlink":
+            target = entry["target"]
+            if (mode != 0o777 or not isinstance(target, str) or not target
+                    or any(entry[k] is not None for k in ("sha256", "hardlink_to"))):
+                _fail("invalid symlink fields")
+            if unicodedata.normalize("NFC", target) != target or any(ord(c) < 32 or ord(c) == 127 for c in target):
+                _fail("invalid symlink target")
+            if target.startswith("/") and (path, target) != ("etc/mtab", "/proc/mounts"):
+                _fail("absolute symlink outside fixed mtab exception")
+        else:
+            _fail("unsupported object type")
+    if paths != sorted(set(paths)) or paths[0] != "." or by_path["."]["type"] != "directory":
+        _fail("manifest entries not canonical, sorted, unique or rooted")
+    for path, entry in by_path.items():
+        if path != ".":
+            parent = path.rsplit("/", 1)[0] if "/" in path else "."
+            if parent not in by_path or by_path[parent]["type"] != "directory":
+                _fail("missing or non-directory ancestor")
+        if entry["hardlink_to"] is not None:
+            original = by_path.get(entry["hardlink_to"])
+            if not original or original["type"] != "file" or original["hardlink_to"] is not None:
+                _fail("invalid hardlink equivalence")
+            if any(entry[k] != original[k] for k in ("uid", "gid", "mode", "sha256", "xattrs", "selinux")):
+                _fail("inconsistent hardlink metadata")
+        if entry["type"] == "symlink" and (path, entry["target"]) != ("etc/mtab", "/proc/mounts"):
+            _resolve_link(path, entry["target"], by_path)
+    identity = {k: data[k] for k in ("source", "entries", "dynamic_mounts")}
+    if not _digest(data["build_id"]) or hashlib.sha256(_canonical(identity)).hexdigest() != data["build_id"]:
+        _fail("manifest build identity mismatch")
+    return data
+
+
+def _resolve_link(path, target, entries):
+    parts = path.split("/")[:-1]
+    pending = target.split("/")
+    links = 0
+    while pending:
+        component = pending.pop(0)
+        if component in ("", "."):
+            continue
+        if component == "..":
+            if not parts:
+                _fail("escaping symlink")
+            parts.pop()
+            continue
+        parts.append(component)
+        current = "/".join(parts)
+        item = entries.get(current)
+        if item is None:
+            _fail("dangling symlink")
+        if item["type"] == "symlink":
+            links += 1
+            if links > 40 or item["target"].startswith("/"):
+                _fail("cyclic or external symlink chain")
+            parts.pop()
+            pending = item["target"].split("/") + pending
+        elif pending and item["type"] != "directory":
+            _fail("symlink traverses non-directory")
+
+
+def _stamp(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_size, info.st_nlink, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _mount_id(fd):
+    try:
+        with open(f"/proc/self/fdinfo/{fd}", "r", encoding="ascii") as handle:
+            matches = [line.split()[1] for line in handle if line.startswith("mnt_id:")]
+        if len(matches) != 1 or not matches[0].isdigit():
+            _fail("cannot establish exact mount identity")
+        return int(matches[0])
+    except OSError as exc:
+        raise VerificationError("Linux fd mount identity unavailable") from exc
+
+
+def _file_digest(fd):
+    digest = hashlib.sha256()
+    total = 0
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_FILE_BYTES:
+            _fail("file exceeds bounded measurement size")
+        digest.update(chunk)
+    return digest.hexdigest(), total
+
+
+def _xattrs(fd=None, parent=None, name=None):
+    if not hasattr(os, "listxattr"):
+        _fail("xattr measurement unavailable")
+    try:
+        if fd is not None:
+            names = os.listxattr(fd)
+        else:
+            names = os.listxattr(f"/proc/self/fd/{parent}/{name}", follow_symlinks=False)
+        if any(name != "security.selinux" for name in names):
+            _fail("unexpected xattr or file capability")
+    except OSError as exc:
+        raise VerificationError("cannot measure complete xattr state") from exc
+    # security.selinux is deliberately UNPROVEN until a reviewed installed policy.
+    return {}
+
+
+def _scan_tree(rootfd):
+    mount_id = _mount_id(rootfd)
+    seen = {}
+    inode_for_path = {}
+    result = []
+    byte_count = 0
+
+    def visit(fd, path):
+        nonlocal byte_count
+        before = os.fstat(fd)
+        if _mount_id(fd) != mount_id:
+            _fail("mount substitution")
+        record(path, "directory", before, _xattrs(fd=fd))
+        names = sorted(os.listdir(fd))
+        for name in names:
+            _path(name)
+            child = name if path == "." else path + "/" + name
+            before_child = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(before_child.st_mode):
+                childfd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                try:
+                    if _stamp(os.fstat(childfd)) != _stamp(before_child):
+                        _fail("directory changed during open")
+                    visit(childfd, child)
+                finally:
+                    os.close(childfd)
+            elif stat.S_ISREG(before_child.st_mode):
+                childfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                try:
+                    if _stamp(os.fstat(childfd)) != _stamp(before_child) or _mount_id(childfd) != mount_id:
+                        _fail("file changed or mount substituted during open")
+                    digest, size = _file_digest(childfd)
+                    byte_count += size
+                    if byte_count > MAX_TREE_BYTES:
+                        _fail("tree exceeds bounded measurement size")
+                    record(child, "file", before_child, _xattrs(fd=childfd), digest=digest)
+                    if _stamp(os.fstat(childfd)) != _stamp(before_child):
+                        _fail("file changed during measurement")
+                finally:
+                    os.close(childfd)
+            elif stat.S_ISLNK(before_child.st_mode):
+                if not hasattr(os, "O_PATH"):
+                    _fail("Linux nofollow symlink identity unavailable")
+                childfd = os.open(name, os.O_PATH | os.O_NOFOLLOW, dir_fd=fd)
+                try:
+                    if _stamp(os.fstat(childfd)) != _stamp(before_child) or _mount_id(childfd) != mount_id:
+                        _fail("symlink changed or mount substituted during open")
+                    target = os.readlink(name, dir_fd=fd)
+                    record(child, "symlink", before_child, _xattrs(parent=fd, name=name), target=target)
+                    if _stamp(os.fstat(childfd)) != _stamp(before_child):
+                        _fail("symlink changed during measurement")
+                finally:
+                    os.close(childfd)
+            else:
+                _fail("unsupported filesystem object")
+            if _stamp(os.stat(name, dir_fd=fd, follow_symlinks=False)) != _stamp(before_child):
+                _fail("path changed during measurement")
+        if sorted(os.listdir(fd)) != names or _stamp(os.fstat(fd)) != _stamp(before):
+            _fail("directory changed during measurement")
+
+    def record(path, kind, info, attrs, digest=None, target=None):
+        if len(result) >= MAX_FILES:
+            _fail("tree exceeds bounded entry count")
+        if info.st_uid != 0 or info.st_gid != 0 or info.st_mode & 0o7000:
+            _fail("unexpected ownership or special permission bits")
+        mode = stat.S_IMODE(info.st_mode)
+        if kind == "directory" and mode & 0o022:
+            _fail("writable directory")
+        if kind == "file" and (mode & 0o022 or mode & 0o222 and mode & 0o111):
+            _fail("writable executable")
+        first = None
+        if kind == "file":
+            key = (info.st_dev, info.st_ino)
+            inode_for_path[path] = key
+            if key in seen:
+                first = seen[key][0]
+                seen[key][1] += 1
+            else:
+                seen[key] = [path, 1, info.st_nlink]
+        result.append({"path": path, "type": kind, "uid": info.st_uid, "gid": info.st_gid,
+                       "mode": mode, "xattrs": attrs, "selinux": "UNPROVEN", "sha256": digest,
+                       "target": target, "hardlink_to": first})
+
+    visit(rootfd, ".")
+    if any(count != expected for _, count, expected in seen.values()):
+        _fail("unmanifested external hardlink alias")
+    first_paths = {}
+    for path in sorted(inode_for_path):
+        first_paths.setdefault(inode_for_path[path], path)
+    for entry in result:
+        if entry["type"] == "file":
+            first = first_paths[inode_for_path[entry["path"]]]
+            entry["hardlink_to"] = None if first == entry["path"] else first
+    return sorted(result, key=lambda entry: entry["path"])
+
+
+def _open_chain(path):
+    absolute = os.path.abspath(os.fspath(path))
+    if os.fspath(path) != absolute:
+        _fail("bundle path must be absolute and normalized")
+    components = absolute.split("/")[1:]
+    if any(component in ("", ".", "..") for component in components):
+        _fail("noncanonical bundle path")
+    fds = [os.open("/", os.O_RDONLY | os.O_DIRECTORY)]
+    links = []
+    try:
+        for component in components:
+            before = os.stat(component, dir_fd=fds[-1], follow_symlinks=False)
+            childfd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fds[-1])
+            fds.append(childfd)
+            if _stamp(before) != _stamp(os.fstat(childfd)):
+                _fail("bundle ancestor changed during open")
+            links.append((fds[-2], component, _stamp(before)))
+        return fds, links
+    except Exception:
+        for fd in reversed(fds):
+            os.close(fd)
+        raise
+
+
+def verify_bundle(bundle, expected_digest):
+    """Compare an offline bundle against an independently supplied manifest hash."""
+    if not _digest(expected_digest):
+        _fail("missing or invalid trusted manifest SHA-256")
+    fds = []
+    try:
+        fds, links = _open_chain(bundle)
+        bundlefd = fds[-1]
+        bundle_before = os.fstat(bundlefd)
+        if bundle_before.st_uid != 0 or bundle_before.st_gid != 0 or stat.S_IMODE(bundle_before.st_mode) & 0o022:
+            _fail("bundle must be root-owned and not group/world writable")
+        if sorted(os.listdir(bundlefd)) != ["manifest.json", "rootfs"]:
+            _fail("unexpected or missing bundle members")
+        manifest_before = os.stat("manifest.json", dir_fd=bundlefd, follow_symlinks=False)
+        if not stat.S_ISREG(manifest_before.st_mode) or manifest_before.st_nlink != 1:
+            _fail("manifest is not an independent regular file")
+        manifestfd = os.open("manifest.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=bundlefd)
+        fds.append(manifestfd)
+        if (_stamp(manifest_before) != _stamp(os.fstat(manifestfd)) or _mount_id(manifestfd) != _mount_id(bundlefd)
+                or manifest_before.st_uid != 0 or manifest_before.st_gid != 0
+                or stat.S_IMODE(manifest_before.st_mode) & 0o7022):
+            _fail("unsafe or substituted manifest")
+        _xattrs(fd=manifestfd)
+        raw = os.read(manifestfd, MAX_MANIFEST + 1)
+        if len(raw) > MAX_MANIFEST or os.read(manifestfd, 1):
+            _fail("manifest exceeds bounded size")
+        if hashlib.sha256(raw).hexdigest() != expected_digest:
+            _fail("trusted manifest digest mismatch")
+        data = _validate_manifest(raw)
+        root_before = os.stat("rootfs", dir_fd=bundlefd, follow_symlinks=False)
+        rootfd = os.open("rootfs", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=bundlefd)
+        fds.append(rootfd)
+        if _stamp(os.fstat(rootfd)) != _stamp(root_before) or _mount_id(rootfd) != _mount_id(bundlefd):
+            _fail("rootfs path or mount substituted")
+        first = _scan_tree(rootfd)
+        if first != data["entries"]:
+            _fail("materialized tree does not match trusted manifest")
+        if _scan_tree(rootfd) != first:
+            _fail("tree changed between independent measurements")
+        if (_stamp(os.fstat(manifestfd)) != _stamp(manifest_before)
+                or _stamp(os.stat("manifest.json", dir_fd=bundlefd, follow_symlinks=False)) != _stamp(manifest_before)
+                or _stamp(os.stat("rootfs", dir_fd=bundlefd, follow_symlinks=False)) != _stamp(root_before)
+                or _stamp(os.fstat(bundlefd)) != _stamp(bundle_before)):
+            _fail("bundle changed during verification")
+        for parentfd, name, original in links:
+            if _stamp(os.stat(name, dir_fd=parentfd, follow_symlinks=False)) != original:
+                _fail("bundle ancestor changed during verification")
+        return {"status": "PASS", "scope": "offline-source-fixture", "selinux": "UNPROVEN",
+                "runtime": "UNPROVEN", "build_id": data["build_id"]}
+    except VerificationError:
+        raise
+    except (OSError, ValueError, TypeError, OverflowError, RecursionError) as exc:
+        raise VerificationError("unreadable, unsupported or unstable offline bundle") from exc
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--offline-bundle", required=True, type=Path)
+    parser.add_argument("--expected-manifest-sha256", required=True)
+    args = parser.parse_args()
+    try:
+        result = verify_bundle(args.offline_bundle, args.expected_manifest_sha256)
+    except VerificationError as exc:
+        print(json.dumps({"status": "FAIL", "error": str(exc)}, sort_keys=True), file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""Source-only Candidate C offline builder; no binary packaging or installation.
+
+The expected oracle is compiled from the reviewed recipe and pinned input bytes,
+never from the output tree or Podman. Linux uid0 in a disposable user namespace
+is sufficient. No production invocation or caller-selected source is provided.
+"""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import stat
+import sys
+import tempfile
+import unicodedata
+
+SOURCE_ROOT = Path(__file__).absolute().parent.parent / 'management-fixture'
+MAX_BYTES = 16 * 1024 * 1024
+
+
+class BuildError(ValueError):
+    pass
+
+
+def canonical(value):
+    return (json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False) + '\n').encode()
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise BuildError('duplicate JSON key')
+        result[key] = value
+    return result
+
+
+def path_ok(value, root=False):
+    if root and value == '.':
+        return
+    if (not isinstance(value, str) or not value or value.startswith('/')
+            or unicodedata.normalize('NFC', value) != value
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)
+            or any(c in ('', '.', '..') for c in value.split('/'))):
+        raise BuildError('noncanonical path')
+
+
+def mount_id(fd):
+    try:
+        for line in Path(f'/proc/self/fdinfo/{fd}').read_text().splitlines():
+            if line.startswith('mnt_id:'):
+                return int(line.split()[1])
+    except OSError as error:
+        raise BuildError('Linux mount identity unavailable') from error
+    raise BuildError('Linux mount identity unavailable')
+
+
+def stamp(st):
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid,
+            st.st_size, st.st_nlink, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def open_directory(path):
+    path = Path(path)
+    if not path.is_absolute():
+        raise BuildError('absolute offline path required')
+    if '..' in path.parts:
+        raise BuildError('parent traversal')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for component in path.parts[1:]:
+            nxt = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def source_snapshot(root):
+    """Read exact pinned source with fd traversal; no symlink/mount fallback."""
+    fd = open_directory(root)
+    result = {}
+    directories = set()
+    mount = mount_id(fd)
+    def walk(directory, prefix):
+        before = stamp(os.fstat(directory))
+        if any(x != "security.selinux" for x in os.listxattr(directory)):
+            raise BuildError("unreviewed source directory xattr")
+        for name in sorted(os.listdir(directory)):
+            relative = prefix + name
+            path_ok(relative)
+            info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+            if info.st_mode & 0o7000:
+                raise BuildError('special source permission bits')
+            if stat.S_ISDIR(info.st_mode):
+                directories.add(relative)
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+                try:
+                    if mount_id(child) != mount or stamp(os.fstat(child)) != stamp(info):
+                        raise BuildError('source mount or inode substitution')
+                    walk(child, relative + '/')
+                    if stamp(os.stat(name, dir_fd=directory, follow_symlinks=False)) != stamp(info):
+                        raise BuildError('source directory changed')
+                finally:
+                    os.close(child)
+            elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                try:
+                    if mount_id(child) != mount or stamp(os.fstat(child)) != stamp(info):
+                        raise BuildError('source substitution')
+                    if any(x != 'security.selinux' for x in os.listxattr(child)):
+                        raise BuildError('unreviewed source xattr')
+                    data = bytearray()
+                    while block := os.read(child, 65536):
+                        data.extend(block)
+                        if len(data) > MAX_BYTES:
+                            raise BuildError('source too large')
+                    if stamp(os.fstat(child)) != stamp(info):
+                        raise BuildError('source changed while reading')
+                    if stamp(os.stat(name, dir_fd=directory, follow_symlinks=False)) != stamp(info):
+                        raise BuildError('source replaced while reading')
+                    result[relative] = bytes(data)
+                finally:
+                    os.close(child)
+            else:
+                raise BuildError('source symlink, alias or unsupported object')
+        if before != stamp(os.fstat(directory)):
+            raise BuildError('source directory changed during read')
+    try:
+        walk(fd, '')
+        expected_dirs = {str(p) for name in result for p in Path(name).parents if str(p) != '.'}
+        if directories != expected_dirs:
+            raise BuildError('unlisted empty source directory')
+        return result
+    finally:
+        os.close(fd)
+
+
+def expected_manifest(snapshot):
+    try:
+        recipe = json.loads(snapshot['rootfs-spec.json'], object_pairs_hook=unique)
+        if set(recipe) != {'schema', 'inputs', 'entries', 'dynamic_mounts'} or type(recipe['schema']) is not int or recipe['schema'] != 1:
+            raise BuildError('unsupported recipe')
+        if recipe['dynamic_mounts'] != []:
+            raise BuildError('offline tree has no measurement exclusions')
+        inputs = recipe['inputs']
+        if not isinstance(inputs, list) or inputs != sorted(inputs, key=lambda x: x['path']):
+            raise BuildError('unordered source inputs')
+        listed = set()
+        for item in inputs:
+            if set(item) != {'path', 'sha256'}:
+                raise BuildError('invalid source input')
+            path_ok(item['path'])
+            name = item['path']
+            if name in listed or name == 'rootfs-spec.json' or digest(snapshot[name]) != item['sha256']:
+                raise BuildError('source digest mismatch or duplicate')
+            listed.add(name)
+        if listed | {'rootfs-spec.json'} != set(snapshot):
+            raise BuildError('unlisted source input')
+        entries = []
+        seen = {}
+        for item in recipe['entries']:
+            if set(item) != {'path','type','mode','source','target','hardlink_to'}:
+                raise BuildError('invalid recipe entry')
+            name, kind, mode = item['path'], item['type'], item['mode']
+            path_ok(name, root=True)
+            if name in seen or type(mode) is not int or not 0 <= mode <= 0o777 or mode & 0o7000:
+                raise BuildError('duplicate path or special mode')
+            if kind not in ('directory', 'file', 'symlink'):
+                raise BuildError('unsupported object')
+            if kind == 'directory' and mode & 0o022 or kind == 'file' and (mode & 0o022 or mode & 0o222 and mode & 0o111):
+                raise BuildError('writable code/directory')
+            entry = dict(path=name, type=kind, uid=0, gid=0, mode=mode, xattrs={}, selinux='UNPROVEN', sha256=None, target=None, hardlink_to=None)
+            if kind == 'file':
+                if item['target'] is not None:
+                    raise BuildError('file target')
+                source = item['source']
+                alias = item['hardlink_to']
+                if alias is not None:
+                    if source is not None or alias not in seen or seen[alias]['type'] != 'file' or seen[alias]['hardlink_to'] is not None or mode != seen[alias]['mode']:
+                        raise BuildError('invalid hardlink group')
+                    entry['hardlink_to'] = alias
+                    entry['sha256'] = seen[alias]['sha256']
+                else:
+                    if source is not None and source not in listed:
+                        raise BuildError('unlisted file source')
+                    entry['sha256'] = digest(snapshot[source] if source is not None else b'')
+            elif kind == 'symlink':
+                if item['source'] is not None or item['hardlink_to'] is not None or mode != 0o777:
+                    raise BuildError('invalid symlink')
+                entry['target'] = item['target']
+                if not isinstance(entry['target'], str) or not entry['target']:
+                    raise BuildError('missing symlink target')
+            elif any(item[x] is not None for x in ('source', 'target', 'hardlink_to')):
+                raise BuildError('directory with payload')
+            seen[name] = entry
+            entries.append(entry)
+        if entries != sorted(entries, key=lambda e: e['path']) or seen.get('.', {}).get('type') != 'directory':
+            raise BuildError('missing root or unsorted entries')
+        for entry in entries:
+            name = entry['path']
+            if name != '.' and seen.get(str(Path(name).parent), {}).get('type') != 'directory':
+                raise BuildError('missing or symlink parent')
+            if entry['type'] == 'symlink':
+                target = entry['target']
+                if name == 'etc/mtab' and target == '/proc/mounts':
+                    continue
+                if target.startswith('/'):
+                    raise BuildError('external symlink')
+                parts = name.split('/')[:-1]
+                for part in target.split('/'):
+                    if part == '..':
+                        if not parts:
+                            raise BuildError('escaping symlink')
+                        parts.pop()
+                    elif part not in ('', '.'):
+                        parts.append(part)
+                resolved = '/'.join(parts) or '.'
+                if seen.get(resolved, {}).get('type') not in ('file', 'directory'):
+                    raise BuildError('dangling or chained symlink')
+        source = {'recipe_sha256':digest(snapshot['rootfs-spec.json']), 'inputs':inputs}
+        identity = dict(source=source, entries=entries, dynamic_mounts=[])
+        return dict(schema=1, scope='offline-source-fixture', build_id=digest(canonical(identity)), **identity)
+    except (KeyError, TypeError, json.JSONDecodeError, AttributeError) as error:
+        raise BuildError('malformed recipe or missing pinned input') from error
+
+
+def publish(stage, output):
+    """Only a complete private sibling bundle becomes visible, never overwrite."""
+    # renameat2 RENAME_NOREPLACE would need a non-stdlib syscall binding. A
+    # root-owned non-writable parent excludes untrusted writers. This offline
+    # builder assumes one trusted root writer, not competing privileged builds.
+    # Output must not exist; a general atomic no-replace protocol is not claimed.
+    if output.exists() or output.is_symlink():
+        raise BuildError('output exists')
+    os.rename(stage, output)
+
+
+def build_bundle(output):
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise BuildError('requires Linux uid0 in a disposable offline user namespace')
+    output = Path(output)
+    if not output.is_absolute() or output.name in ('', '.', '..'):
+        raise BuildError('absolute new offline bundle required')
+    parent_fd = open_directory(output.parent)
+    try:
+        parent = os.fstat(parent_fd)
+        if parent.st_uid != 0 or parent.st_mode & 0o022:
+            raise BuildError('output parent must be root-owned and not group/world writable')
+        source = source_snapshot(SOURCE_ROOT)
+        expected = expected_manifest(source)
+        stage = Path(tempfile.mkdtemp(prefix='.sl-rootfs-', dir=output.parent))
+        stage_stamp = stamp(os.stat(stage))
+        try:
+            tree = stage / 'rootfs'
+            tree.mkdir(mode=0o700)
+            recipe = json.loads(source['rootfs-spec.json'])
+            for item in recipe['entries']:
+                name = item['path']
+                path = tree if name == '.' else tree / name
+                kind = item['type']
+                if kind == 'directory':
+                    if name != '.':
+                        path.mkdir(mode=0o700)
+                elif kind == 'symlink':
+                    path.symlink_to(item['target'])
+                elif item['hardlink_to'] is not None:
+                    os.link(tree / item['hardlink_to'], path, follow_symlinks=False)
+                else:
+                    data = source[item['source']] if item['source'] is not None else b''
+                    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o400)
+                    try:
+                        with os.fdopen(fd, 'wb', closefd=False) as stream:
+                            stream.write(data)
+                            stream.flush()
+                            os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                os.chown(path, 0, 0, follow_symlinks=False)
+            for entry in reversed(expected['entries']):
+                path = tree if entry['path'] == '.' else tree / entry['path']
+                if entry['type'] != 'symlink':
+                    path.chmod(entry['mode'])
+                os.utime(path, ns=(0,0), follow_symlinks=False)
+            blob = canonical(expected)
+            fd = os.open(stage / 'manifest.json', os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o400)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(blob)
+                stream.flush()
+                os.fsync(stream.fileno())
+            # Re-read fixed sources to reject an observed mid-build change.
+            if source_snapshot(SOURCE_ROOT) != source:
+                raise BuildError('source changed during build')
+            if stamp(os.fstat(parent_fd))[:2] != stamp(os.stat(output.parent))[:2] or stage.stat().st_ino != stage_stamp[1]:
+                raise BuildError('output parent/staging substituted')
+            publish(stage, output)
+            os.fsync(parent_fd)
+            return {'status':'PASS', 'scope':'offline-source-fixture', 'build_id':expected['build_id'], 'manifest_sha256':digest(blob), 'binary_packaging':'BLOCKED', 'selinux':'UNPROVEN', 'runtime':'UNPROVEN'}
+        finally:
+            if stage.exists():
+                shutil.rmtree(stage)
+    finally:
+        os.close(parent_fd)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--offline-output', required=True, type=Path)
+    args = parser.parse_args()
+    try:
+        print(json.dumps(build_bundle(args.offline_output), sort_keys=True))
+    except (BuildError, OSError) as error:
+        parser.exit(1, f'rootfs build rejected: {error}\n')
+
+
+if __name__ == '__main__':
+    main()
