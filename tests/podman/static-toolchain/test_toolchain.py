@@ -231,6 +231,19 @@ class OfflineRPMCacheTests(unittest.TestCase):
                 PREP.verify_rpms(self.lock)
 
 
+class ImmutableImageIDTests(unittest.TestCase):
+    def test_bare_podman_image_id_is_canonicalized(self):
+        self.assertEqual(BUILDER.image_id('a'*64),'sha256:'+'a'*64)
+
+    def test_prefixed_podman_image_id_is_preserved(self):
+        self.assertEqual(BUILDER.image_id('sha256:'+'a'*64),'sha256:'+'a'*64)
+
+    def test_invalid_or_floating_image_id_is_rejected(self):
+        for value in (None,'latest','repo:tag','sha256:'+'a'*63,'sha512:'+'a'*64):
+            with self.subTest(value=value), self.assertRaises(BUILDER.BuildError):
+                BUILDER.image_id(value)
+
+
 class StaticBuilderInputTests(unittest.TestCase):
     """Synthetic byte cache only; never RPM parsing, installation or compilation."""
     def setUp(self):

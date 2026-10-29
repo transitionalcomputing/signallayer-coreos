@@ -31,6 +31,13 @@ class BuildError(ValueError):
     pass
 
 
+def image_id(value):
+    """Podman prints config IDs both with and without the sha256 prefix."""
+    if isinstance(value,str) and re.fullmatch(r'(?:sha256:)?[0-9a-f]{64}',value):
+        return value if value.startswith('sha256:') else 'sha256:'+value
+    raise BuildError('invalid immutable image ID')
+
+
 def module(name, path):
     loader = importlib.machinery.SourceFileLoader(name, str(path))
     spec = importlib.util.spec_from_loader(name, loader)
@@ -148,7 +155,7 @@ def build(cache, output):
     if info.get('host',{}).get('security',{}).get('rootless') is not True:
         raise BuildError('rootless Podman is required')
     base = json.loads(run(['podman','image','inspect',lock['base']['reference']]).stdout)[0]
-    if base.get('Id') != lock['base']['pinnedimage_id']:
+    if image_id(base.get('Id')) != lock['base']['pinnedimage_id'] or base.get('Digest') != lock['base']['reference'].split('@')[1]:
         raise BuildError('cached immutable base image identity mismatch')
     # Development-only diagnostic output is retained on failure; never accepted
     # as PASS until every independent check and both compilations finish.
@@ -163,9 +170,7 @@ def build(cache, output):
     result = run(['podman','build','--pull=never','--network=none','--no-cache',
                   '--iidfile',str(output/'builder.iid'),'-f',str(context/'Containerfile'),str(context)],timeout=900,log=output/'preparation.log')
     (output/'preparation.log').write_text(result.stdout+result.stderr)
-    builder = (output/'builder.iid').read_text().strip()
-    if re.fullmatch(r'sha256:[0-9a-f]{64}',builder) is None:
-        raise BuildError('builder is not an immutable image ID')
+    builder = image_id((output/'builder.iid').read_text().strip())
     probe='sl-f5-provenance-'+uuid.uuid4().hex
     try:
         run(['podman','create','--name',probe,'--network=none','--entrypoint','/bin/true',builder])
