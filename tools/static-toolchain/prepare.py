@@ -128,6 +128,9 @@ def validate_lock(lock: dict) -> None:
         raise PreparationError("Fedora44 signing key identity mismatch")
     if lock.get("signing_key_path") != "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-44-primary" or not HEX.fullmatch(lock.get("signing_key_sha256", "")):
         raise PreparationError("missing pinned-base Fedora44 key file identity")
+    key_nevra = 'gpg-pubkey-0:36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6-6786af3b.(none)'
+    if lock.get('signing_key_nevra') != key_nevra or key_nevra not in values:
+        raise PreparationError('expected inventory omits the pinned key bootstrap record')
     versions = lock.get("versions", {})
     if set(versions) != set(COMMANDS) or any(not isinstance(v, str) or not v for v in versions.values()):
         raise PreparationError("all four compiler/tool version strings are required")
@@ -243,6 +246,9 @@ def main() -> None:
     install_output = run(command, timeout=600)
     after = installed_nevras()
     if after != lock["installed_nevras"]:
+        print(json.dumps({'scope':'failed-isolated-closure',
+                          'missing':sorted(set(lock['installed_nevras'])-set(after)),
+                          'unexpected':sorted(set(after)-set(lock['installed_nevras']))}), flush=True)
         raise PreparationError("installed toolchain closure differs from the reviewed exact NEVRA set")
     tool_output = {name: run(argv).splitlines()[0] for name, argv in COMMANDS.items()}
     for name in ("rust", "cargo"):

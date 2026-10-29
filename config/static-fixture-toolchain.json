@@ -167,6 +167,7 @@
     "gnupg2-keyboxd-0:2.4.9-16.fc44.x86_64",
     "gnupg2-verify-0:2.4.9-16.fc44.x86_64",
     "gnutls-0:3.8.13-1.fc44.x86_64",
+    "gpg-pubkey-0:36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6-6786af3b.(none)",
     "gpgme-0:2.0.1-5.fc44.x86_64",
     "grep-0:3.12-3.fc44.x86_64",
     "groff-base-0:1.23.0-12.fc44.x86_64",
@@ -835,6 +836,7 @@
   "schema_version": 1,
   "scope": "development-only-static-toolchain",
   "signing_key_fingerprint": "36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6",
+  "signing_key_nevra": "gpg-pubkey-0:36f612dcf27f7d1a48a835e4dbfcf71c6d9f90a6-6786af3b.(none)",
   "signing_key_path": "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-44-primary",
   "signing_key_sha256": "93642aec521a1e5e96dd715f7ae0ec0850ebc9de09a94ce03cae5263f26cc18a",
   "source": {

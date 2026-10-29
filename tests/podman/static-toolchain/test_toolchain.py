@@ -148,6 +148,14 @@ class ToolchainLockTests(unittest.TestCase):
             PREP.require_rootless_build_namespace()
 
 
+class KeyInventoryAccountingTests(unittest.TestCase):
+    def test_pinned_key_bootstrap_record_is_required_in_expected_inventory(self):
+        lock=json.loads(LOCK_PATH.read_bytes())
+        lock['installed_nevras'].remove(lock['signing_key_nevra'])
+        with self.assertRaisesRegex(PREP.PreparationError,'key bootstrap'):
+            PREP.validate_lock(lock)
+
+
 class OfflineRPMCacheTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
