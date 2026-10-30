@@ -256,6 +256,59 @@ class BinaryInputFixtures(unittest.TestCase):
         self.pin = self.builder.reviewed_artifact(self.snapshot)
         self.output = self.base / "bundle"
 
+    def test_full_build_rejects_unreviewed_same_size_elf(self):
+        # Capture the trusted oracle BEFORE introducing any caller substitution.
+        # This is the fixed private test pin, never the real F5 artifact/golden.
+        expected = self.builder.expected_manifest(self.snapshot, self.pin)
+        expected_bytes = self.builder.canonical(expected)
+        expected_digest = hashlib.sha256(expected_bytes).hexdigest()
+        protected = [self.builder.ARTIFACT_LOCK, self.builder.ARTIFACT_CONTRACT,
+                     self.builder.SOURCE_ROOT / "rootfs-spec.json",
+                     ROOT / "config/static-fixture-toolchain.json",
+                     ROOT / "config/static-fixture-toolchain.contract.json",
+                     ROOT / "tests/podman/rootfs/expected-source-identity.json"]
+        source_before = {path: path.read_bytes() for path in protected}
+        verifier = load_tool("verify-management-rootfs", self.repo)
+
+        # No builder/helper/subprocess mocks: the known-good full path and both
+        # independent verifiers must work in this actual disposable filesystem.
+        good = self.base / "known-good"
+        result = self.builder.build_bundle(good, self.artifact)
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["manifest_sha256"], expected_digest)
+        self.assertEqual(result["build_id"], expected["build_id"])
+        self.assertEqual((good / "manifest.json").read_bytes(), expected_bytes)
+        self.assertEqual(verifier.verify_bundle(good, expected_digest)["status"], "PASS")
+        self.assertEqual((good / "rootfs/usr/bin/sl-management-fixture").read_bytes(), self.payload)
+
+        supplied = bytearray(self.payload)
+        supplied[-1] ^= 0x5A  # Change loadable bytes, not ELF structure or size.
+        supplied = bytes(supplied)
+        self.assertEqual(len(supplied), self.pin["size"])
+        self.assertNotEqual(hashlib.sha256(supplied).hexdigest(), self.pin["sha256"])
+        self.assertEqual(self.elf.parse_elf(supplied)["machine"], "x86_64")
+        unreviewed = self.base / "unreviewed-regular-elf"
+        unreviewed.write_bytes(supplied)
+        unreviewed.chmod(0o555)
+
+        rejection = None
+        try:
+            self.builder.build_bundle(self.output, unreviewed)
+        except self.builder.BuildError as error:
+            rejection = str(error)
+        # This assertion is the full acceptance boundary. A caller-authority
+        # regression must fail here, not through an incidental helper error.
+        self.assertFalse(self.output.exists(),
+                         "full build published an unreviewed same-size valid ELF")
+        self.assert_no_bundle()
+        self.assertIsNotNone(rejection, "full build did not reject caller bytes")
+        self.assertIn("artifact SHA-256 mismatch", rejection)
+        after = self.builder.expected_manifest(self.builder.source_snapshot(self.builder.SOURCE_ROOT))
+        self.assertEqual(self.builder.canonical(after), expected_bytes)
+        self.assertEqual({path: path.read_bytes() for path in protected}, source_before)
+        self.assertEqual((good / "manifest.json").read_bytes(), expected_bytes)
+        self.assertEqual(verifier.verify_bundle(good, expected_digest)["status"], "PASS")
+
     def write_artifact(self, payload):
         self.artifact.chmod(0o600)
         self.artifact.write_bytes(payload)

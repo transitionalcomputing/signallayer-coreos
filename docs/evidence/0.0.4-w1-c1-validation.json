@@ -1,0 +1,622 @@
+{
+  "CoreOS_surface_change": "tests and evidence only; installed none",
+  "acceptance_bypass": {
+    "classification": "Equivalent three-edit caller-authority mutation in isolated source copies; not a production-source defect",
+    "concrete_publication_witness": {
+      "fixture_executed": false,
+      "mutated_manifest_sha256": "b6c3c2df29826a6f86dee83836810556eb8a34f982ca0e6b0ea581fd5222c21c",
+      "mutated_source_sha256": "d777ac0b76dd73b7fb1e79473d75b6bed706a3161ddfbb119cfa1e1c91fac1b7",
+      "original_trusted_verifier_refuses": true,
+      "published_sha256": "d2f56614bcbd3cbf9af6f9321be2429bcdc2348213897f24b1cda8833968fbf2",
+      "reviewed_private_sha256": "8f2d6d1daf245a980108ea6ffb2fc12a629e54f538b519c0267b898417948423",
+      "size": 512,
+      "status": "REPRODUCED",
+      "supplied_sha256": "d2f56614bcbd3cbf9af6f9321be2429bcdc2348213897f24b1cda8833968fbf2",
+      "trusted_manifest_sha256": "1012a3b69255001dcc828d65cee65c011e3170a1df1b55a9fea2fd9fec4d1e36",
+      "trusted_oracle_unchanged": true
+    },
+    "edits": [
+      "after pin = reviewed_artifact(source): pin['sha256'] = digest(Path(artifact_path).read_bytes())",
+      "pin['size'] = Path(artifact_path).stat().st_size",
+      "retain final source_snapshot guard but remove reviewed_artifact(source) != pin comparison"
+    ],
+    "new_full_build_test": {
+      "assertion": "full build published an unreviewed same-size valid ELF",
+      "errors": 0,
+      "failures": 1,
+      "run": 1,
+      "skips": 0,
+      "status": "ASSERTION-DETECTION",
+      "unexpected_successes": 0
+    },
+    "old_120_test_suite": {
+      "errors": 0,
+      "failures": 0,
+      "run": 120,
+      "skips": 0,
+      "status": "PASS-despite-bypass",
+      "unexpected_successes": 0
+    },
+    "retained_guards": [
+      "read_artifact and real independent static checker",
+      "source_snapshot revalidation",
+      "mandatory independent staged-bundle verifier"
+    ]
+  },
+  "environment": {
+    "cached_base_id": "d312275bca51c0a0e28a30b5fe75d8027f540a21713934b84a35f77174e3ef7b",
+    "classification": "Native Linux x86_64; disposable rootless cached-base container, namespace uid0",
+    "container_options": [
+      "--rm",
+      "--pull=never",
+      "--network=none",
+      "--read-only",
+      "--tmpfs /tmp:rw,nodev,nosuid,mode=1777,size=512m",
+      "--user=0:0"
+    ],
+    "fixture_executed": false,
+    "image_built": false
+  },
+  "evidence_reuse": {
+    "F5_rebuilt": false,
+    "historical_records_unchanged": true,
+    "prior_native_record": "docs/evidence/0.0.4-w1-native-validation.json",
+    "prior_native_record_sha256": "0a7ca0a5b39c71abf238c68b10072f3a8897cc620130249b592139739a517c93",
+    "protected_source_files_sha256": {
+      "config/coreos-build-contract.json": "f07b548886cc721f228d3d6ca538b7ac3d9bbd4d32c1fdddb7b4c56a3b19fe12",
+      "config/coreos-source-inventory.json": "54c57e0dc8975bbf362758b5411cf483462acd4f38ac5b411fd7de66971f2325",
+      "config/static-fixture-toolchain.contract.json": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9",
+      "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+      "management-fixture/rootfs-spec.json": "3484698061164d18f3fc6017c8d334704c0544957aba18b02a55ebb1625f5b6c",
+      "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+      "tests/podman/rootfs/expected-source-identity.json": "40eee11374fb43853d4534b7ff1696e0a2d38376161c29cfc9337c11e2b891db",
+      "tests/podman/rootfs/test_rootfs.py": "1ccba28ac20aa603c41cf34adbc5f33150443d2b1989dc722ef48f01233b0f3a",
+      "tools/build-management-rootfs": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
+      "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96",
+      "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+    },
+    "reason": "Builder, independent verifiers, F5 source/lock/contract/checker, recipe, golden and inventory fingerprints are unchanged. C1 adds only synthetic full-build regression and mutation tests; it does not repeat or broaden original native proof.",
+    "reused_results": [
+      "106/106 F5 source regressions",
+      "2/2 real reviewed F5 offline rootfs roundtrips under umasks022/002"
+    ]
+  },
+  "full_build_control": {
+    "coverage": [
+      "trusted private oracle captured before hostile file exists",
+      "known-good full build and independent verifier succeed",
+      "same-size structurally valid ELF with changed loadable byte refused",
+      "no bad accepted output or staging survivor",
+      "private lock/contract/recipe and production lock/contract/golden unchanged",
+      "trusted source-derived manifest identity unchanged"
+    ],
+    "errors": 0,
+    "failures": 0,
+    "run": 1,
+    "skips": 0,
+    "status": "PASS",
+    "unexpected_successes": 0
+  },
+  "limitations": [
+    "Synthetic private 512-byte ELF/lock fixtures; no production repinning or executable invocation",
+    "LOW L1 deferred: ambient TMPDIR for private checker staging must be addressed before non-disposable integration; unchanged and not proven safe here",
+    "Actual Cargo parser remains UNPROVEN in this environment",
+    "No production integration, installed filesystem or SELinux proof, OCI/qcow2 build, KVM, P3-1d, merge, tag or release"
+  ],
+  "mutations": {
+    "blocked": [],
+    "detected": 23,
+    "executed": 23,
+    "method": "Each unmodified control must pass; detections require ordinary assertions and zero errors/skips/unexpected successes",
+    "records": [
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "artifact-digest",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "d4a76e32296208dbd14e841cb14a24881d585bffcc37eb9dd99d880a157af1c8",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "artifact-size",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "398e4c64f387957de6554028b7b26859f41e397e5f80212712990df192f94d2b",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "checker-source-pin",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "7062961828abfd2a48f0bbd26e4ee3a9ff0d8d10a2e2e1f7e7515496e3882eab",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "lock-contract-binding",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "37219deec57fa60dc5bd52ba016214f1191a4b5070530aa448d3fa550b3b35a7",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "source-bindings",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "71722548e44b7b7adbad67ac78d47f55e316a092e7509a642a20a564e4897ce6",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "target-binding",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "09e16ddebc4b5a88c8c955d8e9f1fd647f8801fde2ae0aebbaa8dc98af054d5f",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "reviewed-pin-shape",
+        "mutated": {
+          "errors": 0,
+          "failures": 5,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "7153762dfff61ca03c8493d56dc1d86e3edb8e8b36b0b229cfcc08c4208bc1b0",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "checker-report-identity",
+        "mutated": {
+          "errors": 0,
+          "failures": 5,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "b31720d80cb517e4c7c894f98c92b56a00a8e4458aa6d44611c132a13eafceff",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "checker-reviewed-argument",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "c7fa953982a43bd66dc7ba1b68426acc3d2537f49033b9183e2d75ff4d997951",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "independent-checker-call",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "84520c1d704777b4051f9712f0e0e5301a8116e6f813e0a63ca25181d2d38e19",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "checker-timeout",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "cecb6233624664827ddadfa90d6c7c335b48e85398f69e8c38f53daf87cef182",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "fixed-executable-mode",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "8a532267aa474378027e327eb8039be6e3da7094731d5ffba2f45669cc5ee05f",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "mandatory-executable-entry",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "10d3dc2ec86c03686418869b722993d1022505a1866f23c2f0e2af60ac71c86f",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "input-alias",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "1fc030b520eea2b2c36d97939386cd5db326ee0b844ac0044e9f680ccc89b897",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "input-special-modes",
+        "mutated": {
+          "errors": 0,
+          "failures": 3,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "6f0718af3645074373f070e707fa6ffb4f7656e63bcd92e304d74f1fdd992f19",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "input-parent-mode",
+        "mutated": {
+          "errors": 0,
+          "failures": 2,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "7819f247568da1c147c5b9812fb94382a0daf8c69aa954fe1ba24a0cf981806b",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "input-xattrs",
+        "mutated": {
+          "errors": 0,
+          "failures": 3,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "c5141281377d475cb1f57dfb91d269e2d3585821c5dff87edd6edd4fedf8613b",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "input-fd-mount-binding",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "5cca4474d48685f9aacf85636126b4d0508c45415e6897cbdf432cefe1bf4dd8",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "input-read-revalidation",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "09ecfad5ee32c4505253bf20fd4ee53f87c735e2b6aa55080812601fd5d8a1ac",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "mandatory-artifact-validation",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "3dc5c42bc5353c8d2552a26802213f6713834fe8aea1fd7d6b5cdcfcde9f7b70",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "captured-binary-copy",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "c5ec2639b47c46466a33bbc9cb2445ac8398af1fe6a786ffa45afbc3fa859d95",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "mandatory-staged-verification",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "89ab869cbb164fb687f4096eef9a0ed0e616d887dc941733e3e6a56d1d58dd71",
+        "status": "DETECTED"
+      },
+      {
+        "control": {
+          "errors": 0,
+          "failures": 0,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "gate": "full-build-caller-authority",
+        "mutated": {
+          "errors": 0,
+          "failures": 1,
+          "run": 1,
+          "skips": 0,
+          "unexpected_successes": 0
+        },
+        "mutated_source_sha256": "d777ac0b76dd73b7fb1e79473d75b6bed706a3161ddfbb119cfa1e1c91fac1b7",
+        "status": "DETECTED"
+      }
+    ],
+    "status": "PASS"
+  },
+  "other_checks": {
+    "bash_syntax": "PASS: tools/build-release-oci image/build/build-qcow2.sh",
+    "diff_check": "PASS",
+    "inventory": "PASS: zero differences; accepted inventory/build contract unchanged",
+    "python_compilation": "PASS: two changed test files",
+    "release_preflight": "PASS structural OS0.0.3.1/Cargo0.0.3; actual Cargo parser UNPROVEN because unavailable"
+  },
+  "raw_evidence": {
+    "archive": "image/build/output/w1-c1-validation/native-result.tar",
+    "archive_sha256": "f29a8414830034b31de216e0e3a419dffa7cfcdf75bc92fbcccbc7f80dedbb45",
+    "files_sha256": {
+      "native/evidence-driver.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "native/evidence/C1-control-process.json": "9718a2494100903562ba7d3f107c8c856e6e5d3ae25dd8c33350bf713297423f",
+      "native/evidence/C1-control.json": "f6948d10f3f97813bcdbf413212b8184c1082ca13e71983970e747b82ba2c8c2",
+      "native/evidence/C1-control.log": "dc8a87f42d44302e4c41345d6e8c320b7a33f249c2f5e98637d6cd5bafbf9c7b",
+      "native/evidence/C1-under-bypass-process.json": "b5d793cf75c1c3ed7287abe358605299ac289561d63bdf24dd3b2224661ea2e9",
+      "native/evidence/C1-under-bypass.json": "3ca170ff420f487f835870e09b17457370deaaf075312592a687e6f4f17244ed",
+      "native/evidence/C1-under-bypass.log": "f61101af49eb36f6a7d24e30a99047652999b6cfe4becc6d2a5ed4f9c6a2bd9d",
+      "native/evidence/bypass-witness.json": "3540d6e8bb84e2271f1b00ba7762d67ade00dcde5b72149d4a1a298a43f5a9bb",
+      "native/evidence/mutations-process.json": "c2cb2e92724691914abd5e5d27982e26602796b5731fda7da046e513bc60a92e",
+      "native/evidence/mutations.json": "5dd056867d8cc7cb6a58cf848bbe8b28e8f02352cebbb37a162283b685507290",
+      "native/evidence/mutations.log": "f95cd2ccbe07e1417e52ee90063f6ec26ea6568c80c3991dcc7049e5a1d90b12",
+      "native/evidence/old-suite-under-bypass-process.json": "0f38a1b4f3db2ca363b09e7042f33c89509963bc7025d6b822680015aa17db8a",
+      "native/evidence/old-suite-under-bypass.json": "39e9f1f93dcb0b3816b0ba6920978a30b5e5e48383107cdbf46a2d0afecfd6db",
+      "native/evidence/old-suite-under-bypass.log": "78f1ffcf11f35acd1d77f8e854d4e1d6e057afb4262847258ccf6fe413b79925",
+      "native/evidence/result.json": "63d2ecc5f839cf36ef18ffcb6c56953736132917b9680b5d427209da352000a1",
+      "native/evidence/rootfs-process.json": "8e0404739681acce5223ae266a67a1f87793699a9773206e91f7892c237f5140",
+      "native/evidence/rootfs.json": "95641f39f54cb77c11f4d8bd0ae239f860bc60ebcbd4a02b62c25a9553f8f0d7",
+      "native/evidence/rootfs.log": "7d8c8e0f17f1ab003836cee7012c14a305b58ab57515c2d5bfc37b70d72e1ddd",
+      "native/native-driver.py": "de9986e2ded095682a422bbf7f8f97dc2e833c23498c7aed0349babf2cb37ab6"
+    }
+  },
+  "recorded_date": "2026-10-30",
+  "release_identity": "none",
+  "retention": "Private host workspace and logs retained; ignored CONTINUATION.json records the exact location; no credentials or private infrastructure published",
+  "review_verdict": "GO for focused independent C1 recheck; no merge authorization",
+  "rootfs": {
+    "errors": 0,
+    "failures": 0,
+    "run": 121,
+    "skips": 0,
+    "status": "PASS",
+    "unexpected_successes": 0
+  },
+  "schema": 1,
+  "scope": "W1-C1-test-only-full-build-authority-regression",
+  "status": "PASS",
+  "tested_source": {
+    "base_commit": "4cd46c3a2719d188f5cbf5eb48fbf3826a7b660e",
+    "overlay": "Only the two test files fingerprinted below; no production edits",
+    "source_files_sha256": {
+      "config/static-fixture-toolchain.contract.json": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9",
+      "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+      "tests/podman/rootfs/expected-source-identity.json": "40eee11374fb43853d4534b7ff1696e0a2d38376161c29cfc9337c11e2b891db",
+      "tests/podman/rootfs/mutation_w1.py": "d357c9168149536dc27173b57eb0e602f19118bb19af0347d92cf8e2e3766de6",
+      "tests/podman/rootfs/test_binary_input.py": "b54001b7c680a809295265d603cf17a8421f1f3f5b238daf9121141467538fb4",
+      "tools/build-management-rootfs": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
+      "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96",
+      "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+    }
+  },
+  "tooling": {
+    "classification": "Actual current local suite with real Git history; not a new native111 claim",
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools",
+    "errors": 0,
+    "failures": 0,
+    "run": 111,
+    "skips": 0,
+    "status": "PASS"
+  }
+}

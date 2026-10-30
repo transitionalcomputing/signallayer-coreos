@@ -69,6 +69,9 @@ GATES = [
      "build_bundle", "captured-copy", (), True),
     ("mandatory-staged-verification", "test_rootfs.RootfsFixtures.test_external_verifier_refusal_never_publishes",
      "build_bundle", "staged-call", (), True),
+    ("full-build-caller-authority", LINUX + "test_full_build_rejects_unreviewed_same_size_elf",
+     "build_bundle", "caller-authority",
+     ("pin = reviewed_artifact(source)", "reviewed_artifact(source) != pin"), True),
 ]
 
 
@@ -93,6 +96,30 @@ def mutation(source, gate):
     counts = [0] * max(1, len(fragments))
 
     class Mutator(ast.NodeTransformer):
+        def visit_Assign(self, node):
+            if kind == "caller-authority" and ast.unparse(node) == fragments[0]:
+                counts[0] += 1
+                # Deliberately replace reviewed authority with caller bytes;
+                # both independent verifiers remain present in this mutant.
+                caller_pin = ast.parse(
+                    "pin['sha256'] = digest(Path(artifact_path).read_bytes())\n"
+                    "pin['size'] = Path(artifact_path).stat().st_size\n"
+                ).body
+                return [node, *caller_pin]
+            return self.generic_visit(node)
+
+        def visit_BoolOp(self, node):
+            if kind == "caller-authority" and isinstance(node.op, ast.Or):
+                matches = [value for value in node.values if ast.unparse(value) == fragments[1]]
+                if matches:
+                    remaining = [value for value in node.values if value not in matches]
+                    if (len(matches) != 1 or len(remaining) != 1
+                            or ast.unparse(remaining[0]) != "source_snapshot(SOURCE_ROOT) != source"):
+                        raise ValueError("caller-authority mutation must retain the exact source-snapshot guard")
+                    counts[1] += 1
+                    return remaining[0]
+            return self.generic_visit(node)
+
         def visit_If(self, node):
             if kind == "if" and fragments[0] in ast.unparse(node.test):
                 counts[0] += 1

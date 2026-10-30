@@ -109,6 +109,16 @@ See [W1 findings](0.0.4-w1-offline-rootfs.md),
 Draft PR #48 remains the independent source-review checkpoint; no merge or
 production acceptance is inferred. Harness/environment failures are preserved.
 
+PR #48 C1 correction is test-only: the current native rootfs suite passes
+**121/121** and strict mutations **23/23**. An equivalent caller-authority bypass
+passes the old 120 tests but the new full-build test fails on the explicit
+publication assertion, with zero errors/skips. Current tooling passes **111/111**.
+See [C1 evidence](../evidence/0.0.4-w1-c1-validation.json). Production tooling,
+F5 identity, recipe/golden and prior native evidence are unchanged; the two real
+roundtrips are reused, not rerun. Focused independent C1 recheck is next.
+LOW L1 (`TMPDIR` checker-staging trust) remains deferred before non-disposable
+integration; no hardening or installed acceptance is claimed here.
+
 The existing F5 native result at `a2cd60c85d2ba79640a427cff780431648ffd8d8`
 remains evidence for that build only. W1 synthetic fixtures are not a new native
 artifact or installed acceptance. Exact installed ancestry/SELinux labels,
