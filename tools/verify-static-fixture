@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Bounded independent ELF check for the development-only static fixture.
+
+ELF linkage is not proof about arbitrary glibc NSS/dlopen behavior, execution,
+SELinux labels, installed confinement or KVM. No artifact is executed here.
+"""
+import argparse
+import hashlib
+import json
+import os
+import re
+import stat
+import struct
+import sys
+
+MAX_BYTES = 64 * 1024 * 1024
+MAX_HEADERS = 1024
+HEADER = struct.Struct("<16sHHIQQQIHHHHHH")
+PROGRAM = struct.Struct("<IIQQQQQQ")
+SECTION = struct.Struct("<IIQQQQIIQQ")
+DYNAMIC = struct.Struct("<qQ")
+# NEEDED, SONAME, RPATH, RUNPATH, CONFIG, DEPAUDIT, AUDIT, AUXILIARY, FILTER.
+DEPENDENCY_TAGS = {1, 14, 15, 29, 0x6FFFFEFA, 0x6FFFFEFB, 0x6FFFFEFC,
+                   0x7FFFFFFD, 0x7FFFFFFF}
+
+
+class VerificationError(ValueError):
+    """Unsupported, malformed, changed or dynamically linked artifact."""
+
+
+def require(condition, reason):
+    if not condition:
+        raise VerificationError(reason)
+
+
+def bounded(offset, size, length):
+    return 0 <= offset <= length and 0 <= size <= length - offset
+
+
+def parse_elf(data):
+    require(len(data) >= HEADER.size, "truncated ELF header")
+    (ident, kind, machine, version, entry, phoff, shoff, flags, ehsize,
+     phsize, phnum, shsize, shnum, shstrings) = HEADER.unpack_from(data)
+    require(ident[:4] == b"\x7fELF", "not ELF")
+    require(ident[4:7] == b"\x02\x01\x01", "requires ELF64 little-endian version 1")
+    require(ident[7] in (0, 3) and ident[8] == 0 and ident[9:] == bytes(7),
+            "unsupported ELF ABI or identification padding")
+    require(kind in (2, 3) and machine == 62 and version == 1 and flags == 0,
+            "requires x86_64 ET_EXEC or static PIE ET_DYN")
+    require(ehsize == HEADER.size and phsize == PROGRAM.size,
+            "invalid ELF/program header sizes")
+    require(0 < phnum <= MAX_HEADERS and phoff >= HEADER.size
+            and bounded(phoff, phnum * phsize, len(data)), "invalid program header table")
+    require(shnum <= MAX_HEADERS, "excessive section headers")
+    if shoff or shnum:
+        require(shoff >= HEADER.size and shnum > 0 and shsize == SECTION.size
+                and bounded(shoff, shnum * shsize, len(data))
+                and shstrings < shnum, "invalid section header table")
+        for index in range(shnum):
+            section = SECTION.unpack_from(data, shoff + index * shsize)
+            require(section[1] == 8 or bounded(section[4], section[5], len(data)),
+                    "truncated section contents")
+    else:
+        require(shstrings == 0, "section names without section table")
+
+    loads, dynamics, stacks = [], [], []
+    for index in range(phnum):
+        ptype, pflags, offset, address, _, size, memory, alignment = PROGRAM.unpack_from(
+            data, phoff + index * phsize)
+        require(bounded(offset, size, len(data)), "truncated program segment")
+        require(address + memory <= 1 << 64, "overflowing virtual segment")
+        require(ptype not in (3, 5), "PT_INTERP or obsolete PT_SHLIB is forbidden")
+        if ptype == 1:
+            require(memory >= size and pflags & ~7 == 0, "invalid PT_LOAD")
+            require(not (pflags & 1 and pflags & 2), "writable executable PT_LOAD")
+            require(alignment in (0, 1) or (alignment & (alignment - 1) == 0
+                    and address % alignment == offset % alignment), "invalid PT_LOAD alignment")
+            loads.append((offset, address, size, memory, pflags))
+        elif ptype == 2:
+            dynamics.append((offset, address, size))
+        elif ptype == 0x6474E551:
+            stacks.append(pflags)
+    require(loads, "no loadable segments")
+    require(sum(1 for _, address, size, _, pflags in loads
+                if pflags & 1 and address <= entry < address + size) == 1,
+            "entrypoint is not in exactly one file-backed executable segment")
+    require(len(stacks) == 1 and stacks[0] & 1 == 0,
+            "missing, duplicated or executable GNU_STACK")
+    require(len(dynamics) <= 1, "duplicate PT_DYNAMIC")
+    pie_flags = []
+    for offset, address, size in dynamics:
+        require(size > 0 and size % DYNAMIC.size == 0, "invalid dynamic table length")
+        require(any(start <= offset and offset + size <= start + files
+                    and base + offset - start == address
+                    for start, base, files, _, _ in loads), "unmapped dynamic table")
+        terminated = False
+        for position in range(offset, offset + size, DYNAMIC.size):
+            tag, value = DYNAMIC.unpack_from(data, position)
+            require(not terminated or (tag == 0 and value == 0), "data after dynamic terminator")
+            require(tag not in DEPENDENCY_TAGS, "runtime dependency/search/audit dynamic tag")
+            if tag == 0x6FFFFFFB:
+                pie_flags.append(value)
+            if tag == 0:
+                require(value == 0, "invalid dynamic terminator")
+                terminated = True
+        require(terminated, "unterminated dynamic table")
+    require(kind != 3 or (len(pie_flags) == 1 and pie_flags[0] & 0x08000000),
+            "ET_DYN lacks an unambiguous DF_1_PIE declaration")
+    return {"elf_type": "ET_EXEC" if kind == 2 else "ET_DYN-static-PIE",
+            "machine": "x86_64", "entrypoint": entry, "load_segments": len(loads),
+            "dynamic_segment": bool(dynamics), "pt_interp": False, "dt_needed": []}
+
+
+def verify_elf(path, expected_sha256):
+    require(isinstance(expected_sha256, str)
+            and re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is not None,
+            "expected SHA-256 must be independently pinned lowercase hex")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before = os.fstat(descriptor)
+            require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= MAX_BYTES,
+                    "artifact is not a bounded regular file")
+            require(before.st_mode & 0o7000 == 0, "special permission bits")
+            chunks, remaining = [], before.st_size
+            while remaining:
+                chunk = os.read(descriptor, min(remaining, 1024 * 1024))
+                require(chunk, "artifact truncated while reading")
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            require(not os.read(descriptor, 1), "artifact grew while reading")
+            after = os.fstat(descriptor)
+            require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                     before.st_ctime_ns) == (after.st_dev, after.st_ino, after.st_size,
+                                            after.st_mtime_ns, after.st_ctime_ns),
+                    "artifact changed while reading")
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise VerificationError("artifact cannot be safely read: " + str(exc)) from exc
+    data = b"".join(chunks)
+    digest = hashlib.sha256(data).hexdigest()
+    require(digest == expected_sha256, "artifact SHA-256 mismatch")
+    result = parse_elf(data)
+    result.update({"schema": 1, "status": "PASS", "scope": "development-static-ELF-only",
+                   "sha256": digest, "bytes": len(data),
+                   "binary_selfcontained": "UNPROVEN-general-NSS/dlopen",
+                   "installed_security_and_execution": "UNPROVEN"})
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--artifact", required=True)
+    parser.add_argument("--expected-sha256", required=True)
+    args = parser.parse_args()
+    try:
+        report = verify_elf(args.artifact, args.expected_sha256)
+    except VerificationError as exc:
+        print(json.dumps({"status": "FAIL", "scope": "development-static-ELF-only",
+                          "error": str(exc)}, sort_keys=True))
+        return 1
+    print(json.dumps(report, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

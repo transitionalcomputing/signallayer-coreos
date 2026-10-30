@@ -16,6 +16,8 @@
       "authd/src/service/tests.rs": "bdca8d4a4395701ce76c1a4c2c15044ac418a8e714ad62050e5f4dba17da778f",
       "authd/src/store.rs": "511f0b26b3e9e1b6cd8288bda3da25098a9801d9c13fd1dbc9fe2d4eb2b8c18e",
       "config/security/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "config/static-fixture-toolchain.contract.json": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9",
+      "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
       "config/sysctl/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "config/systemd/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "console/Cargo.toml": "e08110be2e883c440fba7a76db674fb25882b03532486a240250e67b804859d9",

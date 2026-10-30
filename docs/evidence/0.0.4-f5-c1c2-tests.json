@@ -1,0 +1,647 @@
+{
+  "commands": [
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/static-toolchain -v",
+    "python3 tests/podman/static-toolchain/run-mutations.py --output <new-report.json>",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools -v",
+    "git archive --format=tar a2cd60c85d2ba79640a427cff780431648ffd8d8 [source transferred to isolated workspace]",
+    "[pinned original-base rootless read-only network-none container] python3 -m unittest discover -s tests/podman/rootfs -v",
+    "TMPDIR=<dedicated-workspace>/identity-test-tmp PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/identity -v",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/phase1-pass2-candidate-c -v",
+    "python3 tools/build-static-fixture --rpm-cache <preserved-exact-23-RPM-cache> --output <workspace>/full-native",
+    "python3 tools/coreos-inventory --root .",
+    "python3 tools/release-preflight 0.0.3.1 --root .",
+    "bash -n image/build/build-qcow2.sh image/build/inspect-qcow2.sh",
+    "git diff --check"
+  ],
+  "corrected_source_commit": "a2cd60c85d2ba79640a427cff780431648ffd8d8",
+  "earlier_nonpassing_source_test_observations": [
+    {
+      "classification": "test-context/infrastructure",
+      "log": "source-tests.log",
+      "resolution": "complete committed archive used; no maintained source changed",
+      "result": "F5 106/106 and rootfs76/76 PASS; then identity collection error because reduced archive omitted management-lifecycle/identity.py"
+    },
+    {
+      "classification": "container filesystem/SELinux-xattr environment",
+      "log": "source-tests-completion.log",
+      "resolution": "unchanged suite passed69/69 as native unprivileged fixtures in dedicated temporary directory; no security option/policy or host identity change",
+      "result": "identity69:36 succeeded,33errors at os.setxattr EOPNOTSUPP inside readonly container temp filesystem"
+    },
+    {
+      "classification": "expected source-contract refusal before authorized fingerprint update",
+      "log": "tooling-before-fingerprints.log",
+      "resolution": "only2F5 config hashes updated after candidate comparison; final111/111 PASS",
+      "result": "111 tests,10failures with stale F5 fingerprints"
+    }
+  ],
+  "final_documentation_commit": "enclosing Git commit; implementation source exact HEAD above",
+  "finding_status": {
+    "C1": "implemented; one full corrected native PASS against reviewed digest/size",
+    "C2": "implemented; all19 required gates plus8 additional mutants killed with assertion failures",
+    "R1": "deferred; lock location unchanged to avoid scope/path churn",
+    "R2": "corrected; repo metadata hashes recorded provenance, not offline enforcement; one builder/two compiles explicit",
+    "R3": "explicit OCI isolation, anchored signature line, malformed provenance failure, full archive prevalidation; builder image intentionally retained; containers cleaned by owned name"
+  },
+  "mutation_proof": {
+    "baseline_passes": 27,
+    "categories": {
+      "C1-reviewed-binary-oracle": 3,
+      "C2-original-19-execution-gates": 19,
+      "R3-explicit-builder-isolation": 1,
+      "additional-execution-control": 4
+    },
+    "errors": 0,
+    "gates": 27,
+    "gates_and_assertion_failures": [
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "namespace-before-install",
+        "mutation": {
+          "anchor": "require_rootless_build_namespace()",
+          "function": "main",
+          "kind": "replace",
+          "replacement": "pass"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "base-inventory",
+        "mutation": {
+          "anchor": "inventory_digest(before)",
+          "function": "main",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "postinstall-inventory",
+        "mutation": {
+          "anchor": "after != lock[\"installed_nevras\"]",
+          "function": "main",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "measured-rust-version",
+        "mutation": {
+          "anchor": "for name in (\"rust\", \"cargo\"):",
+          "function": "main",
+          "kind": "replace",
+          "replacement": "for name in (\"cargo\",):"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "measured-cargo-version",
+        "mutation": {
+          "anchor": "for name in (\"rust\", \"cargo\"):",
+          "function": "main",
+          "kind": "replace",
+          "replacement": "for name in (\"rust\",):"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "measured-gcc-version",
+        "mutation": {
+          "anchor": "tool_output[\"gcc\"]",
+          "function": "main",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "measured-binutils-version",
+        "mutation": {
+          "anchor": "\"GNU ld\"",
+          "function": "main",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "offline-dnf-arguments",
+        "mutation": {
+          "anchor": "\"--disablerepo=*\"",
+          "function": "main",
+          "kind": "replace",
+          "replacement": "\"--enablerepo=*\""
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "rootless-podman",
+        "mutation": {
+          "anchor": "info.get('host'",
+          "function": "build",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "base-config-id",
+        "mutation": {
+          "anchor": "image_id(base.get('Id')) != lock['base']['pinnedimage_id']",
+          "function": "build",
+          "kind": "replace",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "base-manifest-digest",
+        "mutation": {
+          "anchor": "base.get('Digest') != lock['base']['reference'].split('@')[1]",
+          "function": "build",
+          "kind": "replace",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "provenance-lock",
+        "mutation": {
+          "anchor": "provenance.get('lock_sha256') != hashlib.sha256(lock_bytes).hexdigest()",
+          "function": "validate_preparation",
+          "kind": "replace",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "provenance-inventory",
+        "mutation": {
+          "anchor": "provenance.get('installed_nevras') != lock['installed_nevras']",
+          "function": "validate_preparation",
+          "kind": "replace",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "two-clean-binary-hashes",
+        "mutation": {
+          "anchor": "hashes[0] != hashes[1]",
+          "function": "build",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "smoke-output",
+        "mutation": {
+          "anchor": "runtime.stdout != b'SignalLayer Candidate C fixture\\n'",
+          "function": "build",
+          "kind": "replace",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "smoke-exit",
+        "mutation": {
+          "anchor": "if runtime.returncode or runtime.stdout",
+          "function": "build",
+          "kind": "replace",
+          "replacement": "if 0 or runtime.stdout"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "additional-execution-control",
+        "gate": "smoke-stderr",
+        "mutation": {
+          "anchor": "or runtime.stderr:",
+          "function": "build",
+          "kind": "replace",
+          "replacement": "or False:"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "compile-isolation-argv",
+        "mutation": {
+          "anchor": "'--network=none'",
+          "function": "compile_once",
+          "kind": "replace",
+          "replacement": "'--network=host'"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "archive-member-set",
+        "mutation": {
+          "anchor": "len(members)!=len(expected)",
+          "function": "compile_once",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 2,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C2-original-19-execution-gates",
+        "gate": "elf-checker-execution",
+        "mutation": {
+          "anchor": "elf.verify_elf(binary, lock['artifact']['sha256'])",
+          "function": "verify_compilation",
+          "kind": "replace",
+          "replacement": "{}"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C1-reviewed-binary-oracle",
+        "gate": "reviewed-artifact-size",
+        "mutation": {
+          "anchor": "len(data) != lock['artifact']['size']",
+          "function": "verify_compilation",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C1-reviewed-binary-oracle",
+        "gate": "reviewed-artifact-digest",
+        "mutation": {
+          "anchor": "hashlib.sha256(data).hexdigest() != lock['artifact']['sha256']",
+          "function": "verify_compilation",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "R3-explicit-builder-isolation",
+        "gate": "explicit-oci-build-isolation",
+        "mutation": {
+          "anchor": "'--isolation=oci'",
+          "function": "build",
+          "kind": "replace",
+          "replacement": "'--isolation=chroot'"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "C1-reviewed-binary-oracle",
+        "gate": "reviewed-oracle-substitution",
+        "mutation": {
+          "anchor": "elf.verify_elf(binary, lock['artifact']['sha256'])",
+          "function": "verify_compilation",
+          "kind": "replace",
+          "replacement": "elf.verify_elf(binary, sha(binary))"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "additional-execution-control",
+        "gate": "compile-source-checksum-guard",
+        "mutation": {
+          "anchor": "| sha256sum -c -",
+          "function": "compile_script",
+          "kind": "replace",
+          "replacement": "| cat >/dev/null"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "additional-execution-control",
+        "gate": "compile-static-library-guard",
+        "mutation": {
+          "anchor": "test -f /usr/lib64/libc.a",
+          "function": "compile_script",
+          "kind": "replace",
+          "replacement": "true"
+        },
+        "mutation_assertion_failures": 1,
+        "mutation_errors": 0
+      },
+      {
+        "baseline_tests": 1,
+        "category": "additional-execution-control",
+        "gate": "archive-type-prevalidation",
+        "mutation": {
+          "anchor": "name != 'out' and member.isfile()",
+          "function": "compile_once",
+          "kind": "guard",
+          "replacement": "False"
+        },
+        "mutation_assertion_failures": 3,
+        "mutation_errors": 0
+      }
+    ],
+    "killed": 27,
+    "original_checkout_unchanged": true,
+    "raw_report_path": "image/build/output/f5-c1c2/mutations.json",
+    "raw_report_sha256": "3289e6c9322e86177189566077269032bbc436ae96e409739ffdf5b8a7655aa7",
+    "source_sha256": {
+      "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+      "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+      "tests/podman/static-toolchain/run-mutations.py": "55c1c3d7319fe77b75e0037f42e70092ca26eac0ec79789e16f93e59a3466d66",
+      "tests/podman/static-toolchain/test_execution.py": "b47318a238fc60dd305c8facdfdad2fa17c93462553343e263371f9995fd9266",
+      "tests/podman/static-toolchain/test_preparation_execution.py": "076d50abf3031463d9260a8ba60cee65c5e239fea323ab603f1798106dbad727",
+      "tools/build-static-fixture": "6fc8bb86fe93ea5f501cb24dbd52fbae5f5bfa65f8581686f5de83e841563e69",
+      "tools/static-toolchain/prepare.py": "b427bf5b935c553bf2762d8e0e211995f165ffcc3918ab97b04ad6330d342c35"
+    },
+    "status": "PASS"
+  },
+  "native_full_run": {
+    "artifacts": {
+      "full-native/compile-1/out/sl-management-fixture": {
+        "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+        "size": 15725600
+      },
+      "full-native/compile-2/out/sl-management-fixture": {
+        "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+        "size": 15725600
+      }
+    },
+    "attempts": 1,
+    "builder_config_id": "sha256:7bab05e0dbf6a71aab2b4fcd5185e9ac65f49d1c3a4cea6b15bbd3431c8ea8d2",
+    "builder_manifest_digest": "sha256:5cdc5d63fe4fd83eff55213584cd5206bba65f2fe39f7ac9afa6c85e0c176d91",
+    "complete_result": "docs/evidence/0.0.4-f5-c1c2-native-result.json",
+    "each_reviewed_identity_enforced": {
+      "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+      "size": 15725600
+    },
+    "negative_controls": [
+      {
+        "cause": "SL_F5_MISSING_RUSTC",
+        "exit": 72,
+        "missing": "/usr/bin/rustc",
+        "status": "EXPECTED_FAILURE"
+      },
+      {
+        "cause": "SL_F5_MISSING_LIBC_STATIC",
+        "exit": 73,
+        "missing": "/usr/lib64/libc.a",
+        "status": "EXPECTED_FAILURE"
+      }
+    ],
+    "preparation": {
+      "base_nevras": 543,
+      "exact_RPM_signatures_checked": 23,
+      "fresh": true,
+      "installed_inventory_sha256": "fd9e6a9eac06bccb6f02d6cb7b331859bb39ebd8d7fa422e038e5a72ca9863e3",
+      "installed_nevras": 563,
+      "isolation": "oci",
+      "measured_tools": {
+        "binutils": "GNU ld version 2.46.1-1.fc44",
+        "cargo": "cargo 1.99.1 (5f94df478 2026-08-27) (Fedora 1.99.1-2.fc44)",
+        "gcc": "16.2.1",
+        "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Fedora 1.99.1-2.fc44)"
+      },
+      "network": "none",
+      "no_cache": true,
+      "pull": "never"
+    },
+    "reproducibility_scope": "two separate compilation containers from one freshly prepared builder image; builder-image byte reproducibility unproven",
+    "result_sha256": "3c80b8ea32cc8f25b95a1817e99a455390ad27944345e1f852997cf117624695",
+    "smoke": {
+      "base": "ghcr.io/transitionalcomputing/signallayer-base@sha256:ef8a660e5b1aa24f8b35c43caa57e972f280766c7980440f4490193bf987df2c",
+      "exit": 0,
+      "network": "none",
+      "stdout": "SignalLayer Candidate C fixture\n",
+      "uid": 65532
+    },
+    "source_revision": "a2cd60c85d2ba79640a427cff780431648ffd8d8",
+    "status": "PASS",
+    "workspace": "sl-f5-c1c2-a2cd60c85d2b"
+  },
+  "other_checks": {
+    "bash_syntax": "PASS",
+    "diff_check": "PASS",
+    "inventory_comparison": "PASS; accepted source baseline unchanged",
+    "protected_runtime_surfaces": "byte-identical to reviewed PR head",
+    "python_compilation": "PASS",
+    "release_preflight": "PASS structural identity checks; local Cargo parser unavailable"
+  },
+  "passing_regressions": {
+    "candidate_c_offline_native": 5,
+    "focused_macos": 106,
+    "focused_pinned_fedora_base": 106,
+    "identity_native_unprivileged_fixtures": 69,
+    "rootfs_pinned_fedora_base": 76,
+    "tooling_macos": 111
+  },
+  "recorded_at_utc": "2026-10-29T06:56:49.654186+00:00",
+  "reviewed_head": "20de564535ee77bce7a4be5de56e040c13a32fef",
+  "schema_version": 1,
+  "scope": "PR46 C1/C2 isolated development-only F5 remediation; installed/production proof excluded",
+  "source_sha256": {
+    "config/coreos-build-contract.json": "f4c02850c455e1b6fd40edb568f8db6568ff9dbae0f6192be2b9a323798b708a",
+    "config/coreos-source-inventory.json": "54c57e0dc8975bbf362758b5411cf483462acd4f38ac5b411fd7de66971f2325",
+    "config/static-fixture-toolchain.contract.json": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9",
+    "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+    "docs/development/0.0.4-phase1-pass3-installed-nevras.txt": "8c1fdfa9d787355b1dcca8ec65dc838856290ee09f5c0a6afa7bba0afcb249b4",
+    "management-fixture/rootfs-spec.json": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676",
+    "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+    "tests/podman/rootfs/expected-source-identity.json": "a4029aa065df7a50b0bf1e93ff16651376031db2b3e68d892f3bbb47becdfac2",
+    "tests/podman/static-toolchain/run-mutations.py": "55c1c3d7319fe77b75e0037f42e70092ca26eac0ec79789e16f93e59a3466d66",
+    "tests/podman/static-toolchain/test_elf.py": "d4d3dbdc2bd8206e2655ed39335653dfe5cb4d2c4043c8261d1f7765b22066b9",
+    "tests/podman/static-toolchain/test_execution.py": "b47318a238fc60dd305c8facdfdad2fa17c93462553343e263371f9995fd9266",
+    "tests/podman/static-toolchain/test_preparation_execution.py": "076d50abf3031463d9260a8ba60cee65c5e239fea323ab603f1798106dbad727",
+    "tests/podman/static-toolchain/test_toolchain.py": "c9d332d087e3c19736674e9e24607efdcf5b31d81de5f3de580bda340b17a4b2",
+    "tools/build-static-fixture": "6fc8bb86fe93ea5f501cb24dbd52fbae5f5bfa65f8581686f5de83e841563e69",
+    "tools/static-toolchain/Containerfile": "a6a2c988a807faf10d10bb933efbf189726167cda320547444c5f608e5f6b0a4",
+    "tools/static-toolchain/prepare.py": "b427bf5b935c553bf2762d8e0e211995f165ffcc3918ab97b04ad6330d342c35",
+    "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+  },
+  "transcripts": {
+    "SOURCE_REVISION": {
+      "path": "image/build/output/f5-c1c2/SOURCE_REVISION",
+      "sha256": "9339cc31399ed2142a8b6ed40941888da12f7e23cb47f66b12156ab755d523c7"
+    },
+    "candidate-c-tests.log": {
+      "path": "image/build/output/f5-c1c2/candidate-c-tests.log",
+      "sha256": "763eba91ee9f655926f4b71b4d5cf74e11939a035ef4e871c559c21144dbf01c"
+    },
+    "focused-local.log": {
+      "path": "image/build/output/f5-c1c2/focused-local.log",
+      "sha256": "96e767a6e8b9d9947fb527077cdc15bb7d67e7d2d4092604b976b48210a2e20b"
+    },
+    "full-native.exit": {
+      "path": "image/build/output/f5-c1c2/full-native.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    "full-native.log": {
+      "path": "image/build/output/f5-c1c2/full-native.log",
+      "sha256": "af10649fdc0d0c5487d7a8439efdf43e54fd06d55de49386b25e23a8867fa05d"
+    },
+    "full-native/artifact-identity.json": {
+      "path": "image/build/output/f5-c1c2/full-native/artifact-identity.json",
+      "sha256": "9caf5daa5455e637abaf501caf8219c42947dac60f1f25d0ca295966e1412166"
+    },
+    "full-native/builder.iid": {
+      "path": "image/build/output/f5-c1c2/full-native/builder.iid",
+      "sha256": "5a8c80305446e951e318d0eff1e9718ba50d4fc3f089a4471d409316f717b2bc"
+    },
+    "full-native/compile-1/compile.log": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/compile.log",
+      "sha256": "22b6a74c495bc7b6db0653be89fcbcc4ff8b429278b766b557af664e65be89be"
+    },
+    "full-native/compile-1/elf-dynamic.txt": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/elf-dynamic.txt",
+      "sha256": "8f440b11aa34c5145152189d4391ece1272b24d2739a2a33ebcdb30fa0d8d29d"
+    },
+    "full-native/compile-1/elf-header.txt": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/elf-header.txt",
+      "sha256": "29e9deb8573fa2820ffd3da03d669a9e45282838afd0eaa0fa16bad3994207ad"
+    },
+    "full-native/compile-1/elf-programs.txt": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/elf-programs.txt",
+      "sha256": "aea7489b8d1f8dd68a32793381594438e12f1492a89a98a18927d50cd1dcc387"
+    },
+    "full-native/compile-1/static-check.json": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/static-check.json",
+      "sha256": "e92de0b5269a31a805ecb9bf26df4ab6f32e9b6639eb47eae2acc113e2ac5018"
+    },
+    "full-native/compile-1/symbols.txt": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/symbols.txt",
+      "sha256": "11aa5a9c6d2d87ec9901fac435f905110825a873b5fc5a27fa2b3296265b2734"
+    },
+    "full-native/compile-1/undefined.txt": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-1/undefined.txt",
+      "sha256": "f2c6f44c1a15091daeaaf660396e7e59cb488d8899d3ae0163d89cb280f874b9"
+    },
+    "full-native/compile-2/compile.log": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-2/compile.log",
+      "sha256": "22b6a74c495bc7b6db0653be89fcbcc4ff8b429278b766b557af664e65be89be"
+    },
+    "full-native/compile-2/static-check.json": {
+      "path": "image/build/output/f5-c1c2/full-native/compile-2/static-check.json",
+      "sha256": "e92de0b5269a31a805ecb9bf26df4ab6f32e9b6639eb47eae2acc113e2ac5018"
+    },
+    "full-native/negative-build-controls.json": {
+      "path": "image/build/output/f5-c1c2/full-native/negative-build-controls.json",
+      "sha256": "62317844c2677c9964c85ffe104d922d38fed312f741a1c274bd9eb4a36b4ef1"
+    },
+    "full-native/negative-libc-static.json": {
+      "path": "image/build/output/f5-c1c2/full-native/negative-libc-static.json",
+      "sha256": "1ecadcf98cc953d45af4b70e164bade5a79cec9eb0c716aa25eb41a5add9ea32"
+    },
+    "full-native/negative-rustc.json": {
+      "path": "image/build/output/f5-c1c2/full-native/negative-rustc.json",
+      "sha256": "75b89f2064d8cc5370b2c2e90d6eeea34b891707c5938f2f59bc9f0eb0c0da8c"
+    },
+    "full-native/preparation-evidence.json": {
+      "path": "image/build/output/f5-c1c2/full-native/preparation-evidence.json",
+      "sha256": "8f91b10c357478ab201bd9238f5104e3c2540ad06506281cc34b21be79cc34ba"
+    },
+    "full-native/preparation.log": {
+      "path": "image/build/output/f5-c1c2/full-native/preparation.log",
+      "sha256": "0022a2854bb3fb0e208252ffc10027330c30f75198c4dea615072e73f1337308"
+    },
+    "full-native/result.json": {
+      "path": "image/build/output/f5-c1c2/full-native/result.json",
+      "sha256": "3c80b8ea32cc8f25b95a1817e99a455390ad27944345e1f852997cf117624695"
+    },
+    "identity-unprivileged.log": {
+      "path": "image/build/output/f5-c1c2/identity-unprivileged.log",
+      "sha256": "bd0a47d8c6f007ce6294ef18ec200174112a2d6f43555a66fc431d26402dc551"
+    },
+    "mutations.json": {
+      "path": "image/build/output/f5-c1c2/mutations.json",
+      "sha256": "3289e6c9322e86177189566077269032bbc436ae96e409739ffdf5b8a7655aa7"
+    },
+    "source-tests-completion.log": {
+      "path": "image/build/output/f5-c1c2/source-tests-completion.log",
+      "sha256": "997e7b6db2b4297ac4858f6a7fa75cc92bafe523a8b56690a4072e3c6cc5c9b2"
+    },
+    "source-tests.log": {
+      "path": "image/build/output/f5-c1c2/source-tests.log",
+      "sha256": "71a9c8a0adf636c94358e70bd9b2367568daa290429a2dfb2fb4148183c9f519"
+    },
+    "tooling-before-fingerprints.log": {
+      "path": "image/build/output/f5-c1c2/tooling-before-fingerprints.log",
+      "sha256": "2de8b4ce2f34f0eff07cc85842e9822ef52b0ad0877609572c8cd14a7f43a7ae"
+    },
+    "tooling.log": {
+      "path": "image/build/output/f5-c1c2/tooling.log",
+      "sha256": "3d6612cb96001821b5ed74e1deba42746b4b89dd63ef4a3be48ee1870802250a"
+    }
+  },
+  "unresolved_limits": [
+    "R1 path relocation deferred, not a required gate.",
+    "Prepared builder retained for review; no automatic image pruning.",
+    "Repository metadata is recorded provenance, not enforced snapshot integrity or signed attestation.",
+    "Static-linked fixture success does not prove general NSS/dlopen or empty-root self-containment.",
+    "No installed binary/rootfs, identity or SELinux integration, KVM, production image, release or P3-1d proof.",
+    "Historical unrelated boot72/73 unchanged; not rerun or reclassified."
+  ]
+}

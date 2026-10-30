@@ -1,0 +1,15 @@
+{
+  "inputs_sha256": {
+    "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+    "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+    "tools/build-static-fixture": "6fc8bb86fe93ea5f501cb24dbd52fbae5f5bfa65f8581686f5de83e841563e69",
+    "tools/static-toolchain/Containerfile": "a6a2c988a807faf10d10bb933efbf189726167cda320547444c5f608e5f6b0a4",
+    "tools/static-toolchain/prepare.py": "b427bf5b935c553bf2762d8e0e211995f165ffcc3918ab97b04ad6330d342c35",
+    "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+  },
+  "runtime_inventory_change": false,
+  "schema_version": 1,
+  "scope": "isolated static fixture only; not production CoreOS integration",
+  "source_base": "58312d7e704934e18b274d7eb0c5bca8d3992c71",
+  "status": "unapproved-development-build-contract-candidate"
+}

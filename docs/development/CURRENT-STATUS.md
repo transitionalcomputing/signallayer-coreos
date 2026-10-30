@@ -3,7 +3,7 @@
 **Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b merged; P3-1c rootfs/oracle source implemented for draft review; production runtime integration has not begun.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b/c merged; F5 isolated static fixture toolchain implemented for independent draft review; production runtime integration has not begun.
 
 ## Done
 
@@ -32,6 +32,15 @@
   fixtures and preflight binding are implemented: **69/69** Fedora fixture
   tests and **107/107** tooling tests pass after the NSS review correction. See [results and remaining gates](0.0.4-phase1-pass3-p3-1b.md).
   No account, service or runtime integration is installed; no image was built.
+
+- **P3-1c / F5:** PR #44 merged at `58312d7e704934e18b274d7eb0c5bca8d3992c71`.
+  Under [issue #45](https://github.com/transitionalcomputing/signallayer-coreos/issues/45),
+  a separate locked build-only environment resolves the glibc/static mismatch
+  without changing the original 543-NEVRA base. Two clean fixture compilations
+  are byte-identical; independent ELF checks and a bounded unprivileged smoke
+  on the original base pass. Corrected real missing-input controls pass with
+  exact failure witnesses. This is a development artifact, not installed CoreOS
+  or a runnable production rootfs. See [F5 provenance and limits](0.0.4-f5-static-toolchain.md).
 
 ## PR #42 NSS review checkpoint
 
@@ -84,15 +93,22 @@ are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Next engineering action
 
-Request the changed-lines-only R1 independent recheck on draft PR #44.
-Source tooling remains under issue #43. Rootfs fixtures pass
-**76/76** inside the exact cached Fedora base after the R1 prepublication verifier
-correction and real default-ACL rejection; tooling **111/111** and Candidate C
-harness **5/5** pass. See [P3-1c evidence and limits](0.0.4-phase1-pass3-p3-1c.md).
-Binary packaging is **BLOCKED**: base glibc `2.43-8`, planned static package
-`2.43-9`, no compatible cached metadata/toolchain. Owner review is needed before
-selecting a matching build-only closure or separately pinned isolated stage.
-No package pin, accepted inventory, runtime unit or security policy changed.
+Request the changed-lines-only C1/C2 independent recheck on draft PR #46 before
+authorizing binary/rootfs integration. Corrected source
+`a2cd60c85d2ba79640a427cff780431648ffd8d8` passed one complete fresh native
+builder preparation, two separate compilations from that builder, each checked
+against the reviewed digest/size and independent ELF verifier, native negative
+controls and original-base smoke. Focused tests pass **106/106** on macOS and
+the original Fedora base; rootfs **76/76**, tooling **111/111**, unprivileged
+native identity fixtures **69/69**, and Candidate C harness **5/5** pass.
+Mutation proof kills **27/27**, including all **19** required C2 gates, through
+assertion failures with zero errors. Source-test context/xattr environment
+failures are preserved and qualified in the findings. See
+[the complete result](../evidence/0.0.4-f5-c1c2-native-result.json) and
+[remediation evidence](../evidence/0.0.4-f5-c1c2-tests.json).
+The build-only glibc `2.43-9` closure does not change final-base `2.43-8`.
+Installed binary packaging/manifest integration is still **UNPROVEN**; no
+accepted source inventory, runtime unit or security policy changed.
 Exact installed SELinux labels, immutable mounts, trusted reset, native recovery
 and A→B→A remain UNPROVEN. Do not begin P3-1d automatically. Preserve original
 Candidate C evidence; source PASS is not installed-artifact acceptance.
