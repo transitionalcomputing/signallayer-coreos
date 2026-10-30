@@ -1,6 +1,6 @@
 # SignalLayer CoreOS — current engineering handoff
 
-**Snapshot:** 2026-10-29. Verify against the current repository and evidence before acting.
+**Snapshot:** 2026-10-30. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
 **Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b/c and F5 merged; owner-authorized W1 offline binary/rootfs integration is in source review; production runtime integration has not begun.
@@ -97,11 +97,17 @@ F5 merged through PR #46 at `808bb1e0b2337b1393d1f8746c87456f55fd1f94`
 after independent GO. W1 is explicitly owner-authorized for source-only offline
 packaging, hostile tests, a dedicated branch/push and draft PR. It changes no
 installed surface, F5 artifact/toolchain, base inventory or release identity.
-Portable W1 controls pass 18/18 and mutations detect 13/13, but 102 Linux
-fixtures, 9 native mutation gates and the real-binary offline roundtrip remain
-BLOCKED by development-host SSH timeouts. F5 passes 106/106, tooling 111/111; inventory and
-structural release preflight pass. See [W1 findings and next evidence gate](0.0.4-w1-offline-rootfs.md) and the
-[explicit source identity comparison](../evidence/0.0.4-w1-manifest-comparison.json).
+W1 native evidence at implementation source `c570cd064e8db9bc14bb5e31bfbad427fdc1e2fb`
+now passes: Linux rootfs **120/120**, F5 source tests **106/106**, **22/22**
+strict mutations and **2/2** actual reviewed-binary offline roundtrips. All
+**111 distinct** tooling checks pass (107 host checks plus four historical
+replays with real Git context). Source inventory and structural preflight pass;
+Cargo is unavailable here. No implementation or binary rebuild was needed.
+See [W1 findings](0.0.4-w1-offline-rootfs.md),
+[native evidence](../evidence/0.0.4-w1-native-validation.json), and the
+[explicit identity comparison](../evidence/0.0.4-w1-manifest-comparison.json).
+Draft PR #48 remains the independent source-review checkpoint; no merge or
+production acceptance is inferred. Harness/environment failures are preserved.
 
 The existing F5 native result at `a2cd60c85d2ba79640a427cff780431648ffd8d8`
 remains evidence for that build only. W1 synthetic fixtures are not a new native
