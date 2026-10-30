@@ -1,0 +1,68 @@
+{
+  "baseline": "808bb1e0b2337b1393d1f8746c87456f55fd1f94",
+  "entries_added": [
+    {
+      "gid": 0,
+      "hardlink_to": null,
+      "mode": 365,
+      "path": "usr/bin/sl-management-fixture",
+      "selinux": "UNPROVEN",
+      "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+      "target": null,
+      "type": "file",
+      "uid": 0,
+      "xattrs": {}
+    }
+  ],
+  "entries_changed": [],
+  "entries_removed": [],
+  "method": "Pure source oracle derivation; no tree, binary substitution, execution, or native roundtrip",
+  "new": {
+    "build_id": "b337d0a5f8e7c13bd584735488a9afa9caa1855c8478f1cdf9a0240888852872",
+    "manifest_sha256": "aab21ed687cede0d67093f4fb28b595a983562ea76d833b6b2bea529d036af5a"
+  },
+  "old": {
+    "build_id": "e99edd54d6f803a30338b6036d6f4eb096c28ecf90cf92f8c1bb1d4c1c970e1d",
+    "manifest_sha256": "e5eb96e09cc1cacd3b8690f8c71885a0d6557f84a074d0fe7f695de8e66f41a6"
+  },
+  "reviewed_artifact": {
+    "sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+    "size": 15725600
+  },
+  "schema": 1,
+  "scope": "W1-source-derived-offline-identity-comparison",
+  "source_after": {
+    "inputs": [
+      {
+        "path": "config/static-fixture-toolchain.contract.json",
+        "sha256": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9"
+      },
+      {
+        "path": "config/static-fixture-toolchain.json",
+        "sha256": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e"
+      },
+      {
+        "path": "inputs/message.txt",
+        "sha256": "81c32862e4daf9b5b55319683511aa7c551cc5ffcabcaaa753bca6045055a3c3"
+      },
+      {
+        "path": "src/main.rs",
+        "sha256": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5"
+      }
+    ],
+    "recipe_sha256": "3484698061164d18f3fc6017c8d334704c0544957aba18b02a55ebb1625f5b6c"
+  },
+  "source_before": {
+    "inputs": [
+      {
+        "path": "inputs/message.txt",
+        "sha256": "81c32862e4daf9b5b55319683511aa7c551cc5ffcabcaaa753bca6045055a3c3"
+      },
+      {
+        "path": "src/main.rs",
+        "sha256": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5"
+      }
+    ],
+    "recipe_sha256": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676"
+  }
+}

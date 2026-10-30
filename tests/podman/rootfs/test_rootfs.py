@@ -14,6 +14,7 @@ from pathlib import Path
 import shutil
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -24,13 +25,58 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def load_tool(name):
-    loader = importlib.machinery.SourceFileLoader(name.replace('-', '_'), str(ROOT / 'tools' / name))
+def load_tool(name, root=ROOT):
+    loader = importlib.machinery.SourceFileLoader(name.replace('-', '_'), str(root / 'tools' / name))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     loader.exec_module(module)
     return module
+
+
+def synthetic_elf():
+    """A fixed structural test ELF, never executed or claimed as F5 output."""
+    data = bytearray(512)
+    ident = b'\x7fELF\x02\x01\x01' + bytes(9)
+    struct.pack_into('<16sHHIQQQIHHHHHH', data, 0, ident, 2, 62, 1, 0x400180,
+                     64, 0, 0, 64, 56, 2, 0, 0, 0)
+    struct.pack_into('<IIQQQQQQ', data, 64, 1, 5, 0, 0x400000, 0, 512, 512, 4096)
+    struct.pack_into('<IIQQQQQQ', data, 120, 0x6474E551, 6, 0, 0, 0, 0, 0, 16)
+    return bytes(data)
+
+
+def fixture_checkout(base):
+    """Private test repository; only its copied artifact pin is synthetic.
+
+    Production CLI/path selection and both real verifier processes run unchanged.
+    No production pin override, environment hook, native binary or execution.
+    """
+    repo = base / 'checkout'
+    repo.mkdir(mode=0o700)
+    (repo / 'tools').mkdir()
+    for name in ('build-management-rootfs', 'verify-management-rootfs', 'verify-static-fixture'):
+        shutil.copyfile(ROOT / 'tools' / name, repo / 'tools' / name)
+    shutil.copytree(ROOT / 'management-fixture', repo / 'management-fixture')
+    (repo / 'config').mkdir()
+    original = (ROOT / 'config/static-fixture-toolchain.json').read_bytes()
+    lock = json.loads(original)
+    data = synthetic_elf()
+    # Expected bytes are fixed test source, not learned from a mutable input.
+    lock['artifact'] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data)}
+    lock_bytes = (json.dumps(lock, sort_keys=True) + '\n').encode()
+    (repo / 'config/static-fixture-toolchain.json').write_bytes(lock_bytes)
+    original_contract = (ROOT / 'config/static-fixture-toolchain.contract.json').read_bytes()
+    contract = json.loads(original_contract)
+    contract['inputs_sha256']['config/static-fixture-toolchain.json'] = hashlib.sha256(lock_bytes).hexdigest()
+    (repo / 'config/static-fixture-toolchain.contract.json').write_text(json.dumps(contract, sort_keys=True) + '\n')
+    artifact = base / 'synthetic-fixture'
+    artifact.write_bytes(data)
+    artifact.chmod(0o555)
+    if (ROOT / 'config/static-fixture-toolchain.json').read_bytes() != original:
+        raise AssertionError('production F5 lock changed during isolated fixture setup')
+    if (ROOT / 'config/static-fixture-toolchain.contract.json').read_bytes() != original_contract:
+        raise AssertionError('production F5 contract changed during isolated fixture setup')
+    return repo, artifact
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'requires Linux source fd/mount APIs')
@@ -51,20 +97,26 @@ class SourceOracleFixture(unittest.TestCase):
 class RootfsFixtures(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.builder = load_tool('build-management-rootfs')
         cls.verifier = load_tool('verify-management-rootfs')
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='sl-rootfs-test-')
         self.addCleanup(self.tmp.cleanup)
         self.base = Path(self.tmp.name)
+        self.fixture_root, self.artifact = fixture_checkout(self.base)
+        self.builder = load_tool('build-management-rootfs', self.fixture_root)
+        # Derive the independent fixture oracle before any output exists.
+        expected = self.builder.expected_manifest(self.builder.source_snapshot(self.builder.SOURCE_ROOT))
+        self.source_identity = {'build_id': expected['build_id'],
+                                'manifest_sha256': hashlib.sha256(self.builder.canonical(expected)).hexdigest()}
         self.bundle = self.base / 'bundle'
-        self.builder.build_bundle(self.bundle)
+        self.builder.build_bundle(self.bundle, self.artifact)
         self.rootfs = self.bundle / 'rootfs'
         self.manifest_path = self.bundle / 'manifest.json'
         self.manifest_bytes = self.manifest_path.read_bytes()
         self.manifest = json.loads(self.manifest_bytes)
-        self.digest = hashlib.sha256(self.manifest_bytes).hexdigest()
+        self.digest = self.source_identity['manifest_sha256']
+        self.assertEqual(hashlib.sha256(self.manifest_bytes).hexdigest(), self.digest)
 
     def verify(self, bundle=None, digest=None):
         return self.verifier.verify_bundle(bundle or self.bundle, self.digest if digest is None else digest)
@@ -99,7 +151,7 @@ class RootfsFixtures(unittest.TestCase):
         other = self.base / 'other'
         previous = os.umask(0o002)
         try:
-            self.builder.build_bundle(other)
+            self.builder.build_bundle(other, self.artifact)
         finally:
             os.umask(previous)
         self.assertEqual(self.manifest_bytes, (other / 'manifest.json').read_bytes())
@@ -107,9 +159,19 @@ class RootfsFixtures(unittest.TestCase):
 
     def builder_cli(self, output):
         return subprocess.run(
-            [sys.executable, str(ROOT / 'tools' / 'build-management-rootfs'),
-             '--offline-output', str(output)],
+            [sys.executable, str(self.fixture_root / 'tools' / 'build-management-rootfs'),
+             '--offline-output', str(output), '--fixture-artifact', str(self.artifact)],
             capture_output=True, text=True, timeout=30, check=False)
+
+    def rootfs_verifier_response(self, outcome):
+        real_run = subprocess.run
+        def selective(command, **kwargs):
+            if len(command) > 3 and Path(command[3]) == self.builder.VERIFIER:
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                return outcome
+            return real_run(command, **kwargs)
+        return mock.patch.object(self.builder.subprocess, 'run', side_effect=selective)
 
     def test_clean_parent_cli_publishes_verified_bundle(self):
         parent = self.base / 'clean-parent'
@@ -147,12 +209,14 @@ class RootfsFixtures(unittest.TestCase):
     def test_external_verifier_receives_source_oracle_before_publish(self):
         output = self.base / 'independently-verified'
         real_run, real_publish = subprocess.run, self.builder.publish
-        reviewed = json.loads(Path(__file__).with_name('expected-source-identity.json').read_bytes())
+        reviewed = self.source_identity
         events = []
         def verified(command, **kwargs):
+            if len(command) <= 3 or Path(command[3]) != self.builder.VERIFIER:
+                return real_run(command, **kwargs)
             events.append('verify')
             self.assertEqual(command[:3], [sys.executable, '-I', '-B'])
-            self.assertEqual(Path(command[3]), ROOT / 'tools' / 'verify-management-rootfs')
+            self.assertEqual(Path(command[3]), self.fixture_root / 'tools' / 'verify-management-rootfs')
             self.assertEqual(command[4], '--offline-bundle')
             stage = Path(command[5])
             self.assertEqual(stage.parent, output.parent)
@@ -168,17 +232,17 @@ class RootfsFixtures(unittest.TestCase):
             return real_publish(stage, destination)
         with mock.patch.object(self.builder.subprocess, 'run', side_effect=verified):
             with mock.patch.object(self.builder, 'publish', side_effect=published):
-                self.builder.build_bundle(output)
+                self.builder.build_bundle(output, self.artifact)
         self.assertEqual(events, ['verify', 'publish'])
         self.verify(output)
 
     def test_external_verifier_refusal_never_publishes(self):
         output = self.base / 'verifier-refused'
         refusal = subprocess.CompletedProcess([], 1, stdout='', stderr='injected verifier refusal')
-        with mock.patch.object(self.builder.subprocess, 'run', return_value=refusal):
+        with self.rootfs_verifier_response(refusal):
             with mock.patch.object(self.builder, 'publish') as publish:
                 with self.assertRaises(self.builder.BuildError):
-                    self.builder.build_bundle(output)
+                    self.builder.build_bundle(output, self.artifact)
         publish.assert_not_called()
         self.assertFalse(output.exists())
         self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
@@ -199,10 +263,10 @@ class RootfsFixtures(unittest.TestCase):
             with self.subTest(stdout=stdout, stderr=stderr):
                 output = self.base / 'malformed-verifier'
                 response = subprocess.CompletedProcess([], 0, stdout=stdout, stderr=stderr)
-                with mock.patch.object(self.builder.subprocess, 'run', return_value=response):
+                with self.rootfs_verifier_response(response):
                     with mock.patch.object(self.builder, 'publish') as publish:
                         with self.assertRaises(self.builder.BuildError):
-                            self.builder.build_bundle(output)
+                            self.builder.build_bundle(output, self.artifact)
                 publish.assert_not_called()
                 self.assertFalse(output.exists())
                 self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
@@ -211,10 +275,10 @@ class RootfsFixtures(unittest.TestCase):
         for error in (FileNotFoundError('verifier absent'), subprocess.TimeoutExpired([], 30)):
             with self.subTest(error=type(error).__name__):
                 output = self.base / 'unavailable-verifier'
-                with mock.patch.object(self.builder.subprocess, 'run', side_effect=error):
+                with self.rootfs_verifier_response(error):
                     with mock.patch.object(self.builder, 'publish') as publish:
                         with self.assertRaises(self.builder.BuildError):
-                            self.builder.build_bundle(output)
+                            self.builder.build_bundle(output, self.artifact)
                 publish.assert_not_called()
                 self.assertFalse(output.exists())
                 self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
@@ -461,7 +525,7 @@ class RootfsFixtures(unittest.TestCase):
         output = self.base / 'hostile-output'
         with mock.patch.object(self.builder, 'SOURCE_ROOT', source):
             with self.assertRaises((self.builder.BuildError, OSError)):
-                self.builder.build_bundle(output)
+                self.builder.build_bundle(output, self.artifact)
         self.assertFalse(output.exists())
         self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
 
@@ -555,7 +619,7 @@ class RootfsFixtures(unittest.TestCase):
         output = self.base / 'interrupted'
         with mock.patch.object(self.builder, 'publish', side_effect=InterruptedError('injected interruption')):
             with self.assertRaises(InterruptedError):
-                self.builder.build_bundle(output)
+                self.builder.build_bundle(output, self.artifact)
         self.assertFalse(output.exists())
         self.assertEqual(list(self.base.glob('.sl-rootfs-*')), [])
         self.verify()
@@ -631,7 +695,7 @@ class RootfsFixtures(unittest.TestCase):
     def test_no_partial_publish_when_destination_exists(self):
         before = self.manifest_path.read_bytes()
         with self.assertRaises(Exception):
-            self.builder.build_bundle(self.bundle)
+            self.builder.build_bundle(self.bundle, self.artifact)
         self.assertEqual(self.manifest_path.read_bytes(), before)
         self.verify()
 

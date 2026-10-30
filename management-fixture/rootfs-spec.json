@@ -92,6 +92,14 @@
     {
       "hardlink_to": null,
       "mode": 365,
+      "path": "usr/bin/sl-management-fixture",
+      "source": "@f5-static-fixture",
+      "target": null,
+      "type": "file"
+    },
+    {
+      "hardlink_to": null,
+      "mode": 365,
       "path": "usr/share",
       "source": null,
       "target": null,

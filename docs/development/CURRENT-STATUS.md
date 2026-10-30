@@ -1,9 +1,9 @@
 # SignalLayer CoreOS — current engineering handoff
 
-**Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
+**Snapshot:** 2026-10-29. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b/c merged; F5 isolated static fixture toolchain implemented for independent draft review; production runtime integration has not begun.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b/c and F5 merged; owner-authorized W1 offline binary/rootfs integration is in source review; production runtime integration has not begun.
 
 ## Done
 
@@ -93,25 +93,21 @@ are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Next engineering action
 
-Request the changed-lines-only C1/C2 independent recheck on draft PR #46 before
-authorizing binary/rootfs integration. Corrected source
-`a2cd60c85d2ba79640a427cff780431648ffd8d8` passed one complete fresh native
-builder preparation, two separate compilations from that builder, each checked
-against the reviewed digest/size and independent ELF verifier, native negative
-controls and original-base smoke. Focused tests pass **106/106** on macOS and
-the original Fedora base; rootfs **76/76**, tooling **111/111**, unprivileged
-native identity fixtures **69/69**, and Candidate C harness **5/5** pass.
-Mutation proof kills **27/27**, including all **19** required C2 gates, through
-assertion failures with zero errors. Source-test context/xattr environment
-failures are preserved and qualified in the findings. See
-[the complete result](../evidence/0.0.4-f5-c1c2-native-result.json) and
-[remediation evidence](../evidence/0.0.4-f5-c1c2-tests.json).
-The build-only glibc `2.43-9` closure does not change final-base `2.43-8`.
-Installed binary packaging/manifest integration is still **UNPROVEN**; no
-accepted source inventory, runtime unit or security policy changed.
-Exact installed SELinux labels, immutable mounts, trusted reset, native recovery
-and A→B→A remain UNPROVEN. Do not begin P3-1d automatically. Preserve original
-Candidate C evidence; source PASS is not installed-artifact acceptance.
+F5 merged through PR #46 at `808bb1e0b2337b1393d1f8746c87456f55fd1f94`
+after independent GO. W1 is explicitly owner-authorized for source-only offline
+packaging, hostile tests, a dedicated branch/push and draft PR. It changes no
+installed surface, F5 artifact/toolchain, base inventory or release identity.
+Portable W1 controls pass 18/18 and mutations detect 13/13, but 102 Linux
+fixtures, 9 native mutation gates and the real-binary offline roundtrip remain
+BLOCKED by development-host SSH timeouts. F5 passes 106/106, tooling 111/111; inventory and
+structural release preflight pass. See [W1 findings and next evidence gate](0.0.4-w1-offline-rootfs.md) and the
+[explicit source identity comparison](../evidence/0.0.4-w1-manifest-comparison.json).
+
+The existing F5 native result at `a2cd60c85d2ba79640a427cff780431648ffd8d8`
+remains evidence for that build only. W1 synthetic fixtures are not a new native
+artifact or installed acceptance. Exact installed ancestry/SELinux labels,
+minimal-rootfs execution, immutable runtime mounts, identity compatibility,
+trusted reset, native recovery and A→B→A remain UNPROVEN. Do not begin P3-1d.
 
 ## How to report checkpoints
 

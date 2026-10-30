@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Source-only Candidate C offline builder; no binary packaging or installation.
+"""Source-only Candidate C offline builder for the reviewed fixed F5 executable.
 
 The expected oracle is compiled from the reviewed recipe and pinned input bytes,
 never from the output tree or Podman. Linux uid0 in a disposable user namespace
-is sufficient. No production invocation or caller-selected source is provided.
+is sufficient. No installed invocation or caller-selected executable identity is provided.
 """
 import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import stat
@@ -21,6 +22,12 @@ SOURCE_ROOT = Path(__file__).absolute().parent.parent / 'management-fixture'
 MAX_BYTES = 16 * 1024 * 1024
 VERIFIER = Path(__file__).absolute().with_name("verify-management-rootfs")
 VERIFY_TIMEOUT = 30
+ARTIFACT_LOCK = SOURCE_ROOT.parent / 'config/static-fixture-toolchain.json'
+ARTIFACT_CONTRACT = SOURCE_ROOT.parent / 'config/static-fixture-toolchain.contract.json'
+STATIC_VERIFIER = VERIFIER.with_name('verify-static-fixture')
+ARTIFACT_SOURCE = '@f5-static-fixture'
+ARTIFACT_DESTINATION = 'usr/bin/sl-management-fixture'
+HEX = re.compile(r'[0-9a-f]{64}\Z')
 
 
 class BuildError(ValueError):
@@ -151,7 +158,121 @@ def source_snapshot(root):
         os.close(fd)
 
 
-def expected_manifest(snapshot):
+def regular_snapshot(path, maximum, artifact=False):
+    """Capture one fd-bound file, rejecting observed aliases, mounts and races.
+
+    Offline ancestors may include sticky /tmp. This is not an installed-path
+    authority check; no-follow traversal and revalidation protect this read.
+    """
+    path = Path(path)
+    parent_fd = open_directory(path.parent)
+    try:
+        parent_before = stamp(os.fstat(parent_fd))
+        if artifact and os.fstat(parent_fd).st_mode & 0o022:
+            raise BuildError('artifact parent is group/world writable')
+        info = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise BuildError('input must be a regular file without aliases')
+        if info.st_mode & 0o7000 or not 0 < info.st_size <= maximum:
+            raise BuildError('special mode or unbounded input')
+        if artifact and (info.st_mode & 0o022 or info.st_uid != os.geteuid()):
+            raise BuildError('artifact ownership or writable mode')
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+        try:
+            if stamp(os.fstat(fd)) != stamp(info) or mount_id(fd) != mount_id(parent_fd):
+                raise BuildError('input inode or mount substitution')
+            if any(x != 'security.selinux' for x in os.listxattr(fd)):
+                raise BuildError('unreviewed input xattr/ACL/capability')
+            chunks, size = [], 0
+            while block := os.read(fd, min(65536, maximum + 1 - size)):
+                chunks.append(block)
+                size += len(block)
+                if size > maximum:
+                    raise BuildError('input exceeds bound')
+            if (size != info.st_size or stamp(os.fstat(fd)) != stamp(info)
+                    or stamp(os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)) != stamp(info)):
+                raise BuildError('input changed or replaced while reading')
+        finally:
+            os.close(fd)
+        again = open_directory(path.parent)
+        try:
+            if (stamp(os.fstat(parent_fd)) != parent_before
+                    or stamp(os.fstat(again)) != parent_before
+                    or mount_id(again) != mount_id(parent_fd)):
+                raise BuildError('input parent changed or substituted')
+        finally:
+            os.close(again)
+        return b''.join(chunks)
+    finally:
+        os.close(parent_fd)
+
+
+def reviewed_artifact(snapshot):
+    """The fixed F5 source records authorize bytes; the supplied file never does."""
+    try:
+        lock_bytes = regular_snapshot(ARTIFACT_LOCK, MAX_BYTES)
+        contract_bytes = regular_snapshot(ARTIFACT_CONTRACT, MAX_BYTES)
+        lock = json.loads(lock_bytes, object_pairs_hook=unique)
+        contract = json.loads(contract_bytes, object_pairs_hook=unique)
+        inputs = contract['inputs_sha256']
+        if (contract['schema_version'] != 1 or contract['runtime_inventory_change'] is not False
+                or inputs['config/static-fixture-toolchain.json'] != digest(lock_bytes)
+                or inputs['management-fixture/src/main.rs'] != digest(snapshot['src/main.rs'])
+                or lock['source'] != {'path': 'management-fixture/src/main.rs',
+                                      'sha256': digest(snapshot['src/main.rs'])}
+                or lock['target'] != 'x86_64-unknown-linux-gnu'):
+            raise BuildError('F5 lock/source/target contract mismatch')
+        pin = lock['artifact']
+        if (set(pin) != {'sha256', 'size'} or not isinstance(pin['sha256'], str)
+                or HEX.fullmatch(pin['sha256']) is None or type(pin['size']) is not int
+                or not 0 < pin['size'] <= MAX_BYTES
+                or not isinstance(inputs['tools/verify-static-fixture'], str)
+                or HEX.fullmatch(inputs['tools/verify-static-fixture']) is None):
+            raise BuildError('invalid reviewed F5 artifact pin')
+        return dict(pin, target=lock['target'], source_sha256=lock['source']['sha256'],
+                    lock_sha256=digest(lock_bytes), contract_sha256=digest(contract_bytes),
+                    verifier_sha256=inputs['tools/verify-static-fixture'])
+    except (KeyError, TypeError, json.JSONDecodeError, UnicodeError) as error:
+        raise BuildError('malformed reviewed F5 inputs') from error
+
+
+def read_artifact(path, pin):
+    """Validate and carry captured bytes; never reopen the supplied pathname."""
+    data = regular_snapshot(path, pin['size'], artifact=True)
+    if len(data) != pin['size']:
+        raise BuildError('artifact size mismatch')
+    if digest(data) != pin['sha256']:
+        raise BuildError('artifact SHA-256 mismatch')
+    checker = regular_snapshot(STATIC_VERIFIER, MAX_BYTES)
+    if digest(checker) != pin['verifier_sha256']:
+        raise BuildError('static verifier differs from reviewed F5 contract')
+    # The independent parser receives only the already captured file and its
+    # reviewed hash. Capture its own pinned source too, avoiding a script race.
+    with tempfile.TemporaryDirectory(prefix='sl-w1-elf-') as temporary:
+        private = Path(temporary)
+        capture = private / 'artifact'
+        checker_path = private / 'verify-static-fixture'
+        capture.write_bytes(data)
+        checker_path.write_bytes(checker)
+        capture.chmod(0o400)
+        checker_path.chmod(0o400)
+        try:
+            result = subprocess.run(
+                [sys.executable, '-I', '-B', str(checker_path), '--artifact', str(capture),
+                 '--expected-sha256', pin['sha256']], shell=False, capture_output=True,
+                text=True, encoding='utf-8', errors='strict', timeout=VERIFY_TIMEOUT, check=False)
+            report = json.loads(result.stdout, object_pairs_hook=unique)
+        except (OSError, UnicodeError, ValueError, subprocess.SubprocessError) as error:
+            raise BuildError('independent static ELF verification unavailable or malformed') from error
+        if (result.returncode != 0 or result.stderr or not isinstance(report, dict)
+                or report.get('status') != 'PASS' or report.get('sha256') != pin['sha256']
+                or report.get('bytes') != pin['size'] or report.get('machine') != 'x86_64'
+                or report.get('scope') != 'development-static-ELF-only'):
+            raise BuildError('independent static ELF verification refused')
+    return data
+
+
+def expected_manifest(snapshot, pin=None):
     try:
         recipe = json.loads(snapshot['rootfs-spec.json'], object_pairs_hook=unique)
         if set(recipe) != {'schema', 'inputs', 'entries', 'dynamic_mounts'} or type(recipe['schema']) is not int or recipe['schema'] != 1:
@@ -172,6 +293,7 @@ def expected_manifest(snapshot):
             listed.add(name)
         if listed | {'rootfs-spec.json'} != set(snapshot):
             raise BuildError('unlisted source input')
+        pin = reviewed_artifact(snapshot) if pin is None else pin
         entries = []
         seen = {}
         for item in recipe['entries']:
@@ -197,9 +319,14 @@ def expected_manifest(snapshot):
                     entry['hardlink_to'] = alias
                     entry['sha256'] = seen[alias]['sha256']
                 else:
-                    if source is not None and source not in listed:
-                        raise BuildError('unlisted file source')
-                    entry['sha256'] = digest(snapshot[source] if source is not None else b'')
+                    if source == ARTIFACT_SOURCE:
+                        if name != ARTIFACT_DESTINATION or mode != 0o555:
+                            raise BuildError('reviewed executable destination/mode is fixed')
+                        entry['sha256'] = pin['sha256']
+                    else:
+                        if source is not None and source not in listed:
+                            raise BuildError('unlisted file source')
+                        entry['sha256'] = digest(snapshot[source] if source is not None else b'')
             elif kind == 'symlink':
                 if item['source'] is not None or item['hardlink_to'] is not None or mode != 0o777:
                     raise BuildError('invalid symlink')
@@ -233,7 +360,16 @@ def expected_manifest(snapshot):
                 resolved = '/'.join(parts) or '.'
                 if seen.get(resolved, {}).get('type') not in ('file', 'directory'):
                     raise BuildError('dangling or chained symlink')
-        source = {'recipe_sha256':digest(snapshot['rootfs-spec.json']), 'inputs':inputs}
+        fixture = seen.get(ARTIFACT_DESTINATION)
+        if (fixture is None or fixture['type'] != 'file' or fixture['hardlink_to'] is not None
+                or next(x for x in recipe['entries'] if x['path'] == ARTIFACT_DESTINATION)['source'] != ARTIFACT_SOURCE):
+            raise BuildError('missing fixed reviewed executable')
+        provenance = inputs + [
+            {'path': 'config/static-fixture-toolchain.json', 'sha256': pin['lock_sha256']},
+            {'path': 'config/static-fixture-toolchain.contract.json', 'sha256': pin['contract_sha256']},
+        ]
+        source = {'recipe_sha256': digest(snapshot['rootfs-spec.json']),
+                  'inputs': sorted(provenance, key=lambda x: x['path'])}
         identity = dict(source=source, entries=entries, dynamic_mounts=[])
         return dict(schema=1, scope='offline-source-fixture', build_id=digest(canonical(identity)), **identity)
     except (KeyError, TypeError, json.JSONDecodeError, AttributeError) as error:
@@ -274,7 +410,7 @@ def publish(stage, output):
     os.rename(stage, output)
 
 
-def build_bundle(output):
+def build_bundle(output, artifact_path):
     if sys.platform != 'linux' or os.geteuid() != 0:
         raise BuildError('requires Linux uid0 in a disposable offline user namespace')
     output = Path(output)
@@ -286,10 +422,12 @@ def build_bundle(output):
         if parent.st_uid != 0 or parent.st_mode & 0o022:
             raise BuildError('output parent must be root-owned and not group/world writable')
         source = source_snapshot(SOURCE_ROOT)
-        expected = expected_manifest(source)
+        pin = reviewed_artifact(source)
+        expected = expected_manifest(source, pin)
         # Pin these bytes/digest from the source oracle BEFORE materialization.
         blob = canonical(expected)
         expected_digest = digest(blob)
+        artifact = read_artifact(artifact_path, pin)
         stage = Path(tempfile.mkdtemp(prefix='.sl-rootfs-', dir=output.parent))
         stage_stamp = stamp(os.stat(stage))
         try:
@@ -308,7 +446,8 @@ def build_bundle(output):
                 elif item['hardlink_to'] is not None:
                     os.link(tree / item['hardlink_to'], path, follow_symlinks=False)
                 else:
-                    data = source[item['source']] if item['source'] is not None else b''
+                    data = (artifact if item['source'] == ARTIFACT_SOURCE else
+                            source[item['source']] if item['source'] is not None else b'')
                     fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o400)
                     try:
                         with os.fdopen(fd, 'wb', closefd=False) as stream:
@@ -329,14 +468,14 @@ def build_bundle(output):
                 stream.flush()
                 os.fsync(stream.fileno())
             # Re-read fixed sources to reject an observed mid-build change.
-            if source_snapshot(SOURCE_ROOT) != source:
+            if source_snapshot(SOURCE_ROOT) != source or reviewed_artifact(source) != pin:
                 raise BuildError('source changed during build')
             verify_staged_bundle(stage, expected_digest, expected['build_id'])
             if stamp(os.fstat(parent_fd))[:2] != stamp(os.stat(output.parent))[:2] or stage.stat().st_ino != stage_stamp[1]:
                 raise BuildError('output parent/staging substituted')
             publish(stage, output)
             os.fsync(parent_fd)
-            return {'status':'PASS', 'scope':'offline-source-fixture', 'build_id':expected['build_id'], 'manifest_sha256':expected_digest, 'binary_packaging':'BLOCKED', 'selinux':'UNPROVEN', 'runtime':'UNPROVEN'}
+            return {'status':'PASS', 'scope':'offline-source-fixture', 'build_id':expected['build_id'], 'manifest_sha256':expected_digest, 'binary_packaging':'reviewed-F5-offline-only', 'selinux':'UNPROVEN', 'runtime':'UNPROVEN'}
         finally:
             if stage.exists():
                 shutil.rmtree(stage)
@@ -347,9 +486,10 @@ def build_bundle(output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--offline-output', required=True, type=Path)
+    parser.add_argument('--fixture-artifact', required=True, type=Path)
     args = parser.parse_args()
     try:
-        print(json.dumps(build_bundle(args.offline_output), sort_keys=True))
+        print(json.dumps(build_bundle(args.offline_output, args.fixture_artifact), sort_keys=True))
     except (BuildError, OSError) as error:
         parser.exit(1, f'rootfs build rejected: {error}\n')
 
