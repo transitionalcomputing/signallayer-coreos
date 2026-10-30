@@ -1,9 +1,9 @@
 # SignalLayer CoreOS — current engineering handoff
 
-**Snapshot:** 2026-10-28. Verify against the current repository and evidence before acting.
+**Snapshot:** 2026-10-30. Verify against the current repository and evidence before acting.
 **Governing policy:** [ENGINEERING.md](../../ENGINEERING.md).
 **Roadmap:** [roadmap to 0.1.0](../roadmap/roadmap-to-0.1.0.md).
-**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b/c merged; F5 isolated static fixture toolchain implemented for independent draft review; production runtime integration has not begun.
+**Current milestone:** **0.0.4 — Podman Foundation**, P3-1a/b/c and F5 merged; owner-authorized W1 offline binary/rootfs integration is in source review; production runtime integration has not begun.
 
 ## Done
 
@@ -93,25 +93,37 @@ are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Next engineering action
 
-Request the changed-lines-only C1/C2 independent recheck on draft PR #46 before
-authorizing binary/rootfs integration. Corrected source
-`a2cd60c85d2ba79640a427cff780431648ffd8d8` passed one complete fresh native
-builder preparation, two separate compilations from that builder, each checked
-against the reviewed digest/size and independent ELF verifier, native negative
-controls and original-base smoke. Focused tests pass **106/106** on macOS and
-the original Fedora base; rootfs **76/76**, tooling **111/111**, unprivileged
-native identity fixtures **69/69**, and Candidate C harness **5/5** pass.
-Mutation proof kills **27/27**, including all **19** required C2 gates, through
-assertion failures with zero errors. Source-test context/xattr environment
-failures are preserved and qualified in the findings. See
-[the complete result](../evidence/0.0.4-f5-c1c2-native-result.json) and
-[remediation evidence](../evidence/0.0.4-f5-c1c2-tests.json).
-The build-only glibc `2.43-9` closure does not change final-base `2.43-8`.
-Installed binary packaging/manifest integration is still **UNPROVEN**; no
-accepted source inventory, runtime unit or security policy changed.
-Exact installed SELinux labels, immutable mounts, trusted reset, native recovery
-and A→B→A remain UNPROVEN. Do not begin P3-1d automatically. Preserve original
-Candidate C evidence; source PASS is not installed-artifact acceptance.
+F5 merged through PR #46 at `808bb1e0b2337b1393d1f8746c87456f55fd1f94`
+after independent GO. W1 is explicitly owner-authorized for source-only offline
+packaging, hostile tests, a dedicated branch/push and draft PR. It changes no
+installed surface, F5 artifact/toolchain, base inventory or release identity.
+W1 native evidence at implementation source `c570cd064e8db9bc14bb5e31bfbad427fdc1e2fb`
+now passes: Linux rootfs **120/120**, F5 source tests **106/106**, **22/22**
+strict mutations and **2/2** actual reviewed-binary offline roundtrips. All
+**111 distinct** tooling checks pass (107 host checks plus four historical
+replays with real Git context). Source inventory and structural preflight pass;
+Cargo is unavailable here. No implementation or binary rebuild was needed.
+See [W1 findings](0.0.4-w1-offline-rootfs.md),
+[native evidence](../evidence/0.0.4-w1-native-validation.json), and the
+[explicit identity comparison](../evidence/0.0.4-w1-manifest-comparison.json).
+Draft PR #48 remains the independent source-review checkpoint; no merge or
+production acceptance is inferred. Harness/environment failures are preserved.
+
+PR #48 C1 correction is test-only: the current native rootfs suite passes
+**121/121** and strict mutations **23/23**. An equivalent caller-authority bypass
+passes the old 120 tests but the new full-build test fails on the explicit
+publication assertion, with zero errors/skips. Current tooling passes **111/111**.
+See [C1 evidence](../evidence/0.0.4-w1-c1-validation.json). Production tooling,
+F5 identity, recipe/golden and prior native evidence are unchanged; the two real
+roundtrips are reused, not rerun. Focused independent C1 recheck is next.
+LOW L1 (`TMPDIR` checker-staging trust) remains deferred before non-disposable
+integration; no hardening or installed acceptance is claimed here.
+
+The existing F5 native result at `a2cd60c85d2ba79640a427cff780431648ffd8d8`
+remains evidence for that build only. W1 synthetic fixtures are not a new native
+artifact or installed acceptance. Exact installed ancestry/SELinux labels,
+minimal-rootfs execution, immutable runtime mounts, identity compatibility,
+trusted reset, native recovery and A→B→A remain UNPROVEN. Do not begin P3-1d.
 
 ## How to report checkpoints
 

@@ -1,0 +1,173 @@
+{
+  "F5": {
+    "errors": 0,
+    "execution": "authorized source tests outside restricted sandbox; no supplied ELF execution",
+    "failures": 0,
+    "initial_restricted_attempt": {
+      "failure": "SUID mode bit stripped by restricted execution sandbox before unchanged test assertion",
+      "failures": 1,
+      "passed": 105,
+      "resolution": "Unchanged focused test and then full106 suite PASS with normal disposable-file permissions; no F5 source/test/guard changes",
+      "unchanged_baseline_reproduction": "same failure at unchanged F5 head 4817dcd0c97cd32cede9e7189a0e533fecdd8469"
+    },
+    "passed": 106,
+    "raw_log": "image/build/output/w1-validation/F5.log",
+    "run": 106,
+    "status": "PASS"
+  },
+  "baseline": "808bb1e0b2337b1393d1f8746c87456f55fd1f94",
+  "commands": {
+    "F5": "python3 -m unittest discover -s tests/podman/static-toolchain",
+    "F5_baseline_reproduction": "python3 -m unittest discover -s tests/podman/static-toolchain -k test_special_permission_bits_are_rejected (unchanged 4817dcd checkout)",
+    "bash": "bash -n tools/build-release-oci image/build/build-qcow2.sh",
+    "diff": "git diff --check",
+    "inventory": "python3 tools/coreos-inventory --root . --format json",
+    "mutations": "PYTHONDONTWRITEBYTECODE=1 python3 tests/podman/rootfs/mutation_w1.py --output image/build/output/w1-validation/mutations.json",
+    "preflight": "python3 tools/release-preflight 0.0.3.1 --root .",
+    "python": "compile(source_bytes, filename, exec) for affected/relevant Python tools/tests; no bytecode output",
+    "rootfs": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/podman/rootfs",
+    "tooling": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools"
+  },
+  "installed_surface_change": "none",
+  "inventory": {
+    "accepted_inventory_unchanged": true,
+    "differences": 0,
+    "planned_inventory": "unchanged; not-installed",
+    "status": "PASS"
+  },
+  "limitations": [
+    "Synthetic test ELF and mocked fd-capture controls do not establish native path/materialization or installed security behavior",
+    "9 native mutation gates, all Linux rootfs/F5 reruns and real reviewed-binary offline roundtrip remain pending",
+    "No minimal-rootfs execution/NSS proof, installed ancestry/labels, lifecycle reset, or KVM/A-to-B-to-A evidence introduced",
+    "Future planned fixture Cargo/output descriptor remains unchanged and must be reconciled before installed integration"
+  ],
+  "logs": {
+    "F5.log": "5caea4a6e2e295f9dd57320e1247c7471346b44b7cdf49c5077f369c48c9e8db",
+    "inventory.log": "ea05befd03261dc9dcc46a46adcdd834d6461c23f36f075e22e423c8bd30df91",
+    "mutation.log": "9dfa45810c52c41c9fe496498bfbf6641dd5c4fdc9d5e6502248284b1c1fd40a",
+    "release-preflight.log": "d0df6b7dde6b05af3e861fa40e007b97576635eca857c44d88d386caba5ecc14",
+    "rootfs.log": "c6c356103ec064842402a7da1b579290b58cf977d2ccc288ddf52fe78275567d",
+    "tooling.log": "829512e31c592dd37d87ff3f9509bf9f69c98a38e1db73babe8e5cbd78579580"
+  },
+  "mutations": {
+    "blocked": [
+      {
+        "gate": "input-alias",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_external_hardlink_alias_is_refused"
+      },
+      {
+        "gate": "input-special-modes",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_special_permission_bits_are_refused"
+      },
+      {
+        "gate": "input-parent-mode",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_group_or_world_writable_input_parent_is_refused"
+      },
+      {
+        "gate": "input-xattrs",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_capabilities_acl_and_other_unreviewed_xattrs_are_refused"
+      },
+      {
+        "gate": "input-fd-mount-binding",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_mount_identity_substitution_is_refused"
+      },
+      {
+        "gate": "input-read-revalidation",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_content_change_during_read_is_refused"
+      },
+      {
+        "gate": "mandatory-artifact-validation",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_static_refusal_prevents_bundle_publication"
+      },
+      {
+        "gate": "captured-binary-copy",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_binary_input.BinaryInputFixtures.test_input_path_is_not_reread_after_verified_bytes_are_captured"
+      },
+      {
+        "gate": "mandatory-staged-verification",
+        "reason": "requires genuine Linux uid 0 fd fixtures",
+        "test": "test_rootfs.RootfsFixtures.test_external_verifier_refusal_never_publishes"
+      }
+    ],
+    "detected": 13,
+    "errors": 0,
+    "executed": 13,
+    "passing_controls": 13,
+    "report_sha256": "067ac22f383ed62ab96f68d4edaaae36ae341cf000917b541ea67d42d187c6f0",
+    "status": "BLOCKED"
+  },
+  "native": {
+    "binary_available_locally": false,
+    "reason": "Direct SSH to the existing authorized host timed out, including one retry after owner confirmed VPN",
+    "rebuilt": false,
+    "reviewed_sha256": "deeae34d74b6933d7b3ee88b7780a340a19267cc7eac0bee1320226adee93093",
+    "reviewed_size": 15725600,
+    "roundtrips": 0,
+    "status": "BLOCKED",
+    "substituted": false
+  },
+  "preflight": {
+    "Cargo": "0.0.3",
+    "cargo_consumer": "UNPROVEN; cargo unavailable locally",
+    "planned_OS": "0.0.3.1",
+    "release_identity_changed": false,
+    "status": "PASS-structural"
+  },
+  "release_identity": "none",
+  "review_verdict": "CONDITIONAL GO for independent source-only review; native gates BLOCKED",
+  "rootfs": {
+    "classification": "portable synthetic controls; Linux fd/materialization skipped",
+    "errors": 0,
+    "failures": 0,
+    "passed": 18,
+    "run": 120,
+    "skipped": 102
+  },
+  "schema": 1,
+  "scope": "W1-source-only-offline-binary-rootfs-integration",
+  "source_context": "Baseline plus explicitly fingerprinted W1 working tree; no new build or native candidate",
+  "source_files_sha256": {
+    "config/coreos-build-contract.json": "f07b548886cc721f228d3d6ca538b7ac3d9bbd4d32c1fdddb7b4c56a3b19fe12",
+    "config/coreos-source-inventory.json": "54c57e0dc8975bbf362758b5411cf483462acd4f38ac5b411fd7de66971f2325",
+    "config/static-fixture-toolchain.contract.json": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9",
+    "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+    "management-fixture/rootfs-spec.json": "3484698061164d18f3fc6017c8d334704c0544957aba18b02a55ebb1625f5b6c",
+    "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+    "tests/podman/rootfs/expected-source-identity.json": "40eee11374fb43853d4534b7ff1696e0a2d38376161c29cfc9337c11e2b891db",
+    "tests/podman/rootfs/mutation_w1.py": "a44c67f4dfa114f9133f1bc0a92f4f0830a7986158a2e7067293f7bf3eb6803a",
+    "tests/podman/rootfs/test_binary_input.py": "0d2a7f523e0d22a45b6c77057f2db0c891a145e1272ea6d52b7826aff61a811d",
+    "tests/podman/rootfs/test_rootfs.py": "1ccba28ac20aa603c41cf34adbc5f33150443d2b1989dc722ef48f01233b0f3a",
+    "tools/build-management-rootfs": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
+    "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96",
+    "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+  },
+  "static": {
+    "bash": "PASS",
+    "diff_check": "PASS",
+    "python": "PASS"
+  },
+  "status": "PARTIAL",
+  "tooling": {
+    "errors": 0,
+    "failures": 0,
+    "run": 111,
+    "status": "PASS"
+  },
+  "unchanged_baseline_files": {
+    "Containerfile": "dc3ecd35612328093ffaa656e41e7eb9baf15c0da073be06ae358b376baae479",
+    "config/coreos-source-inventory.json": "54c57e0dc8975bbf362758b5411cf483462acd4f38ac5b411fd7de66971f2325",
+    "config/static-fixture-toolchain.contract.json": "506391150103f44321c4d324d31548e0e610b66b774ca7ca8c65f457ecfabec9",
+    "config/static-fixture-toolchain.json": "d7b2a081490f7babd2eb56eac139c8ce38e95ae6d1b780693749e71e0a125b2e",
+    "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
+    "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96",
+    "tools/verify-static-fixture": "0206cf34d058e09b9c57a093da2c708fa16ea8f1e107c6e4969320ce13f19df8"
+  }
+}

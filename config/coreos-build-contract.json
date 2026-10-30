@@ -75,7 +75,7 @@
       "image/platform/sl-update.service": "2a59ebf66e4b0321dda360745e2969286ce8667746747d20e198337237403e82",
       "image/platform/udisks2-polkit.conf": "7798a6fe37e70c0e442b0ff84813662d5285624aaf3b4dc275c0e3542dfe0172",
       "management-fixture/inputs/message.txt": "81c32862e4daf9b5b55319683511aa7c551cc5ffcabcaaa753bca6045055a3c3",
-      "management-fixture/rootfs-spec.json": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676",
+      "management-fixture/rootfs-spec.json": "3484698061164d18f3fc6017c8d334704c0544957aba18b02a55ebb1625f5b6c",
       "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
       "management-lifecycle/README.md": "c7161131d09e1f53002d72b4e1cb2db43b57ac5c676c1800cb07d711c606095b",
       "management-lifecycle/identity.py": "235c04c75d0951449032dd8d56ab67dca5e077892180ee6356430223c253f71f",
@@ -111,7 +111,7 @@
       "remoted/static/index.html": "23870de1cfa928a21fe5d3e65a100562c2d2e248385c0541be758d074bd8f978",
       "sessiond/Cargo.toml": "71eda11f86adcc4780b163500db43ef82be0edfc849b39300131fc6288b9d0b1",
       "sessiond/src/main.rs": "0f93579106527c7129dc6d12cab39f4efe87e8c4dffdb968aac6257bddfcadc7",
-      "tools/build-management-rootfs": "0f8bd2de258cb7f7211626c8f6e50ed8be3411c1ec9bc8b4cec043fe9700032d",
+      "tools/build-management-rootfs": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
       "tools/coreos-inventory": "3026ec3ece08557a71fd0b09e5d567900a3002273d1850a8f65d09da7d992194",
       "tools/release-preflight": "c51e8e9b1d2e224eb2757ea26d996804d176b343900025a446228deff8d3f346",
       "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96"
@@ -618,7 +618,7 @@
       },
       "management-fixture/rootfs-spec.json": {
         "executable": false,
-        "sha256": "972cf8507b1b12676eb678207b67f3dcd7a29a050ed5bed9a07c8cf9477e2676",
+        "sha256": "3484698061164d18f3fc6017c8d334704c0544957aba18b02a55ebb1625f5b6c",
         "state": "file"
       },
       "management-fixture/src": {
@@ -644,7 +644,7 @@
       },
       "tools/build-management-rootfs": {
         "executable": true,
-        "sha256": "0f8bd2de258cb7f7211626c8f6e50ed8be3411c1ec9bc8b4cec043fe9700032d",
+        "sha256": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
         "state": "file"
       },
       "tools/install-management-masks": {
@@ -776,7 +776,7 @@
       }
     ]
   },
-  "recorded_from": "fea70df88d2b72a9af0e9d06035e98f9c9c37e63",
+  "recorded_from": "808bb1e0b2337b1393d1f8746c87456f55fd1f94",
   "schema_version": 1,
   "scope": "exact Containerfile instructions, COPY provenance, maintained build inputs and planned-source state; no installed-artifact certification"
 }
