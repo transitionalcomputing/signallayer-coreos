@@ -93,13 +93,19 @@ are recorded in [the review checkpoint](0.0.4-phase1-pass3-p3-1b.md).
 
 ## Next engineering action
 
-Review the F5 development-only toolchain under issue #45 before authorizing
-binary/rootfs integration. Focused static-toolchain tests pass **74/74** on both
-macOS and the original cached Fedora base; rootfs fixtures **76/76**, tooling
-**111/111**, and Candidate C harness **5/5** pass. The isolated builder's exact
-23-RPM transaction and 563-record inventory, signed inputs, compiler versions,
-reproducible bytes and original-base smoke are measured. See
-[the F5 evidence](../evidence/0.0.4-f5-static-toolchain.json).
+Request the changed-lines-only C1/C2 independent recheck on draft PR #46 before
+authorizing binary/rootfs integration. Corrected source
+`a2cd60c85d2ba79640a427cff780431648ffd8d8` passed one complete fresh native
+builder preparation, two separate compilations from that builder, each checked
+against the reviewed digest/size and independent ELF verifier, native negative
+controls and original-base smoke. Focused tests pass **106/106** on macOS and
+the original Fedora base; rootfs **76/76**, tooling **111/111**, unprivileged
+native identity fixtures **69/69**, and Candidate C harness **5/5** pass.
+Mutation proof kills **27/27**, including all **19** required C2 gates, through
+assertion failures with zero errors. Source-test context/xattr environment
+failures are preserved and qualified in the findings. See
+[the complete result](../evidence/0.0.4-f5-c1c2-native-result.json) and
+[remediation evidence](../evidence/0.0.4-f5-c1c2-tests.json).
 The build-only glibc `2.43-9` closure does not change final-base `2.43-8`.
 Installed binary packaging/manifest integration is still **UNPROVEN**; no
 accepted source inventory, runtime unit or security policy changed.
