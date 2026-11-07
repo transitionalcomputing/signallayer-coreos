@@ -1,0 +1,101 @@
+{
+  "candidate": "a0232e3f3a3a985052f45fd6a3c4c4d06299e63c",
+  "cargo_metadata": "UNAVAILABLE; not installed or run",
+  "cleanup": "No staged survivors; both disposable containers exited; evidence retained",
+  "concurrent_per_suite_run": {
+    "EACCES": 320,
+    "bounded_not_exhaustive": true,
+    "operations": 320,
+    "real_parser_calls": 8
+  },
+  "coreos_surface_change": "none",
+  "f5_executed": false,
+  "f5_rebuilt": false,
+  "independent_review": "Pending final exact-candidate verdict; test pass is not merge/release permission",
+  "inventory": "PASS; zero differences",
+  "mutations": {
+    "blocked": 0,
+    "detected": 31,
+    "errors": 0,
+    "executed": 31,
+    "new_integration_controls": [
+      "caller-private-checker-staging",
+      "automatic-post-parser-validation"
+    ],
+    "skips": 0
+  },
+  "native_image": "d312275bca51c0a0e28a30b5fe75d8027f540a21713934b84a35f77174e3ef7b",
+  "previous_failed_inventory": "Preserved unchanged at 9275d1e; 76 run,44 failures,30 errors,2 passes; missing Git resolved in authorized separate tooling image",
+  "raw_files_sha256": {
+    "container-final-state.txt": "726df4b1183aca4dfc75b4c9f5795cab25b8ffcca638d42b7dbf77200ecf18a2",
+    "f5-source.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "f5-source.log": "d751ab45c472923ee5237b0ece6feb5137eb478dbec81ac08c5bd7dd6bd96980",
+    "focused.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "focused.log": "bc36b4e49e4fe0e91fc628048380c217d788c3924b8505d30e5316b0c0dcd25c",
+    "history-context.txt": "4e4850871a63d45f84d03dbe8122e0e840b5c63589ffa5be7cc4732db3635613",
+    "inputs-after.sha256": "fa5eb54078da3feab95c3adec91120c54fcccc3a0cdf526263f3f0d8042a7bd3",
+    "inventory.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "inventory.json": "817993453b3587c200e1a6928ae8914b173a01beaebcea80b65f4ae32af48a71",
+    "inventory.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "mutations.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "mutations.json": "f8ae5a1ad88bdf67ec010ae4154a3ef87540787832a9c7939329fb92cadf1826",
+    "mutations.log": "91afcdd3e7ae97592c70b2c1d618e5c98a9ffe32c6f30747365d5ce8ef6c0341",
+    "native-cleanup.txt": "a5ff6a52a78ad47951c980fa9d15c355326fa108f68d3c0275cbf177e3e7da25",
+    "preflight.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "preflight.log": "d0df6b7dde6b05af3e861fa40e007b97576635eca857c44d88d386caba5ecc14",
+    "rootfs.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "rootfs.log": "2ce235bedbb2d5fe8ae6322c2deb156ed30b369cfd4c16718200ccbc91a474ea",
+    "sl-l1-a0232e3-inspect.json": "76f6cc5fda54fba5f320ba9e5d5f9d1c70f1781fe49e036f00038ce20c287fff",
+    "sl-l1-a0232e3-preflight.txt": "81855bfcf981c960edeb98a10ee929b88145e55365dffb8a217c508f48ff39ae",
+    "sl-l1-tooling-a0232e3-inspect.json": "9680ac172bb5a000f0a06e8b30ae4063a3d87dd459e7e7bc58055095c16f011f",
+    "sl-l1-tooling-a0232e3-preflight.txt": "538f73fc5fea28507a6c31c192682dba3bd50178fe078439d35bb136b59bb5c9",
+    "source-and-reuse-check.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "source-and-reuse-check.txt": "625cf009721bff65ab4558bf9c27c06b68d5944c89e60022b5fa5075049723b4",
+    "source.bundle": "c8ee38c841391ca9c6887a2d81d786342c259cbbf2d2e36b1254a6272393c790",
+    "tooling-tests.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "tooling-tests.log": "0ead9449225a11c234b7e62f52c32b5cc1f4ddcfcebb100c84cdbf04cb0ee8a3"
+  },
+  "real_f5_roundtrips": {
+    "count": 2,
+    "evidence_summary_sha256": "d1c9e6f23efe0edf0aa1a8b2868f114d89f8fd62211dbfa25c1022d40b83974d",
+    "rationale": "exact Git diff confirms unchanged production builder, both verifiers, F5 lock/contract/source/recipe/golden and F5 tests; no installed payload or artifact rebuilt",
+    "status": "REUSED, not rerun",
+    "tested_commit": "e0942a156c9849c958d8dcca8a6bc43dc1cf87f1"
+  },
+  "recorded_utc": "2026-11-07T03:50:49.239784+00:00",
+  "release_identity": "none",
+  "source_hashes_verified": true,
+  "structural_preflight": "PASS",
+  "suites": {
+    "f5-source": {
+      "errors": 0,
+      "failures": 0,
+      "run": 106,
+      "skips": 0,
+      "status": "PASS"
+    },
+    "focused": {
+      "errors": 0,
+      "failures": 0,
+      "run": 25,
+      "skips": 0,
+      "status": "PASS"
+    },
+    "rootfs": {
+      "errors": 0,
+      "failures": 0,
+      "run": 146,
+      "skips": 0,
+      "status": "PASS"
+    },
+    "tooling-tests": {
+      "errors": 0,
+      "failures": 0,
+      "run": 111,
+      "skips": 0,
+      "status": "PASS"
+    }
+  },
+  "tooling_added_this_iteration": false,
+  "tooling_image": "a532e2d69374e9b9331012cc8edfcc565642250a6abad3d21985e0e1f9288e37"
+}
