@@ -179,6 +179,112 @@ class CheckerStagingTests(unittest.TestCase):
         # Hostile trusted-root relocation is outside guarantees. The original
         # directory can remain empty; no copied executable or artifact survives.
 
+    def test_empty_child_replacement_is_preserved_by_cleanup_identity_guard(self):
+        moved = self.base / 'empty-original'
+        with self.assertRaises(self.builder.BuildError):
+            with self.builder.private_checker_files(b'x', b'y') as (path, validate):
+                path.rename(moved)
+                path.mkdir(mode=0o700)
+                # Deliberately do not call validate here: this targets cleanup
+                # after the post-yield check observes replacement.
+        self.assertTrue(path.is_dir(), 'cleanup deleted the replacement directory')
+        self.assertEqual(list(path.iterdir()), [])
+        self.assertEqual(list(moved.iterdir()), [])
+
+    def test_independent_parent_modes_are_refused_before_staging(self):
+        for mode in (0o770, 0o707, 0o2700):
+            with self.subTest(mode=oct(mode)):
+                self.parent.chmod(mode)
+                try:
+                    with mock.patch.object(self.builder.os, 'mkdir', wraps=os.mkdir) as create:
+                        with self.assertRaises(self.builder.BuildError):
+                            with self.builder.private_checker_files(b'x', b'y'):
+                                self.fail('unsafe initial mode accepted')
+                        create.assert_not_called()
+                finally:
+                    self.parent.chmod(0o700)
+                self.assert_empty()
+
+    def test_higher_ancestor_owner_is_refused_before_staging(self):
+        os.chown(self.base, 1, 0)
+        try:
+            with mock.patch.object(self.builder.os, 'mkdir', wraps=os.mkdir) as create:
+                with self.assertRaises(self.builder.BuildError):
+                    with self.builder.private_checker_files(b'x', b'y'):
+                        self.fail('nonroot ancestor accepted')
+                create.assert_not_called()
+        finally:
+            os.chown(self.base, 0, 0)
+        self.assert_empty()
+
+    def test_child_creation_mode_drift_is_refused(self):
+        # Inject a creator that fails to honor 0700; validate real resulting
+        # filesystem metadata. This is not an attacker privilege claim.
+        mkdir = os.mkdir
+        def wrong_mode(path, mode=0o777, *, dir_fd=None):
+            return mkdir(path, 0o755, dir_fd=dir_fd)
+        with mock.patch.object(self.builder.os, 'mkdir', side_effect=wrong_mode):
+            with self.assertRaises(self.builder.BuildError):
+                with self.builder.private_checker_files(b'x', b'y'):
+                    self.fail('nonprivate child accepted')
+        self.assert_empty()
+
+    def test_unexpected_entry_validation_is_sensitive(self):
+        with self.builder.private_checker_files(b'x', b'y') as (path, validate):
+            extra = path / 'unexpected'
+            extra.write_bytes(b'preserve until controlled test cleanup')
+            observed = None
+            try:
+                validate()
+            except self.builder.BuildError as error:
+                observed = error
+            finally:
+                extra.unlink()
+            self.assertIsInstance(observed, self.builder.BuildError)
+            self.assertIn('unexpected checker staging entry', str(observed))
+        self.assert_empty()
+
+    def test_unlink_failure_is_not_successful_cleanup(self):
+        unlink = os.unlink
+        created = None
+        def refused(leaf, *, dir_fd=None):
+            if leaf == 'artifact':
+                raise PermissionError(errno.EACCES, 'injected unlink failure')
+            return unlink(leaf, dir_fd=dir_fd)
+        try:
+            with mock.patch.object(self.builder.os, 'unlink', side_effect=refused):
+                with self.assertRaises(PermissionError):
+                    with self.builder.private_checker_files(b'x', b'y') as (path, validate):
+                        created = path
+            self.assertTrue((created / 'artifact').exists())
+        finally:
+            # Explicit fixture cleanup after the injected failure; production
+            # cannot promise removal when the filesystem refuses unlink.
+            if created is not None:
+                for leaf in created.iterdir():
+                    leaf.unlink()
+                created.rmdir()
+        self.assert_empty()
+
+    def test_rmdir_failure_preserves_empty_private_directory_and_refuses(self):
+        rmdir = os.rmdir
+        created = None
+        def refused(path, *, dir_fd=None):
+            if str(path).startswith('.sl-w1-elf-'):
+                raise PermissionError(errno.EACCES, 'injected rmdir failure')
+            return rmdir(path, dir_fd=dir_fd)
+        try:
+            with mock.patch.object(self.builder.os, 'rmdir', side_effect=refused):
+                with self.assertRaises(PermissionError):
+                    with self.builder.private_checker_files(b'x', b'y') as (path, validate):
+                        created = path
+            self.assertTrue(created.is_dir())
+            self.assertEqual(list(created.iterdir()), [])
+        finally:
+            if created is not None:
+                created.rmdir()
+        self.assert_empty()
+
     def test_exception_cleanup(self):
         with self.assertRaisesRegex(RuntimeError, 'injected'):
             with self.builder.private_checker_files(b'x', b'y'):

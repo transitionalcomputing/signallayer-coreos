@@ -25,6 +25,14 @@ LINUX = "test_binary_input.BinaryInputFixtures."
 
 # name, test, function, AST node kind, exact condition fragment(s), requires Linux.
 GATES = [
+    ("checker-ancestor-root-owner", "test_checker_staging.CheckerStagingTests.test_higher_ancestor_owner_is_refused_before_staging",
+     "checker_directory", "compare", ("info.st_uid != 0",), True),
+    ("checker-cleanup-replacement-identity", "test_checker_staging.CheckerStagingTests.test_empty_child_replacement_is_preserved_by_cleanup_identity_guard",
+     "private_checker_files", "if", ("(linked.st_dev, linked.st_ino) != (held.st_dev, held.st_ino)",), True),
+    ("checker-child-private-mode", "test_checker_staging.CheckerStagingTests.test_child_creation_mode_drift_is_refused",
+     "private_checker_files", "if", ("stat.S_IMODE(os.fstat(child).st_mode) != 448",), True),
+    ("checker-unexpected-staging-entry", "test_checker_staging.CheckerStagingTests.test_unexpected_entry_validation_is_sensitive",
+     "private_checker_files", "if", ("sorted(os.listdir(child)) != sorted(files)",), True),
     ("checker-staging-ancestry-mode", "test_checker_staging.CheckerStagingTests.test_shared_sticky_ancestor_is_refused",
      "checker_directory", "if", ("info.st_mode & 3602",), True),
     ("checker-staging-acl", "test_checker_staging.CheckerStagingTests.test_real_extended_acl_is_refused",
