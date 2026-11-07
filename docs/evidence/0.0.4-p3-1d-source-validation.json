@@ -1,0 +1,65 @@
+{
+  "base": "0d8bcc4ac045bcb21e1353eee867b9ed10e122c4",
+  "coreos_surface_change": "none; source/build-context hashes only",
+  "earlier_evidence": {
+    "initial_model": "40 tests and14 mutations passed on macOS and Linux; superseded by explicit retry/data semantics correction",
+    "pre_fingerprint_tooling": "111 tests,10 comparison failures before new source fingerprints adopted; preserved, not reclassified"
+  },
+  "independent_review": "Pending exact candidate source review at recorded time",
+  "limitations": [
+    "In-memory observations, fake pidfds/objects and persistence receipts, not live syscall evidence",
+    "No live systemd, account provisioning, installed helpers, SELinux policy changes or production runtime",
+    "Durable atomic adapters and kernel/systemd behavior remain unproven",
+    "Identity compatibility W2 remains on HOLD; B engine-risk acceptance reserved",
+    "No root Cargo workspace or dependency changes; actual consumer check is separate from model compilation",
+    "Historical boot72/73 remains separate unresolved evidence, not rerun or asserted current failure"
+  ],
+  "linux": {
+    "cleanup": "verified stopped after successful test completion; sleep PID1 required SIGKILL after graceful stop timeout, exit137",
+    "errors": 0,
+    "failures": 0,
+    "image": "7bab05e0dbf6a71aab2b4fcd5185e9ac65f49d1c3a4cea6b15bbd3431c8ea8d2",
+    "isolation": "disposable rootless offline compiler container; no bind shares, capability set empty, no-new-privileges, read-only root, bounded tmpfs/memory/CPU/PIDs",
+    "model_tests": 44,
+    "mutations_detected": 14,
+    "rustc": "1.99.1",
+    "skips": 0
+  },
+  "macos": {
+    "errors": 0,
+    "failures": 0,
+    "model_tests": 44,
+    "mutations_detected": 14,
+    "rustc": "1.90.0",
+    "skips": 0,
+    "target": "aarch64-apple-darwin"
+  },
+  "raw_evidence_sha256": {
+    "inventory-final-local.json": "94bb743d361a0d34f20c8c1041cdfe7109005906766e432a87230aa901051a72",
+    "native-model-645a9d.log": "61ec97f332786f7b1d04257e0a3297fec0b0b5b9bb32f68b32d3ad4aef661bb9",
+    "native-mutations-645a9d.json": "b4e724dabe964fdf0a1169f9861a8036248527e077bb0cf5ae0d124dd49c3bd7",
+    "preflight-final-local.log": "77473d0500380e91e500d35b4ba67efb88a21b972dcefaf182111ab8e5638f6f",
+    "source-model-macos-retry/mutations.json": "ae7d43400d8f90bfaf7aedfa06e73ae050b9dd7e185920cd171833379c78cc61",
+    "source-model-macos-retry/tests.log": "4194b21c64afe3f40c1c7de5cf97dd25967ba3a580da4aed4783dc41b3c861f5",
+    "tooling-final-local.log": "dbd0eae95cb80f3af3d0090bf71b442ee79f3f885625e6558d35146a3bfc918f"
+  },
+  "recorded_utc": "2026-11-07T04:40:08.991358+00:00",
+  "release_identity": "none",
+  "reuse": "F5 artifact/lock/contract, W1 builder/verifiers/recipe/golden, L1 source and prior evidence unchanged; no F5 rebuild or execution",
+  "schema": 1,
+  "scope": "P3-1d pure source model; no installed runtime acceptance",
+  "source_safeguards": {
+    "cargo_metadata": "PASS: --locked --offline --no-deps, unchanged root workspace; does not compile non-workspace model",
+    "diff_check": "PASS",
+    "errors": 0,
+    "failures": 0,
+    "inventory": "PASS",
+    "release_preflight": "PASS with actual existing Cargo consumer",
+    "tooling_tests": 111
+  },
+  "tested_source_sha256": {
+    "management-lifecycle/src/lib.rs": "645a9d80257c37d82c762ca1c97d14ada742e7f2ffbbcff9081788f9f226b2a4",
+    "management-lifecycle/src/tests.rs": "6ee56c5505767c88f89931e2a91161cac5abb74dbba83a0cd0335f22f770f050",
+    "tests/podman/lifecycle/mutations.py": "d889673c21a1ec5fc2db95b377a5816124da1f96f2ce1d34ed2048cf18baf393"
+  }
+}

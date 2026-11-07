@@ -1,3 +1,24 @@
+# Current P3-1d source checkpoint (2026-11-07)
+
+PR #50 L1 merged at `0d8bcc4ac045bcb21e1353eee867b9ed10e122c4`.
+P3-1d source lifecycle work is owner-authorized and implemented for review,
+without Podman or live services. See [P3-1d checkpoint](0.0.4-phase1-pass3-p3-1d.md)
+for measured results and unproven runtime boundaries. F5/W1/L1 are unchanged
+inputs. W2 identity compatibility stays on HOLD; B security acceptance remains
+reserved. No downstream runtime gate, publication, merge or release is implied.
+
+Required Claude findings P31D-12/P31D-03 are corrected in the source model.
+Corrected macOS tests pass 52/52, strict mutations 21/21, tooling 111/111,
+with inventory/offline Cargo/preflight passing. Separate internal source review
+returned GO; Claude re-review remains pending. Corrected Linux execution and
+all live runtime/crash guarantees remain unproven. See
+[correction evidence](../evidence/0.0.4-p3-1d-review-corrections.json).
+
+## Historical pre-L1 checkpoint
+
+The C1-next and L1-deferred instructions below are historical and superseded
+by PR #48/#50 and current P3-1d source scope; do not restart completed work.
+
 # SignalLayer CoreOS — current engineering handoff
 
 **Snapshot:** 2026-10-30. Verify against the current repository and evidence before acting.
