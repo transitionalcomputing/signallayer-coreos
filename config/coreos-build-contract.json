@@ -77,11 +77,11 @@
       "management-fixture/inputs/message.txt": "81c32862e4daf9b5b55319683511aa7c551cc5ffcabcaaa753bca6045055a3c3",
       "management-fixture/rootfs-spec.json": "3484698061164d18f3fc6017c8d334704c0544957aba18b02a55ebb1625f5b6c",
       "management-fixture/src/main.rs": "0a52cc83098ab9019945b872a3afa53975b59314d2b39e0b7fb9a8d32fa394d5",
-      "management-lifecycle/MODEL.md": "39b27fcebaaf9f400df6553e794625a26e8252af0265f46c75cd495410b0b11f",
+      "management-lifecycle/MODEL.md": "1e30290e1ca37807e99b3f261109f31f46804c69873633564d3e060d6862b2d5",
       "management-lifecycle/README.md": "c7161131d09e1f53002d72b4e1cb2db43b57ac5c676c1800cb07d711c606095b",
       "management-lifecycle/identity.py": "235c04c75d0951449032dd8d56ab67dca5e077892180ee6356430223c253f71f",
-      "management-lifecycle/src/lib.rs": "645a9d80257c37d82c762ca1c97d14ada742e7f2ffbbcff9081788f9f226b2a4",
-      "management-lifecycle/src/tests.rs": "6ee56c5505767c88f89931e2a91161cac5abb74dbba83a0cd0335f22f770f050",
+      "management-lifecycle/src/lib.rs": "cf0093f1af67de5a2ad943301c92c54f363ff9c0aad2d84c1d0c227c01d395c4",
+      "management-lifecycle/src/tests.rs": "fabc05f2816e04760789930d4beb486762a299b53c23f51075ec69ab46655883",
       "network-observer/Cargo.toml": "221efbd4dd2a422157da5ae28fff65fdf0cbea51c54d82045499d1ce477271b6",
       "network-observer/src/main.rs": "6d30bf8da26c3edfe2142c84fb49ed3ef773c764932642d18b5fa1ca5a862719",
       "platformd/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -637,7 +637,7 @@
       },
       "management-lifecycle/MODEL.md": {
         "executable": false,
-        "sha256": "39b27fcebaaf9f400df6553e794625a26e8252af0265f46c75cd495410b0b11f",
+        "sha256": "1e30290e1ca37807e99b3f261109f31f46804c69873633564d3e060d6862b2d5",
         "state": "file"
       },
       "management-lifecycle/README.md": {
@@ -655,12 +655,12 @@
       },
       "management-lifecycle/src/lib.rs": {
         "executable": false,
-        "sha256": "645a9d80257c37d82c762ca1c97d14ada742e7f2ffbbcff9081788f9f226b2a4",
+        "sha256": "cf0093f1af67de5a2ad943301c92c54f363ff9c0aad2d84c1d0c227c01d395c4",
         "state": "file"
       },
       "management-lifecycle/src/tests.rs": {
         "executable": false,
-        "sha256": "6ee56c5505767c88f89931e2a91161cac5abb74dbba83a0cd0335f22f770f050",
+        "sha256": "fabc05f2816e04760789930d4beb486762a299b53c23f51075ec69ab46655883",
         "state": "file"
       },
       "tools/build-management-rootfs": {

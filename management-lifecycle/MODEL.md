@@ -17,8 +17,18 @@ CoreOS-Surface-Change: none; source and build-context fingerprints only (existin
 
 The non-cloneable coordinator owns boot/transaction/reset identities, committed
 identity/map observations, exact F5/W1 content identities, deployment digest,
-epoch and object identities. An independently supplied `ExpectedJob` binds the
-runtime/verifier InvocationIDs and cgroup; guard/results cannot replace it.
+epoch and object identities. At state 1, `ExpectedJob` binds only the fixed
+runtime/verifier unit names and a coordinator-generated request token. The token
+is not a preassigned systemd Job ID or InvocationID. The trusted adapter must
+correlate the actual manager job with that request. At state 8, `bind_runtime`
+accepts an independent system-manager activation observation for the exact
+transaction/request, recording runtime InvocationID and cgroup. Its descriptor
+must be persisted before the pre-start guard compares its own identity. The
+guard supplies no verifier ID. `start_verifier` binds the manager-observed
+verifier InvocationID only when that fixed dependency actually activates;
+manager and runtime-observation claims must match. Distinct source input types
+make the provenance requirement explicit but do not prove it. Native manager
+correlation, event ordering and guard waiting remain P3-4 integration gates.
 
 Transitions require current observations and simulated durable acknowledgment
 of the exact descriptor. READY follows durable state-1 lock acknowledgment,
@@ -38,7 +48,14 @@ oneshot invocation is required afterward, not permanent verifier liveness.
 State 10 must be durably acknowledged before temporary inhibit release.
 Permanent exclusion remains required. Adverse operational observations latch
 failure; a restored good observation cannot revive trust without reset.
-Failure exposes only a stop/preserve plan. Fixture failure may retry with a fresh transaction in the same still-live reset
+Failure advances the descriptor sequence once and exposes a stop/preserve plan
+with `revoke_publication: true`. An exact durable Failed receipt is accepted as
+revocation, never as permission to resume. Repeated failure keeps the same
+record. Normal transitions reserve the last sequence value for revocation, so
+sequence exhaustion cannot leave an operational record without a higher ordered
+failure. The adapter must durably record that revocation and execute the plan;
+a crash before persistence is still an integration concern. Durable Operational
+metadata alone is never live authority, and every restart begins at state 1. Fixture failure may retry with a fresh transaction in the same still-live reset
 invocation; actual coordinator restart requires a new reset ID and the previous
 reset no longer live. Both paths start at state 1 and retain no token/result.
 Data preservation observations apply during reset, not to legitimate operational

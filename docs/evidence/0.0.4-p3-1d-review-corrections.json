@@ -1,0 +1,56 @@
+{
+  "base_candidate": "e86fd655d64861dfb3b553bc11586808a698eca8",
+  "coreos_surface_change": "none; existing source/build-context fingerprints only",
+  "earlier_run": "tooling-partial-fingerprints.log retains 111 tests with 10 failures before planned_source_inputs hashes were updated; subsequent full run passed",
+  "independent_review": {
+    "claude": "re-review pending; original candidate changes required P31D-12/P31D-03",
+    "internal_separate_agent": "source-only GO on exact lib/tests/mutations hashes; did not rerun tests"
+  },
+  "limitations": [
+    "Pure in-memory source model; no installed adapter or live systemd, fsync, pidfd, kernel, SELinux or crash proof",
+    "Linux corrected-source run NOT PERFORMED; earlier 44/14 Linux result applies only to original candidate",
+    "System manager observation provenance and activation synchronization require P3-4 validation",
+    "Optional Low/Info findings remain deferred; required P31D-12/P31D-03 only",
+    "W2 identity compatibility HOLD; B engine-risk acceptance reserved; no merge/push/release/production approval"
+  ],
+  "macos": {
+    "failures": 0,
+    "ignored": 0,
+    "model_tests": 52,
+    "rustc": "1.90.0",
+    "strict_mutations_detected": 21,
+    "strict_mutations_total": 21,
+    "target": "aarch64-apple-darwin"
+  },
+  "raw_evidence_sha256": {
+    "cargo-metadata.log": "e40bcd5370640ff0c0bf889d43e03f050df5ec6a2979e0931502379e51b266b1",
+    "checks-partial-fingerprints.json": "4441337b2750126dead9a3b75cf28b7d988abebf86c08ebd4ea397bdeac674bb",
+    "checks.json": "317870fba9f81952020a4343c12797f469412fa3868e771b3022c790d60057e3",
+    "diff.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "inventory.log": "ba9ccaa5eb7239a5442f3e20fbdf8bb2e0417fa04c2bf7e5a1f85694edafb1d0",
+    "mutations.json": "8f562e55871bf7300fbd14a4c25dbcfeb24a65a8a74e65b88c260bf4349f4c02",
+    "preflight.log": "77473d0500380e91e500d35b4ba67efb88a21b972dcefaf182111ab8e5638f6f",
+    "tests.log": "c1fe64edc268cab61a140e641b8844bbdd7cb325597d8fc0106a5348471a33b0",
+    "tooling-partial-fingerprints.log": "3854addb47781f7239477d5112d5d01e1e15bcdde1ca051e93a477b7688670a4",
+    "tooling.log": "dd874824f8a77a83ebdebb44f61404a92c9f1ca95a32b4a47d3b7395b7cae4cc"
+  },
+  "recorded_utc": "2026-11-07T06:56:01.945342+00:00",
+  "release_identity": "none",
+  "reuse": "F5/W1/L1 source and artifact inputs unchanged; no artifact rebuilt or executed",
+  "schema": 1,
+  "scope": "P31D-12 and P31D-03 required source corrections only",
+  "source_safeguards": {
+    "cargo_metadata": "PASS --locked --offline --no-deps",
+    "diff_check": "PASS",
+    "failures": 0,
+    "inventory": "PASS",
+    "release_preflight": "PASS with actual Cargo consumer",
+    "tooling_tests": 111
+  },
+  "tested_source_sha256": {
+    "management-lifecycle/MODEL.md": "1e30290e1ca37807e99b3f261109f31f46804c69873633564d3e060d6862b2d5",
+    "management-lifecycle/src/lib.rs": "cf0093f1af67de5a2ad943301c92c54f363ff9c0aad2d84c1d0c227c01d395c4",
+    "management-lifecycle/src/tests.rs": "fabc05f2816e04760789930d4beb486762a299b53c23f51075ec69ab46655883",
+    "tests/podman/lifecycle/mutations.py": "5c3a60ba7b977b2a29d981e07c09bb102b5f0569b8e5e6dade38cef401e3c5fb"
+  }
+}

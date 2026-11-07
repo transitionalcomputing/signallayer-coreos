@@ -11,7 +11,10 @@ fn observation() -> Observation {
         now: 100, lock_held: true, reset_live: true, permanent_spawn_closed: true,
         event_coverage_complete: true, unexpected_event: false, data_unchanged: true }
 }
-fn job() -> ExpectedJob { ExpectedJob {runtime:id(4),verifier:id(6),cgroup:object(7)} }
+fn job() -> ExpectedJob { ExpectedJob { request:id(40), runtime_unit:"sl-management-runtime.service".into(), verifier_unit:"sl-management-verify.service".into() } }
+fn manager_runtime(o: &Observation) -> ManagerRuntime { ManagerRuntime { binding:o.binding.clone(), job:job(), runtime:id(4), cgroup:object(7) } }
+fn manager_verifier(o: &Observation) -> ManagerVerifier { ManagerVerifier { binding:o.binding.clone(), job:job(), runtime:id(4), verifier:id(6) } }
+fn bound(o: &Observation) -> Coordinator { let mut c=preconditions(o); c.bind_runtime(o,&manager_runtime(o)).unwrap();persist(&mut c);c }
 fn begin(o: &Observation) -> Coordinator {
     Coordinator::begin(o.binding.clone(), o.identity.clone(), o.content.clone(), o.objects.clone(), job(), o.now).unwrap()
 }
@@ -40,7 +43,7 @@ fn runtime_observation() -> RuntimeObservation {
 }
 fn running_observation() -> RuntimeObservation { let mut r=runtime_observation();r.verifier_state=VerifierState::Running;r }
 fn launched(o:&Observation) -> Coordinator {
-    let mut c=preconditions(o); c.guard(o,&guard(),id(6)).unwrap(); persist(&mut c); c.start_verifier(o,&running_observation()).unwrap();persist(&mut c);c
+    let mut c=bound(o); c.guard(o,&guard()).unwrap(); persist(&mut c); c.start_verifier(o,&manager_verifier(o),&running_observation()).unwrap();persist(&mut c);c
 }
 fn verified(o:&Observation) -> Coordinator {
     let mut c=launched(o); let r=runtime_observation(); let result=verify(c.descriptor(),o,&running_observation()).unwrap();
@@ -49,7 +52,7 @@ fn verified(o:&Observation) -> Coordinator {
 #[test] fn positive_full_lifecycle_requires_durable_publication() {
     let o=observation(); let r=runtime_observation(); let mut c=verified(&o);
     assert!(!c.trusted(&o,&r)); c.publish(&o,&r).unwrap(); assert!(!c.trusted(&o,&r));
-    persist(&mut c); c.release_inhibit(&o,&r).unwrap(); let mut released=o.clone();released.lock_held=false; assert!(c.trusted(&released,&r)); assert_eq!(c.descriptor().sequence(),11);
+    persist(&mut c); c.release_inhibit(&o,&r).unwrap(); let mut released=o.clone();released.lock_held=false; assert!(c.trusted(&released,&r)); assert_eq!(c.descriptor().sequence(),12);
 }
 #[test] fn malformed_and_zero_ids_refused() {
     for s in ["", "0", "00000000000000000000000000000000", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "gggggggggggggggggggggggggggggggg", "é000000000000000000000000000000"] { assert!(Id::parse(s).is_err()); }
@@ -130,7 +133,7 @@ fn verified(o:&Observation) -> Coordinator {
         6=>bad.lock_held=false,7=>bad.reset_live=false,8=>bad.permanent_spawn_closed=false,
         9=>bad.event_coverage_complete=false,10=>bad.unexpected_event=true,11=>bad.data_unchanged=false,
         _=>bad.now=99 }
-        let mut c=preconditions(&o); assert!(c.guard(&bad,&guard(),id(6)).is_err()); }
+        let mut c=bound(&o); assert!(c.guard(&bad,&guard()).is_err()); }
 }
 #[test] fn monotonic_clock_cannot_go_backwards() {
     let mut o=observation(); let mut c=ready(&o); o.now+=2;c.advance(&o,Evidence::SpawnClosed).unwrap();persist(&mut c);
@@ -140,15 +143,15 @@ fn verified(o:&Observation) -> Coordinator {
     let o=observation(); for n in 0..6 { let mut g=guard(); match n {
         0=>g.pidfd_matches=false,1=>g.members.clear(),2=>g.members.push(g.own),
         3=>g.populated_children=true,4=>g.members[0].start_time+=1,_=>g.own.pid=0 }
-        let mut c=preconditions(&o); assert!(c.guard(&o,&g,id(6)).is_err()); }
+        let mut c=bound(&o); assert!(c.guard(&o,&g).is_err()); }
 }
 #[test] fn guard_replay_is_terminal_and_failure_never_restores_token() {
-    let o=observation(); let mut c=launched(&o); assert!(c.guard(&o,&guard(),id(6)).is_err());
+    let o=observation(); let mut c=launched(&o); assert!(c.guard(&o,&guard()).is_err());
     assert_eq!(c.descriptor().state(),State::Failed);
-    assert!(c.guard(&o,&guard(),id(6)).is_err());
+    assert!(c.guard(&o,&guard()).is_err());
 }
 #[test] fn guard_requires_state_seven() {
-    let o=observation(); let mut c=ready(&o); assert!(c.guard(&o,&guard(),id(6)).is_err());
+    let o=observation(); let mut c=ready(&o); assert!(c.guard(&o,&guard()).is_err());
 }
 #[test] fn verifier_cannot_run_before_guard() {
     let o=observation(); let c=preconditions(&o); assert!(verify(c.descriptor(),&o,&runtime_observation()).is_err());
@@ -195,7 +198,7 @@ fn verified(o:&Observation) -> Coordinator {
     let mut b=o.binding.clone();b.transaction=id(20);assert!(c.restart(b,job(),false,200).is_err());
 }
 #[test] fn failed_state_has_only_preserving_stop_plan() {
-    let o=observation();let mut c=verified(&o);let p=c.fail();assert_eq!(p,FailurePlan {stop_runtime:true,stop_verifier:true,preserve_application_data:true,preserve_ambiguous_evidence:true});
+    let o=observation();let mut c=verified(&o);let p=c.fail();assert_eq!(p,FailurePlan {stop_runtime:true,stop_verifier:true,revoke_publication:true,preserve_application_data:true,preserve_ambiguous_evidence:true});
     assert!(c.publish(&o,&runtime_observation()).is_err());assert!(!c.trusted(&o,&runtime_observation()));
 }
 #[test] fn sequence_overflow_fails_closed() {
@@ -203,13 +206,13 @@ fn verified(o:&Observation) -> Coordinator {
     assert!(c.advance(&o,Evidence::SpawnClosed).is_err());assert_eq!(c.descriptor().state(),State::Failed);
 }
 #[test] fn independent_expected_job_rejects_guard_selected_ids() {
-    let o=observation();for n in 0..3 {let mut c=preconditions(&o);let mut g=guard();let mut v=id(6);
-        match n {0=>g.runtime=id(44),1=>v=id(66),_=>{g.own.cgroup=object(99);g.members=vec![g.own];}}
-        assert!(c.guard(&o,&g,v).is_err());}
+    let o=observation();for n in 0..2 {let mut c=bound(&o);let mut g=guard();
+        match n {0=>g.runtime=id(44),_=>{g.own.cgroup=object(99);g.members=vec![g.own];}}
+        assert!(c.guard(&o,&g).is_err());}
 }
 #[test] fn verifier_deadline_does_not_bound_teardown() {
-    let mut o=observation();let mut c=preconditions(&o);o.now=1000;
-    c.guard(&o,&guard(),id(6)).unwrap();persist(&mut c);c.start_verifier(&o,&running_observation()).unwrap();persist(&mut c);let r=running_observation();
+    let mut o=observation();let mut c=bound(&o);o.now=1000;
+    c.guard(&o,&guard()).unwrap();persist(&mut c);c.start_verifier(&o,&manager_verifier(&o),&running_observation()).unwrap();persist(&mut c);let r=running_observation();
     let mut within=o.clone();within.now=1030;assert!(verify(c.descriptor(),&within,&r).is_ok());
     let mut late=o.clone();late.now=1031;assert!(verify(c.descriptor(),&late,&r).is_err());
     let result=verify(c.descriptor(),&o,&running_observation()).unwrap();assert!(c.accept_verification(&late,result,&runtime_observation()).is_err());
@@ -269,10 +272,10 @@ fn verified(o:&Observation) -> Coordinator {
     let mut current=o.clone();current.lock_held=false;assert!(c.trusted(&current,&runtime_observation()));
 }
 #[test] fn verifier_start_is_one_use_and_clock_starts_at_activation() {
-    let mut o=observation();let mut c=preconditions(&o);c.guard(&o,&guard(),id(6)).unwrap();persist(&mut c);
-    o.now=1000;c.start_verifier(&o,&running_observation()).unwrap();persist(&mut c);
+    let mut o=observation();let mut c=bound(&o);c.guard(&o,&guard()).unwrap();persist(&mut c);
+    o.now=1000;c.start_verifier(&o,&manager_verifier(&o),&running_observation()).unwrap();persist(&mut c);
     o.now=1030;assert!(verify(c.descriptor(),&o,&running_observation()).is_ok());
-    assert!(c.start_verifier(&o,&running_observation()).is_err());
+    assert!(c.start_verifier(&o,&manager_verifier(&o),&running_observation()).is_err());
 }
 #[test] fn verifier_process_must_match_activation_snapshot() {
     let o=observation();let c=launched(&o);let mut r=running_observation();r.process.start_time+=1;
@@ -297,4 +300,62 @@ fn verified(o:&Observation) -> Coordinator {
     let o=observation();let r=runtime_observation();let mut c=verified(&o);c.publish(&o,&r).unwrap();persist(&mut c);c.release_inhibit(&o,&r).unwrap();
     let mut live=o.clone();live.lock_held=false;live.data_unchanged=false;assert!(c.trusted(&live,&r));
     live.objects.data=object(99);assert!(!c.trusted(&live,&r));
+}
+#[test] fn state_one_has_no_activation_identities() {
+    let o=observation();let c=begin(&o);
+    assert!(c.descriptor.runtime.is_none());assert!(c.descriptor.runtime_cgroup.is_none());
+    assert!(c.descriptor.verifier.is_none());assert!(c.descriptor.verifier_started.is_none());
+    let mut wrong=job();wrong.runtime_unit="other.service".into();
+    assert!(Coordinator::begin(o.binding.clone(),o.identity.clone(),o.content.clone(),o.objects.clone(),wrong,o.now).is_err());
+}
+#[test] fn manager_runtime_binding_requires_exact_transaction_and_job() {
+    let o=observation();for n in 0..5 {let mut c=preconditions(&o);let mut m=manager_runtime(&o);
+        match n {0=>m.binding.transaction=id(88),1=>m.job.request=id(88),2=>m.job.runtime_unit="other.service".into(),3=>m.job.verifier_unit="other.service".into(),_=>m.cgroup.inode=0}
+        assert!(c.bind_runtime(&o,&m).is_err());assert_eq!(c.descriptor().state(),State::Failed);}
+    let mut c=ready(&o);assert!(c.bind_runtime(&o,&manager_runtime(&o)).is_err());
+    let mut c=bound(&o);assert!(c.bind_runtime(&o,&manager_runtime(&o)).is_err());
+}
+#[test] fn runtime_binding_must_be_durable_before_guard() {
+    let o=observation();let mut c=preconditions(&o);
+    assert!(c.guard(&o,&guard()).is_err());
+    let mut c=preconditions(&o);c.bind_runtime(&o,&manager_runtime(&o)).unwrap();
+    assert!(c.guard(&o,&guard()).is_err());assert_eq!(c.descriptor().state(),State::Failed);
+}
+#[test] fn verifier_identity_is_bound_only_at_activation() {
+    let o=observation();let mut c=bound(&o);c.guard(&o,&guard()).unwrap();persist(&mut c);
+    assert!(c.descriptor.verifier.is_none());
+    let mut m=manager_verifier(&o);m.verifier=id(77);let mut r=running_observation();r.verifier=id(77);
+    assert!(c.start_verifier(&o,&m,&r).is_ok());persist(&mut c);
+    assert_eq!(c.descriptor.verifier,Some(id(77)));assert!(verify(c.descriptor(),&o,&r).is_ok());
+}
+#[test] fn verifier_binding_rejects_unrelated_manager_or_claims() {
+    let o=observation();for n in 0..6 {let mut c=bound(&o);c.guard(&o,&guard()).unwrap();persist(&mut c);
+        let mut m=manager_verifier(&o);let mut r=running_observation();
+        match n {0=>m.binding.reset=id(88),1=>m.job.request=id(88),2=>m.runtime=id(88),3=>m.verifier=id(88),4=>r.process.cgroup=object(88),_=>{m.verifier=m.runtime;r.verifier=m.runtime;}}
+        assert!(c.start_verifier(&o,&m,&r).is_err());}
+    let mut c=bound(&o);assert!(c.start_verifier(&o,&manager_verifier(&o),&running_observation()).is_err());
+}
+#[test] fn operational_failure_has_ordered_durable_revocation() {
+    let o=observation();let r=runtime_observation();let mut c=verified(&o);
+    c.publish(&o,&r).unwrap();persist(&mut c);let published=c.descriptor().clone();c.release_inhibit(&o,&r).unwrap();
+    let mut bad=o.clone();bad.lock_held=false;bad.reset_live=false;assert!(!c.trusted(&bad,&r));
+    let revoked=c.descriptor().clone();assert_eq!(revoked.state(),State::Failed);
+    assert!(revoked.sequence()>published.sequence());assert!(!c.durable);
+    assert!(c.persist(Persistence {descriptor:revoked.clone(),durable:true}).is_ok());assert!(c.durable);
+    assert!(!c.trusted(&bad,&r));assert!(c.publish(&o,&r).is_err());
+    assert!(c.persist(Persistence {descriptor:published,durable:true}).is_err());
+    assert_eq!(c.descriptor(),&revoked);persist(&mut c);assert!(c.durable);
+}
+#[test] fn failure_revocation_is_idempotent_and_receipt_exact() {
+    let o=observation();let mut c=ready(&o);let before=c.descriptor().sequence();
+    assert!(c.fail().revoke_publication);let failed=c.descriptor().clone();assert_eq!(failed.sequence(),before+1);
+    c.fail();assert_eq!(c.descriptor(),&failed);
+    assert!(c.persist(Persistence {descriptor:failed.clone(),durable:false}).is_err());assert!(!c.durable);
+    persist(&mut c);assert!(c.durable);assert!(c.ready(&o).is_err());assert_eq!(c.descriptor(),&failed);
+}
+#[test] fn final_sequence_slot_is_reserved_for_revocation() {
+    let o=observation();let mut c=ready(&o);c.descriptor.sequence=u64::MAX-1;
+    assert!(c.advance(&o,Evidence::SpawnClosed).is_err());
+    assert_eq!(c.descriptor().sequence(),u64::MAX);assert_eq!(c.descriptor().state(),State::Failed);
+    persist(&mut c);assert!(c.durable);c.fail();assert_eq!(c.descriptor().sequence(),u64::MAX);
 }

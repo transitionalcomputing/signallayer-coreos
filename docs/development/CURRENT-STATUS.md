@@ -7,6 +7,13 @@ for measured results and unproven runtime boundaries. F5/W1/L1 are unchanged
 inputs. W2 identity compatibility stays on HOLD; B security acceptance remains
 reserved. No downstream runtime gate, publication, merge or release is implied.
 
+Required Claude findings P31D-12/P31D-03 are corrected in the source model.
+Corrected macOS tests pass 52/52, strict mutations 21/21, tooling 111/111,
+with inventory/offline Cargo/preflight passing. Separate internal source review
+returned GO; Claude re-review remains pending. Corrected Linux execution and
+all live runtime/crash guarantees remain unproven. See
+[correction evidence](../evidence/0.0.4-p3-1d-review-corrections.json).
+
 ## Historical pre-L1 checkpoint
 
 The C1-next and L1-deferred instructions below are historical and superseded

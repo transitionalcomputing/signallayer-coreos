@@ -33,9 +33,23 @@ impl Id {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Binding { pub boot: Id, pub transaction: Id, pub reset: Id }
-/// Independently selected by the coordinator adapter, never taken from guard/result.
+/// Fixed units plus a coordinator-generated request token, NOT a future systemd
+/// InvocationID or Job ID. The adapter correlates manager events with this request.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExpectedJob { pub runtime: Id, pub verifier: Id, pub cgroup: Object }
+pub struct ExpectedJob { pub request: Id, pub runtime_unit: String, pub verifier_unit: String }
+impl ExpectedJob {
+    fn valid(&self) -> bool {
+        self.runtime_unit == "sl-management-runtime.service"
+            && self.verifier_unit == "sl-management-verify.service"
+    }
+}
+/// Obtained independently from the system manager after runtime activation,
+/// never constructed from guard claims. Provenance is a later adapter obligation.
+#[derive(Clone, Debug)]
+pub struct ManagerRuntime { pub binding: Binding, pub job: ExpectedJob, pub runtime: Id, pub cgroup: Object }
+/// Obtained from the system manager only when the fixed verifier activates.
+#[derive(Clone, Debug)]
+pub struct ManagerVerifier { pub binding: Binding, pub job: ExpectedJob, pub runtime: Id, pub verifier: Id }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Extent { pub start: u32, pub count: u32 }
 impl Extent {
@@ -175,7 +189,7 @@ fn common(d: &Descriptor, o: &Observation) -> Result<()> {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FailurePlan {
-    pub stop_runtime: bool, pub stop_verifier: bool,
+    pub stop_runtime: bool, pub stop_verifier: bool, pub revoke_publication: bool,
     pub preserve_application_data: bool, pub preserve_ambiguous_evidence: bool,
 }
 /// No Clone: one coordinator owns a one-use guard token in this process.
@@ -186,7 +200,7 @@ pub struct Coordinator { descriptor: Descriptor, durable: bool, ready: bool,
 impl Coordinator {
     pub fn begin(binding: Binding, identity: Identity, content: Content, objects: Objects, expected_job: ExpectedJob, now: u64) -> Result<Self> {
         identity.validate()?; content.validate()?; objects.validate()?;
-        if !expected_job.cgroup.valid() || expected_job.runtime == expected_job.verifier { return Err(Error::InvalidIdentity); }
+        if !expected_job.valid() { return Err(Error::InvalidIdentity); }
         Ok(Self { descriptor: Descriptor { binding, identity, content, objects,
             state: State::Inhibited, sequence: 1, started: now, expected_job, verifier_started: None, runtime: None, verifier: None, runtime_cgroup: None, runtime_process: None },
             durable: false, ready: false, guard_used: false, result: None, last_observed: now, inhibited: true })
@@ -194,7 +208,7 @@ impl Coordinator {
     pub fn descriptor(&self) -> &Descriptor { &self.descriptor }
     pub fn persist(&mut self, receipt: Persistence) -> Result<()> {
         if !receipt.durable || receipt.descriptor != self.descriptor { return self.reject(Error::NotDurable); }
-        if self.descriptor.state == State::Failed { return Err(Error::Failed); }
+        // Failed is a durable revocation, never renewed operational authority.
         self.durable = true; Ok(())
     }
     /// READY after durable state-1 lock, before any launch request. This does
@@ -207,7 +221,12 @@ impl Coordinator {
         self.ready = true; Ok(())
     }
     fn reject<T>(&mut self, error: Error) -> Result<T> {
-        self.descriptor.state = State::Failed; self.durable = false;
+        if self.descriptor.state != State::Failed {
+            // Normal transitions reserve the final sequence for revocation.
+            self.descriptor.sequence = self.descriptor.sequence.saturating_add(1);
+            self.descriptor.state = State::Failed;
+        }
+        self.durable = false;
         self.guard_used = true; self.result = None; Err(error)
     }
     fn check(&mut self, o: &Observation) -> Result<()> {
@@ -221,7 +240,7 @@ impl Coordinator {
     }
     fn transition(&mut self, next: State) -> Result<()> {
         let sequence = match self.descriptor.sequence.checked_add(1) {
-            Some(x) => x, None => return self.reject(Error::Overflow),
+            Some(x) if x < u64::MAX => x, _ => return self.reject(Error::Overflow),
         };
         self.descriptor.sequence = sequence; self.descriptor.state = next; self.durable = false; Ok(())
     }
@@ -243,29 +262,39 @@ impl Coordinator {
         };
         self.transition(next)
     }
+    /// State-8 manager binding. Persist before allowing the runtime pre-start guard.
+    pub fn bind_runtime(&mut self, o: &Observation, manager: &ManagerRuntime) -> Result<()> {
+        self.check(o)?;
+        if self.descriptor.state != State::Preconditions || self.descriptor.runtime.is_some()
+            || manager.binding != self.descriptor.binding || manager.job != self.descriptor.expected_job
+            || !manager.cgroup.valid() { return self.reject(Error::Stale); }
+        self.descriptor.runtime = Some(manager.runtime);
+        self.descriptor.runtime_cgroup = Some(manager.cgroup);
+        self.transition(State::Launched)
+    }
     /// One-use source-level guard; consumes authorization even on refusal.
     /// Adapter must enforce exact fixed service, pidfd and durable binding.
-    pub fn guard(&mut self, observation: &Observation, g: &GuardObservation, verifier: Id) -> Result<()> {
+    pub fn guard(&mut self, observation: &Observation, g: &GuardObservation) -> Result<()> {
         self.check(observation)?;
         if self.guard_used { return self.reject(Error::Replay); }
         self.guard_used = true;
-        if self.descriptor.state != State::Preconditions || !g.pidfd_matches
-            || g.runtime != self.descriptor.expected_job.runtime || verifier != self.descriptor.expected_job.verifier
-            || g.own.cgroup != self.descriptor.expected_job.cgroup
+        if self.descriptor.state != State::Launched || !g.pidfd_matches
+            || Some(g.runtime) != self.descriptor.runtime
+            || Some(g.own.cgroup) != self.descriptor.runtime_cgroup
             || g.own.pid == 0 || g.own.start_time == 0 || !g.own.cgroup.valid()
             || g.members != [g.own] || g.populated_children {
             return self.reject(Error::UnsafeObservation);
         }
-        self.descriptor.runtime_cgroup = Some(g.own.cgroup);
-        self.descriptor.runtime = Some(g.runtime);
         self.transition(State::Launched)
     }
     /// Model the actual verifier activation, after runtime launch. A start can
     /// bind once only; persisting this exact descriptor precedes measurement.
-    pub fn start_verifier(&mut self, o: &Observation, r: &RuntimeObservation) -> Result<()> {
+    pub fn start_verifier(&mut self, o: &Observation, manager: &ManagerVerifier, r: &RuntimeObservation) -> Result<()> {
         self.check(o)?;
-        if self.descriptor.state != State::Launched || self.descriptor.verifier_started.is_some()
-            || self.descriptor.runtime != Some(r.runtime) || self.descriptor.expected_job.verifier != r.verifier
+        if self.descriptor.state != State::Launched || !self.guard_used || self.descriptor.verifier_started.is_some()
+            || manager.binding != self.descriptor.binding || manager.job != self.descriptor.expected_job
+            || self.descriptor.runtime != Some(manager.runtime) || manager.runtime == manager.verifier
+            || self.descriptor.runtime != Some(r.runtime) || manager.verifier != r.verifier
             || self.descriptor.runtime_cgroup != Some(r.process.cgroup) || !r.runtime_live
             || r.process.pid == 0 || r.process.start_time == 0
             || !matches!(r.verifier_state, VerifierState::Running) { return self.reject(Error::Stale); }
@@ -327,7 +356,7 @@ impl Coordinator {
     }
     pub fn fail(&mut self) -> FailurePlan {
         let _: Result<()> = self.reject(Error::Failed);
-        FailurePlan { stop_runtime: true, stop_verifier: true,
+        FailurePlan { stop_runtime: true, stop_verifier: true, revoke_publication: true,
             preserve_application_data: true, preserve_ambiguous_evidence: true }
     }
     /// A failed fixture may retry in the same live coordinator invocation.

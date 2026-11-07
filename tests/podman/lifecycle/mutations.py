@@ -16,7 +16,7 @@ MUTATIONS = [
     ("artifact-pin", "|| self.artifact != F5_SHA256", "|| false", "immutable_content_pins"),
     ("transaction-binding", "d.binding != o.binding ||", "false ||", "common_freshness_and_authority_refusals"),
     ("event-coverage", "!o.permanent_spawn_closed || !o.event_coverage_complete", "!o.permanent_spawn_closed", "event_gap_or_coordinator_loss_prevents_publication"),
-    ("job-runtime", "|| g.runtime != self.descriptor.expected_job.runtime", "|| false", "independent_expected_job_rejects_guard_selected_ids"),
+    ("job-runtime", "|| Some(g.runtime) != self.descriptor.runtime", "|| false", "independent_expected_job_rejects_guard_selected_ids"),
     ("guard-pidfd", "|| !g.pidfd_matches", "|| false", "guard_only_own_pidfd_confirmed_process"),
     ("exact-persistence", "|| receipt.descriptor != self.descriptor", "|| false", "stale_persistence_receipt_refuses"),
     ("verifier-deadline", "o.now - started > 30", "o.now - started > 60", "verifier_deadline_does_not_bound_teardown"),
@@ -27,6 +27,13 @@ MUTATIONS = [
     ("one-use-verifier-start", "|| self.descriptor.verifier_started.is_some()", "|| false", "verifier_start_is_one_use_and_clock_starts_at_activation"),
     ("ready-before-progress", "if !self.ready { return self.reject(Error::NotReady); }", "if false { return self.reject(Error::NotReady); }", "missing_durability_or_ready_refuses"),
     ("retry-exhaustion", "self.failures.len() >= 5", "self.failures.len() >= 6", "restart_backoff_and_exhaustion_are_bounded"),
+    ("manager-job-binding", "|| manager.job != self.descriptor.expected_job\n            || !manager.cgroup.valid()", "|| false\n            || !manager.cgroup.valid()", "manager_runtime_binding_requires_exact_transaction_and_job"),
+    ("guard-cgroup-binding", "|| Some(g.own.cgroup) != self.descriptor.runtime_cgroup", "|| false", "independent_expected_job_rejects_guard_selected_ids"),
+    ("verifier-manager-binding", "|| manager.verifier != r.verifier", "|| false", "verifier_binding_rejects_unrelated_manager_or_claims"),
+    ("failure-sequence", "self.descriptor.sequence = self.descriptor.sequence.saturating_add(1);", "/* omit revocation ordering */", "operational_failure_has_ordered_durable_revocation"),
+    ("failed-persistence", "// Failed is a durable revocation, never renewed operational authority.", "if self.descriptor.state == State::Failed { return Err(Error::Failed); }", "operational_failure_has_ordered_durable_revocation"),
+    ("revocation-plan", "revoke_publication: true,", "revoke_publication: false,", "failure_revocation_is_idempotent_and_receipt_exact"),
+    ("reserve-revocation-sequence", "Some(x) if x < u64::MAX => x", "Some(x) => x", "final_sequence_slot_is_reserved_for_revocation"),
 ]
 
 def run(argv):
