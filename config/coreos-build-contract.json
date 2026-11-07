@@ -111,7 +111,7 @@
       "remoted/static/index.html": "23870de1cfa928a21fe5d3e65a100562c2d2e248385c0541be758d074bd8f978",
       "sessiond/Cargo.toml": "71eda11f86adcc4780b163500db43ef82be0edfc849b39300131fc6288b9d0b1",
       "sessiond/src/main.rs": "0f93579106527c7129dc6d12cab39f4efe87e8c4dffdb968aac6257bddfcadc7",
-      "tools/build-management-rootfs": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
+      "tools/build-management-rootfs": "8898f3f99b9c297aacd619c279b22e4441353f4a063845915b00611bc3018018",
       "tools/coreos-inventory": "3026ec3ece08557a71fd0b09e5d567900a3002273d1850a8f65d09da7d992194",
       "tools/release-preflight": "c51e8e9b1d2e224eb2757ea26d996804d176b343900025a446228deff8d3f346",
       "tools/verify-management-rootfs": "a973504d01ed854eb0d9b522895b7760fd76f0952cab271f956adf75ba43fc96"
@@ -644,7 +644,7 @@
       },
       "tools/build-management-rootfs": {
         "executable": true,
-        "sha256": "6d423654a41c31de34ee97126db4cb2e38cfebd99521cd852394b0ffabbe634d",
+        "sha256": "8898f3f99b9c297aacd619c279b22e4441353f4a063845915b00611bc3018018",
         "state": "file"
       },
       "tools/install-management-masks": {

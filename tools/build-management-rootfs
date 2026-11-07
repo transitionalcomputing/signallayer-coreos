@@ -6,10 +6,12 @@ never from the output tree or Podman. Linux uid0 in a disposable user namespace
 is sufficient. No installed invocation or caller-selected executable identity is provided.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 import shutil
 import stat
@@ -236,6 +238,134 @@ def reviewed_artifact(snapshot):
         raise BuildError('malformed reviewed F5 inputs') from error
 
 
+# Fixed transient host location, not TMPDIR/TEMP/TMP or a CLI override. This
+# source-only builder requires a disposable Linux uid0 namespace. No fallback.
+CHECKER_STAGING_PARENT = Path('/run')
+
+
+def checker_directory(fd):
+    info = os.fstat(fd)
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+            or info.st_mode & 0o7022):
+        raise BuildError('unsafe checker staging directory ownership/mode')
+    if any(x != 'security.selinux' for x in os.listxattr(fd)):
+        raise BuildError('unreviewed checker staging directory xattr/ACL')
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+            info.st_gid, mount_id(fd))
+
+
+def checker_ancestry(path):
+    """Validate every ancestor without following links; caller owns returned fd.
+
+    Different mounts are allowed (e.g. a private /run tmpfs), but their IDs
+    are retained for revalidation. Trusted root/kernel/mount administrators
+    remain outside the threat model; metadata checks cannot exclude them.
+    """
+    path = Path(path)
+    if not path.is_absolute() or '..' in path.parts:
+        raise BuildError('absolute canonical checker parent required')
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        chain = [checker_directory(fd)]
+        for part in path.parts[1:]:
+            nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+            chain.append(checker_directory(fd))
+        return fd, chain
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+@contextmanager
+def private_checker_files(data, checker):
+    """Stage pinned bytes beneath validated root-only authority, then remove.
+
+    Non-root writers cannot replace any ancestor or access the 0700 child.
+    Rechecks detect observed substitution; they do not promise atomicity
+    against another trusted-root writer. Never recursively delete a pathname.
+    """
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise BuildError('checker staging requires disposable Linux uid0')
+    parent, ancestry = checker_ancestry(CHECKER_STAGING_PARENT)
+    name = '.sl-w1-elf-' + secrets.token_hex(16)
+    child = None
+    made = False
+    files = {}
+    try:
+        os.mkdir(name, 0o700, dir_fd=parent)
+        made = True
+        child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        identity = checker_directory(child)
+        if stat.S_IMODE(os.fstat(child).st_mode) != 0o700:
+            raise BuildError('checker staging child must be private')
+        for leaf, payload in (('artifact', data), ('verify-static-fixture', checker)):
+            fd = os.open(leaf, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o400, dir_fd=child)
+            try:
+                with os.fdopen(fd, 'wb', closefd=False) as stream:
+                    stream.write(payload)
+                    stream.flush()
+                    os.fsync(fd)
+                files[leaf] = stamp(os.fstat(fd))
+            finally:
+                os.close(fd)
+
+        def validate():
+            again, current = checker_ancestry(CHECKER_STAGING_PARENT)
+            try:
+                if current != ancestry or checker_directory(parent) != ancestry[-1]:
+                    raise BuildError('checker staging ancestry substituted')
+                linked = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=again)
+                try:
+                    if checker_directory(linked) != identity or checker_directory(child) != identity:
+                        raise BuildError('checker staging child substituted')
+                finally:
+                    os.close(linked)
+            finally:
+                os.close(again)
+            if sorted(os.listdir(child)) != sorted(files):
+                raise BuildError('unexpected checker staging entry')
+            for leaf, payload in (('artifact', data), ('verify-static-fixture', checker)):
+                fd = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=child)
+                try:
+                    info = os.fstat(fd)
+                    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                            or stat.S_IMODE(info.st_mode) != 0o400 or info.st_nlink != 1
+                            or stamp(info) != files[leaf] or mount_id(fd) != identity[-1]
+                            or any(x != 'security.selinux' for x in os.listxattr(fd))):
+                        raise BuildError('checker staging file metadata/substitution')
+                    with os.fdopen(fd, 'rb', closefd=False) as stream:
+                        captured = stream.read(len(payload) + 1)
+                    if (captured != payload or stamp(os.fstat(fd)) != files[leaf]
+                            or stamp(os.stat(leaf, dir_fd=child, follow_symlinks=False)) != files[leaf]):
+                        raise BuildError('checker staging file changed')
+                finally:
+                    os.close(fd)
+        validate()
+        yield CHECKER_STAGING_PARENT / name, validate
+        validate()
+    finally:
+        try:
+            if child is not None:
+                for leaf in ('artifact', 'verify-static-fixture'):
+                    try:
+                        os.unlink(leaf, dir_fd=child)
+                    except FileNotFoundError:
+                        pass
+                # Preserve replacement directories, never clean an unrelated tree.
+                linked = os.stat(name, dir_fd=parent, follow_symlinks=False)
+                held = os.fstat(child)
+                if (linked.st_dev, linked.st_ino) != (held.st_dev, held.st_ino):
+                    raise BuildError('checker staging cleanup identity changed')
+            if made:
+                os.rmdir(name, dir_fd=parent)
+        finally:
+            if child is not None:
+                os.close(child)
+            os.close(parent)
+
+
 def read_artifact(path, pin):
     """Validate and carry captured bytes; never reopen the supplied pathname."""
     data = regular_snapshot(path, pin['size'], artifact=True)
@@ -248,14 +378,10 @@ def read_artifact(path, pin):
         raise BuildError('static verifier differs from reviewed F5 contract')
     # The independent parser receives only the already captured file and its
     # reviewed hash. Capture its own pinned source too, avoiding a script race.
-    with tempfile.TemporaryDirectory(prefix='sl-w1-elf-') as temporary:
-        private = Path(temporary)
+    with private_checker_files(data, checker) as (private, validate):
         capture = private / 'artifact'
         checker_path = private / 'verify-static-fixture'
-        capture.write_bytes(data)
-        checker_path.write_bytes(checker)
-        capture.chmod(0o400)
-        checker_path.chmod(0o400)
+        validate()
         try:
             result = subprocess.run(
                 [sys.executable, '-I', '-B', str(checker_path), '--artifact', str(capture),

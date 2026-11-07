@@ -4,6 +4,7 @@ Only private test checkouts receive a synthetic ELF pin. The reviewed production
 lock, fixture source and binary are never changed or fabricated by these tests.
 """
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -41,6 +42,19 @@ class CapturedArtifactControlTests(unittest.TestCase):
         self.addCleanup(self.capture.stop)
         self.pin = self.builder.reviewed_artifact(self.snapshot)
         self.capture_mock.reset_mock()
+        # Control-flow fixtures deliberately simulate the new Linux staging
+        # boundary. Real ancestry/metadata evidence belongs to test_checker_staging.
+        @contextmanager
+        def simulated_staging(data, checker):
+            with tempfile.TemporaryDirectory(dir=self.base) as directory:
+                private = Path(directory)
+                for leaf, value in (('artifact', data), ('verify-static-fixture', checker)):
+                    (private / leaf).write_bytes(value)
+                    (private / leaf).chmod(0o400)
+                yield private, lambda: None
+        staging = mock.patch.object(self.builder, 'private_checker_files', simulated_staging)
+        staging.start()
+        self.addCleanup(staging.stop)
 
     def capture_boundary(self, path, maximum, artifact=False):
         self.assertIn(Path(path), (self.artifact, self.builder.ARTIFACT_LOCK,

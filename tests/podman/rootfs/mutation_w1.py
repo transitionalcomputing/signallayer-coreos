@@ -25,6 +25,10 @@ LINUX = "test_binary_input.BinaryInputFixtures."
 
 # name, test, function, AST node kind, exact condition fragment(s), requires Linux.
 GATES = [
+    ("checker-staging-ancestry-mode", "test_checker_staging.CheckerStagingTests.test_shared_sticky_ancestor_is_refused",
+     "checker_directory", "if", ("info.st_mode & 3602",), True),
+    ("checker-staging-acl", "test_checker_staging.CheckerStagingTests.test_real_extended_acl_is_refused",
+     "checker_directory", "if", ("any((x != 'security.selinux'",), True),
     ("artifact-digest", PORTABLE + "test_same_size_wrong_capture_fails_before_checker",
      "read_artifact", "if", ("digest(data) != pin['sha256']",), False),
     ("artifact-size", PORTABLE + "test_wrong_capture_size_fails_before_checker",
@@ -80,6 +84,7 @@ def isolated_copy(destination):
                      "tools/verify-static-fixture", "config/static-fixture-toolchain.json",
                      "config/static-fixture-toolchain.contract.json",
                      "tests/podman/rootfs/test_rootfs.py", "tests/podman/rootfs/test_binary_input.py",
+                     "tests/podman/rootfs/test_checker_staging.py",
                      "tests/podman/rootfs/expected-source-identity.json"):
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
