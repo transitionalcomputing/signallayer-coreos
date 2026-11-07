@@ -25,6 +25,22 @@ LINUX = "test_binary_input.BinaryInputFixtures."
 
 # name, test, function, AST node kind, exact condition fragment(s), requires Linux.
 GATES = [
+    ("caller-private-checker-staging", "test_checker_staging.CheckerStagingTests.test_read_artifact_uses_fixed_private_staging_despite_poisoned_temp",
+     "read_artifact", "ambient-checker-call", (), True),
+    ("automatic-post-parser-validation", "test_checker_staging.CheckerStagingTests.test_read_artifact_rejects_post_parser_leaf_substitution_automatically",
+     "private_checker_files", "post-yield-validation", (), True),
+    ("checker-ancestor-root-owner", "test_checker_staging.CheckerStagingTests.test_higher_ancestor_owner_is_refused_before_staging",
+     "checker_directory", "compare", ("info.st_uid != 0",), True),
+    ("checker-cleanup-replacement-identity", "test_checker_staging.CheckerStagingTests.test_empty_child_replacement_is_preserved_by_cleanup_identity_guard",
+     "private_checker_files", "if", ("(linked.st_dev, linked.st_ino) != (held.st_dev, held.st_ino)",), True),
+    ("checker-child-private-mode", "test_checker_staging.CheckerStagingTests.test_child_creation_mode_drift_is_refused",
+     "private_checker_files", "if", ("stat.S_IMODE(os.fstat(child).st_mode) != 448",), True),
+    ("checker-unexpected-staging-entry", "test_checker_staging.CheckerStagingTests.test_unexpected_entry_validation_is_sensitive",
+     "private_checker_files", "if", ("sorted(os.listdir(child)) != sorted(files)",), True),
+    ("checker-staging-ancestry-mode", "test_checker_staging.CheckerStagingTests.test_shared_sticky_ancestor_is_refused",
+     "checker_directory", "if", ("info.st_mode & 3602",), True),
+    ("checker-staging-acl", "test_checker_staging.CheckerStagingTests.test_real_extended_acl_is_refused",
+     "checker_directory", "if", ("any((x != 'security.selinux'",), True),
     ("artifact-digest", PORTABLE + "test_same_size_wrong_capture_fails_before_checker",
      "read_artifact", "if", ("digest(data) != pin['sha256']",), False),
     ("artifact-size", PORTABLE + "test_wrong_capture_size_fails_before_checker",
@@ -80,6 +96,7 @@ def isolated_copy(destination):
                      "tools/verify-static-fixture", "config/static-fixture-toolchain.json",
                      "config/static-fixture-toolchain.contract.json",
                      "tests/podman/rootfs/test_rootfs.py", "tests/podman/rootfs/test_binary_input.py",
+                     "tests/podman/rootfs/test_checker_staging.py",
                      "tests/podman/rootfs/expected-source-identity.json"):
         target = destination / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +111,20 @@ def mutation(source, gate):
     if len(selected) != 1:
         raise ValueError("mutation function missing/ambiguous: " + function)
     counts = [0] * max(1, len(fragments))
+    if kind == "ambient-checker-call":
+        # Coherent insecure historical caller, not a missing-file/syntax mutant.
+        # Only the mutated private source copy receives this helper.
+        helper = ast.parse("""
+@contextmanager
+def _mutation_ambient_checker_files(data, checker):
+    with tempfile.TemporaryDirectory(prefix='sl-w1-elf-') as directory:
+        private = Path(directory)
+        for leaf, payload in (('artifact', data), ('verify-static-fixture', checker)):
+            (private / leaf).write_bytes(payload)
+            (private / leaf).chmod(0o400)
+        yield private, lambda: None
+""").body[0]
+        tree.body.insert(tree.body.index(selected[0]), helper)
 
     class Mutator(ast.NodeTransformer):
         def visit_Assign(self, node):
@@ -145,6 +176,10 @@ def mutation(source, gate):
             return self.generic_visit(node)
 
         def visit_Call(self, node):
+            if kind == "ambient-checker-call" and ast.unparse(node.func) == "private_checker_files":
+                counts[0] += 1
+                node.func = ast.Name(id="_mutation_ambient_checker_files", ctx=ast.Load())
+                return node
             if kind in ("checker-call", "timeout") and ast.unparse(node.func) == "subprocess.run":
                 counts[0] += 1
                 if kind == "timeout":
@@ -160,6 +195,18 @@ def mutation(source, gate):
                 counts[0] += 1
                 return ast.parse("Path(artifact_path).read_bytes()", mode="eval").body
             return self.generic_visit(node)
+
+        def visit_Try(self, node):
+            node = self.generic_visit(node)
+            if kind == "post-yield-validation":
+                for index, statement in enumerate(node.body):
+                    if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Yield):
+                        if index + 1 >= len(node.body) or ast.unparse(node.body[index + 1]) != "validate()":
+                            raise ValueError("post-yield validation anchor changed")
+                        counts[0] += 1
+                        del node.body[index + 1]
+                        break
+            return node
 
         def visit_Expr(self, node):
             if (kind == "staged-call" and isinstance(node.value, ast.Call)
