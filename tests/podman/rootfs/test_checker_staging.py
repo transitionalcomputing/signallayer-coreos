@@ -465,6 +465,79 @@ class CheckerStagingTests(unittest.TestCase):
                     self.base.chmod(0o700)
                     self.parent.chmod(0o700)
 
+    def test_read_artifact_uses_fixed_private_staging_despite_poisoned_temp(self):
+        repo, artifact = fixture_checkout(self.base)
+        builder = load_tool('build-management-rootfs', repo)
+        self.assertEqual(builder.CHECKER_STAGING_PARENT, Path('/run'))
+        pin = builder.reviewed_artifact(builder.source_snapshot(builder.SOURCE_ROOT))
+        payload = artifact.read_bytes()
+        checker_bytes = builder.STATIC_VERIFIER.read_bytes()
+        poison = self.base / 'ambient-temp'
+        poison.mkdir(mode=0o777)
+        observed = []
+        real_run = builder.subprocess.run
+        def inspect_real_parser(argv, **kwargs):
+            checker, capture = Path(argv[3]), Path(argv[5])
+            observed.append({'checker': checker, 'capture': capture,
+                             'mode': stat.S_IMODE(checker.parent.stat().st_mode),
+                             'owner': checker.parent.stat().st_uid,
+                             'checker_bytes': checker.read_bytes(),
+                             'capture_bytes': capture.read_bytes()})
+            return real_run(argv, **kwargs)
+        with mock.patch.dict(os.environ, {k: str(poison) for k in ('TMPDIR', 'TEMP', 'TMP')}), \
+                mock.patch.object(tempfile, 'tempdir', str(poison)), \
+                mock.patch.object(builder, 'private_checker_files', wraps=builder.private_checker_files) as staging, \
+                mock.patch.object(builder.subprocess, 'run', side_effect=inspect_real_parser) as parser:
+            accepted = builder.read_artifact(artifact, pin)
+        # Observe the actual caller/parser path, not only direct helper tests.
+        self.assertEqual(accepted, payload)
+        staging.assert_called_once_with(payload, checker_bytes)
+        parser.assert_called_once()
+        self.assertEqual(len(observed), 1)
+        record = observed[0]
+        self.assertEqual(record['checker'].parent.parent, Path('/run'))
+        self.assertTrue(record['checker'].parent.name.startswith('.sl-w1-elf-'))
+        self.assertEqual(record['checker'].parent, record['capture'].parent)
+        self.assertEqual((record['mode'], record['owner']), (0o700, 0))
+        self.assertEqual(record['checker_bytes'], checker_bytes)
+        self.assertEqual(record['capture_bytes'], payload)
+        self.assertFalse(record['checker'].parent.exists())
+        self.assertEqual(list(poison.iterdir()), [])
+
+    def test_read_artifact_rejects_post_parser_leaf_substitution_automatically(self):
+        repo, artifact = fixture_checkout(self.base)
+        builder = load_tool('build-management-rootfs', repo)
+        pin = builder.reviewed_artifact(builder.source_snapshot(builder.SOURCE_ROOT))
+        real_run = builder.subprocess.run
+        observed = []
+        def replace_after_real_parser(argv, **kwargs):
+            result = real_run(argv, **kwargs)
+            checker = Path(argv[3])
+            # Deliberate trusted-root fault injection after real parser success,
+            # not an unprivileged attack or a manual call to validate().
+            original = checker.read_bytes()
+            checker.unlink()
+            checker.write_bytes(original + b'\n# injected post-parser replacement\n')
+            checker.chmod(0o400)
+            observed.append((checker.parent, result))
+            return result
+        accepted, rejection = None, None
+        with mock.patch.object(builder.subprocess, 'run', side_effect=replace_after_real_parser) as parser:
+            try:
+                accepted = builder.read_artifact(artifact, pin)
+            except builder.BuildError as error:
+                rejection = error
+        parser.assert_called_once()
+        self.assertEqual(len(observed), 1)
+        path, result = observed[0]
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(json.loads(result.stdout)['status'], 'PASS')
+        self.assertIsNone(accepted, 'caller accepted bytes after post-parser staging substitution')
+        self.assertIsInstance(rejection, builder.BuildError)
+        self.assertIn('checker staging file metadata/substitution', str(rejection))
+        self.assertFalse(path.exists())
+
     def test_real_parser_roundtrip_and_timeout_leave_no_staging(self):
         repo, artifact = fixture_checkout(self.base)
         builder = load_tool('build-management-rootfs', repo)
